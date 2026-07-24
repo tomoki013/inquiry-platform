@@ -1,0 +1,29 @@
+{
+  "name": "tomokichi-app-studio",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.11.0",
+  "engines": {
+    "node": "24.x",
+    "pnpm": "11.x"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "check": "turbo run check",
+    "test": "turbo run test",
+    "test:watch": "turbo run test:watch",
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "fix": "biome check --write .",
+    "ci": "biome ci . && pnpm check && pnpm test && pnpm build",
+    "deploy:main": "pnpm --filter @tomokichi/main deploy",
+    "deploy:remeet": "pnpm --filter @tomokichi/remeet deploy",
+    "deploy:api": "pnpm --filter @tomokichi/api deploy"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.5",
+    "turbo": "^2.10.5",
+    "typescript": "^6.0.3"
+  }
+}

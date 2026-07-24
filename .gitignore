@@ -1,0 +1,16 @@
+node_modules
+dist
+coverage
+
+.astro
+.turbo
+.wrangler
+
+.env
+.env.*
+!.env.example
+
+.dev.vars
+.dev.vars.*
+
+.DS_Store
