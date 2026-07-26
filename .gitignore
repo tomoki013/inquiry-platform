@@ -5,6 +5,7 @@ coverage
 .astro
 .turbo
 .wrangler
+worker-configuration.d.ts
 
 .env
 .env.*
