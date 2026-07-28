@@ -19,6 +19,7 @@
     "ci": "biome ci . && pnpm check && pnpm test && pnpm build",
     "deploy:main": "pnpm --filter @tomokichi/main deploy",
     "deploy:remeet": "pnpm --filter @tomokichi/remeet deploy",
+    "deploy:colorvia": "pnpm --filter @tomokichi/colorvia deploy",
     "deploy:api": "pnpm --filter @tomokichi/api deploy"
   },
   "devDependencies": {
