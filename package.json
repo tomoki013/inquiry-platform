@@ -19,12 +19,12 @@
     "format": "biome format --write .",
     "fix": "biome check --write .",
     "ci": "biome ci . && pnpm check && pnpm test && pnpm build && pnpm check:links",
-    "deploy:main": "pnpm --filter @tomokichi/main deploy",
-    "deploy:remeet": "pnpm --filter @tomokichi/remeet deploy",
-    "deploy:tripory": "pnpm --filter @tomokichi/tripory deploy",
-    "deploy:colorvia": "pnpm --filter @tomokichi/colorvia deploy",
-    "deploy:yohaku": "pnpm --filter @tomokichi/yohaku deploy",
-    "deploy:api": "pnpm --filter @tomokichi/api deploy"
+    "deploy:main": "pnpm --filter @tomokichi/main run deploy",
+    "deploy:remeet": "pnpm --filter @tomokichi/remeet run deploy",
+    "deploy:tripory": "pnpm --filter @tomokichi/tripory run deploy",
+    "deploy:colorvia": "pnpm --filter @tomokichi/colorvia run deploy",
+    "deploy:yohaku": "pnpm --filter @tomokichi/yohaku run deploy",
+    "deploy:api": "pnpm --filter @tomokichi/api run deploy"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.5",
