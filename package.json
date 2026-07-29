@@ -9,17 +9,21 @@
   },
   "scripts": {
     "dev": "turbo run dev",
+    "create:app-site": "node scripts/create-app-site.mjs",
     "build": "turbo run build",
+    "check:links": "node scripts/check-static-links.mjs",
     "check": "turbo run check",
     "test": "turbo run test",
     "test:watch": "turbo run test:watch",
     "lint": "biome lint .",
     "format": "biome format --write .",
     "fix": "biome check --write .",
-    "ci": "biome ci . && pnpm check && pnpm test && pnpm build",
+    "ci": "biome ci . && pnpm check && pnpm test && pnpm build && pnpm check:links",
     "deploy:main": "pnpm --filter @tomokichi/main deploy",
     "deploy:remeet": "pnpm --filter @tomokichi/remeet deploy",
+    "deploy:tripory": "pnpm --filter @tomokichi/tripory deploy",
     "deploy:colorvia": "pnpm --filter @tomokichi/colorvia deploy",
+    "deploy:yohaku": "pnpm --filter @tomokichi/yohaku deploy",
     "deploy:api": "pnpm --filter @tomokichi/api deploy"
   },
   "devDependencies": {
