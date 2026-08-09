@@ -1,6 +1,9 @@
 {
   "$schema": "https://turborepo.com/schema.json",
   "ui": "tui",
+  // One slot per persistent workspace `dev` (currently 11 apps), plus headroom.
+  // Turbo requires concurrency > number of concurrent persistent tasks.
+  "concurrency": "20",
   "tasks": {
     "dev": {
       "cache": false,
