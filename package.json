@@ -11,6 +11,7 @@
     "dev": "turbo run dev",
     "create:app-site": "node scripts/create-app-site.mjs",
     "build": "turbo run build",
+    "build:review": "node apps/review/scripts/build.mjs",
     "check:links": "node scripts/check-static-links.mjs",
     "check": "turbo run check",
     "test": "turbo run test",
@@ -24,6 +25,7 @@
     "deploy:tripory": "pnpm --filter @tomokichi/tripory run deploy",
     "deploy:colorvia": "pnpm --filter @tomokichi/colorvia run deploy",
     "deploy:yohaku": "pnpm --filter @tomokichi/yohaku run deploy",
+    "deploy:review": "pnpm build:review && pnpm --filter @tomokichi/yohaku exec wrangler deploy --config ../../apps/review/wrangler.jsonc",
     "deploy:api": "pnpm --filter @tomokichi/api run deploy"
   },
   "devDependencies": {
