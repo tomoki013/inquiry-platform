@@ -16,7 +16,16 @@ export class ResendMailProvider implements MailProvider {
 
   constructor(
     private readonly apiKey: string,
-    private readonly fetcher: typeof fetch = fetch,
+    /**
+     * Injectable for the tests, and wrapped rather than defaulted to bare
+     * `fetch` on purpose: the Workers runtime rejects `fetch` called with the
+     * wrong receiver, so storing the global itself and calling it as
+     * `this.fetcher(...)` throws `TypeError: Illegal invocation` on every
+     * send. Every test passes a fetcher, so the default was the one line in
+     * this file the suite could not reach — and it failed the first real
+     * reply, in production.
+     */
+    private readonly fetcher: typeof fetch = (input, init) => fetch(input, init),
   ) {}
 
   sendTransactional(mail: BaseMail): Promise<MailResult> {

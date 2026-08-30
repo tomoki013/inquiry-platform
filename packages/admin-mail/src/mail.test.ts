@@ -24,6 +24,42 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe("ResendMailProvider", () => {
+  /**
+   * The default fetcher, which every other test in this file replaces.
+   *
+   * Leaving it uncovered cost a production send. A bare `fetch` stored on the
+   * instance and called as `this.fetcher(...)` is invoked with the provider as
+   * its receiver, and the Workers runtime answers that with
+   * `TypeError: Illegal invocation` — reported by the adapter as a
+   * TRANSPORT_ERROR indistinguishable from the network being down.
+   *
+   * Node does not enforce the receiver, so asserting "the global was called"
+   * would pass either way. What this asserts instead is the thing that
+   * actually differs: what `fetch` is called *on*. Anything but the provider
+   * is fine; the provider is the bug.
+   */
+  it("calls the global fetch without the provider as its receiver", async () => {
+    let receiver: unknown = "never called";
+    const globalFetch = vi.spyOn(globalThis, "fetch").mockImplementation(async function (
+      this: unknown,
+    ) {
+      receiver = this;
+      return jsonResponse({ id: "resend-global" });
+    });
+    try {
+      const provider = new ResendMailProvider("key");
+      const result = await provider.sendSupportReply(mail);
+      expect(result.ok).toBe(true);
+      expect(globalFetch).toHaveBeenCalledWith(
+        "https://api.resend.com/emails",
+        expect.objectContaining({ method: "POST" }),
+      );
+      expect(receiver).not.toBe(provider);
+    } finally {
+      globalFetch.mockRestore();
+    }
+  });
+
   it("sends the plain text as the body and the idempotency key as a header", async () => {
     const fetcher = fakeFetch(jsonResponse({ id: "resend-1" }));
     const result = await new ResendMailProvider("key", fetcher as never).sendSupportReply(mail);

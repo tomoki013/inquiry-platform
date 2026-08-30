@@ -337,6 +337,13 @@ export class ReplyService {
             threadId: input.threadId,
             code: sent.code,
             provider: this.mail.name,
+            // The provider's own summary of what went wrong. Every adapter
+            // builds this out of a status code or an error name, never out of
+            // a response body — so it says why a send failed without quoting
+            // the message that failed to send. Without it, a TRANSPORT_ERROR
+            // is indistinguishable from any other and has to be reproduced
+            // with a tail to be diagnosed at all.
+            detail: sent.detail,
           }),
         );
         // The draft is untouched. Whatever they wrote is still there.
