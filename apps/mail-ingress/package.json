@@ -1,0 +1,25 @@
+{
+  "name": "@tomokichi/mail-ingress",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8789",
+    "build": "wrangler deploy --dry-run",
+    "check": "wrangler types --env-interface CloudflareBindings --strict-vars=false && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "deploy": "wrangler deploy",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings --strict-vars=false"
+  },
+  "dependencies": {
+    "@tomokichi/admin-contracts": "workspace:*",
+    "postal-mime": "^2.4.5"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.18.7",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.113.0"
+  }
+}
