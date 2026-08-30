@@ -5,7 +5,7 @@ import type {
   SupportDraft,
   SupportThreadDetail,
 } from "@tomokichi/admin-contracts";
-import { replySubject } from "@tomokichi/admin-contracts";
+import { replySubjectFor } from "@tomokichi/admin-contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { Dialog } from "./Dialog";
@@ -45,7 +45,22 @@ export function ReplyComposer({
   const [body, setBody] = useState("");
   const [note, setNote] = useState("");
   const [draftState, setDraftState] = useState<DraftState>("idle");
-  const [pendingTemplate, setPendingTemplate] = useState<AppliedTemplate | null>(null);
+  const [pendingTemplate, setPendingTemplate] = useState<(AppliedTemplate & { id: string }) | null>(
+    null,
+  );
+  /**
+   * The template the operator inserted, if any.
+   *
+   * Kept so the send can name it. Only its **id** goes to the server, which
+   * looks the subject up itself — the browser still never says what a reply's
+   * subject is; it says which template was used and the subject is derived
+   * there. Editing the inserted text does not clear it, because a reply is
+   * normally a template with the specifics filled in, and dropping the subject
+   * on the first keystroke would take it away exactly when it is wanted.
+   */
+  const [appliedTemplate, setAppliedTemplate] = useState<{ id: string; subject: string } | null>(
+    null,
+  );
   const [confirmReopen, setConfirmReopen] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
 
@@ -103,8 +118,12 @@ export function ReplyComposer({
         `/api/support/threads/${thread.id}/apply-template`,
         { templateId },
       );
-      if (body.trim().length === 0) setBody(applied.bodyText);
-      else setPendingTemplate(applied);
+      if (body.trim().length === 0) {
+        setBody(applied.bodyText);
+        setAppliedTemplate({ id: templateId, subject: applied.subject });
+      } else {
+        setPendingTemplate({ ...applied, id: templateId });
+      }
     },
     [body, thread.id],
   );
@@ -112,6 +131,7 @@ export function ReplyComposer({
   const onSent = (updated: SupportThreadDetail) => {
     idempotencyKey.current = crypto.randomUUID();
     setBody("");
+    setAppliedTemplate(null);
     setDraftState("idle");
     loadedDraftFor.current = null;
     setSendError(null);
@@ -127,6 +147,7 @@ export function ReplyComposer({
         bodyText: body,
         idempotencyKey: idempotencyKey.current,
         reopenIfResolved,
+        templateId: appliedTemplate?.id,
       }),
     onSuccess: onSent,
     onError: (error) =>
@@ -161,7 +182,7 @@ export function ReplyComposer({
           <dl className="mb-4 grid gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
             <Meta label="宛先">{thread.requesterEmail}</Meta>
             <Meta label="差出人">support@tmkch.io</Meta>
-            <Meta label="件名">{replySubject(thread.subject)}</Meta>
+            <Meta label="件名">{appliedTemplate?.subject ?? replySubjectFor(thread)}</Meta>
           </dl>
 
           <div className="mb-3">
@@ -276,6 +297,8 @@ export function ReplyComposer({
             </Button>
             <Button
               onClick={() => {
+                // Appending mixes two templates' words together; whichever
+                // subject is already in force stays in force.
                 setBody((current) => `${current}\n\n${pendingTemplate?.bodyText ?? ""}`);
                 setPendingTemplate(null);
               }}
@@ -286,6 +309,9 @@ export function ReplyComposer({
               variant="primary"
               onClick={() => {
                 setBody(pendingTemplate?.bodyText ?? "");
+                if (pendingTemplate) {
+                  setAppliedTemplate({ id: pendingTemplate.id, subject: pendingTemplate.subject });
+                }
                 setPendingTemplate(null);
               }}
             >

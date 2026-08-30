@@ -223,6 +223,87 @@ describe("sendSupportReply", () => {
     expect(mail?.subject).toBe("Re: アプリで共有できません");
   });
 
+  /**
+   * The subject a form submission gets answered with.
+   *
+   * `admin-bridge.ts` has no subject to hand over and builds `[category]
+   * requestId` so the row has a heading. Echoing that back sent the customer
+   * `Re: [bug] 8f21c…`, which says nothing and looks machine-made — and there
+   * is no conversation of theirs to preserve, because they never sent a
+   * message. So the subject is chosen: the template's, or the default.
+   */
+  it("does not answer a form submission with Re: [category] requestId", async () => {
+    const formThread = expectOk<{ id: string }>(
+      (await h.support.createThread(
+        {
+          source: "web_form",
+          requesterEmail: "someone@example.com",
+          subject: "[bug] 8f21c9de",
+          bodyText: "共有できません。",
+        },
+        { type: "app", id: "tomokichi-api" },
+      )) as never,
+    );
+
+    await h.reply.send(
+      { threadId: formThread.id, bodyText: "本文", idempotencyKey: "idem-key-000000010" },
+      admin,
+    );
+    expect(h.mail.sent.at(-1)?.subject).toBe("お問い合わせいただいた件について");
+
+    const template = expectOk<{ id: string }>(
+      (await h.reply.createTemplate(
+        {
+          key: "subject_bearing",
+          name: "件名つき",
+          category: "acknowledgement",
+          subject: "不具合のご報告について",
+          body: "本文",
+          includeSignature: false,
+        },
+        admin,
+      )) as never,
+    );
+    await h.reply.send(
+      {
+        threadId: formThread.id,
+        bodyText: "本文",
+        idempotencyKey: "idem-key-000000011",
+        templateId: template.id,
+      },
+      admin,
+    );
+    expect(h.mail.sent.at(-1)?.subject).toBe("不具合のご報告について");
+  });
+
+  /** A template never overrides the subject of a real mail thread: echoing it
+   * is what keeps the answer in the conversation the customer started. */
+  it("keeps Re: on a mail thread even when a template offers a subject", async () => {
+    const template = expectOk<{ id: string }>(
+      (await h.reply.createTemplate(
+        {
+          key: "subject_bearing_mail",
+          name: "件名つき",
+          category: "acknowledgement",
+          subject: "別の件名",
+          body: "本文",
+          includeSignature: false,
+        },
+        admin,
+      )) as never,
+    );
+    await h.reply.send(
+      {
+        threadId,
+        bodyText: "本文",
+        idempotencyKey: "idem-key-000000012",
+        templateId: template.id,
+      },
+      admin,
+    );
+    expect(h.mail.sent.at(-1)?.subject).toBe("Re: アプリで共有できません");
+  });
+
   it("threads the reply onto the customer's message", async () => {
     await h.reply.send({ threadId, bodyText: "本文", idempotencyKey: KEY }, admin);
     const mail = h.mail.sent[0];

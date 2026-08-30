@@ -1,6 +1,5 @@
 import { env } from "cloudflare:test";
 import type { MailProvider, MailResult, SupportReplyMail } from "@tomokichi/admin-mail";
-import migrationSql from "../migrations/0001_admin_core.sql?raw";
 import { AppRepository } from "../src/db/apps";
 import { AuditRepository } from "../src/db/audit";
 import { ReportRepository } from "../src/db/reports";
@@ -16,14 +15,29 @@ import type { AdminCoreEnv } from "../src/env";
 export const testEnv = env as unknown as AdminCoreEnv;
 
 /**
- * Applies the real migration file to the test database.
+ * Every migration file, in filename order.
+ *
+ * A glob rather than a list of imports: the suite failed the day a second
+ * migration was added, because the harness was still applying only the first
+ * and every test met a column that existed in production and not here. A new
+ * file is now picked up by existing.
+ */
+const migrations = Object.entries(
+  import.meta.glob("../migrations/*.sql", { query: "?raw", import: "default", eager: true }),
+)
+  .sort(([a], [b]) => a.localeCompare(b))
+  .map(([, sql]) => sql as string);
+
+/**
+ * Applies the real migration files to the test database.
  *
  * The schema under test is the schema that ships — a hand-written `CREATE
  * TABLE` in a fixture is how a test suite ends up passing against a database
  * that does not exist.
  */
 export async function migrate(): Promise<void> {
-  const statements = migrationSql
+  const statements = migrations
+    .join("\n;\n")
     .split("\n")
     .filter((line) => !line.trimStart().startsWith("--"))
     .join("\n")
@@ -31,7 +45,17 @@ export async function migrate(): Promise<void> {
     .map((statement) => statement.trim())
     .filter((statement) => statement.length > 0);
   for (const statement of statements) {
-    await testEnv.DB.prepare(statement).run();
+    try {
+      await testEnv.DB.prepare(statement).run();
+    } catch (error) {
+      // The schema outlives a single test file, so `migrate` runs against a
+      // database that may already be up to date. `CREATE TABLE IF NOT EXISTS`
+      // says so itself; `ALTER TABLE ADD COLUMN` has no such spelling and fails
+      // the second time. Swallowing exactly that one message keeps the harness
+      // idempotent without turning it into something that ignores real schema
+      // errors.
+      if (!(error instanceof Error) || !/duplicate column name/i.test(error.message)) throw error;
+    }
   }
   await reset();
 }

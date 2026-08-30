@@ -18,10 +18,13 @@ import type { ReplyTemplateCategory } from "@tomokichi/admin-contracts";
  *   the current behaviour without telling somebody they were wrong to ask.
  * - A follow-up goes in the same mail thread as the question it answers.
  *
- * That last rule is why none of these carry a subject line. A reply is sent as
- * `Re: <the thread's subject>` (`replySubject`), which is what keeps it in the
- * customer's existing conversation; giving each template its own subject would
- * break the threading the rules ask for.
+ * That last rule is why a subject here is not always used. A reply to mail goes
+ * out as `Re: <the thread's subject>`, which is what keeps it in the customer's
+ * existing conversation, and no template overrides that. A submission from an
+ * app's support form has no such conversation — the customer never sent a
+ * message — and the subject the bridge invents for the row, `[category]
+ * requestId`, reads as nonsense in an inbox. That is the case these subjects
+ * are for. See `replySubjectFor`.
  *
  * What stays a `{{placeholder}}` is what only a person can write for one
  * specific question. `sendSupportReply` refuses a body that still contains any,
@@ -41,6 +44,8 @@ export interface ReplyTemplateSeed {
   category: ReplyTemplateCategory;
   /** Slug, resolved to an id at seed time. Absent means Studio-wide. */
   appSlug?: string;
+  /** The reply's subject, used only for a thread that has none of its own. */
+  subject: string;
   body: string;
   includeSignature: boolean;
   sortOrder: number;
@@ -58,6 +63,7 @@ const CLOSING = "今後とも{{appName}}ならびにTomokichi Studioをよろし
 export const seedReplyTemplates: ReplyTemplateSeed[] = [
   {
     key: "studio_general",
+    subject: "お問い合わせいただいた件について",
     name: "01 通常回答",
     category: "general",
     sortOrder: 10,
@@ -76,6 +82,7 @@ export const seedReplyTemplates: ReplyTemplateSeed[] = [
   },
   {
     key: "studio_bug_received",
+    subject: "不具合のご報告について",
     name: "02 不具合受付",
     category: "acknowledgement",
     sortOrder: 20,
@@ -102,6 +109,7 @@ export const seedReplyTemplates: ReplyTemplateSeed[] = [
   },
   {
     key: "studio_need_info",
+    subject: "お問い合わせ内容について追加で確認させてください",
     name: "03 追加情報のお願い",
     category: "need_more_information",
     sortOrder: 30,
@@ -131,6 +139,7 @@ export const seedReplyTemplates: ReplyTemplateSeed[] = [
   },
   {
     key: "studio_bug_fixed",
+    subject: "以前ご報告いただいた不具合について",
     name: "04 不具合修正完了",
     category: "resolved",
     sortOrder: 40,
@@ -154,6 +163,7 @@ export const seedReplyTemplates: ReplyTemplateSeed[] = [
   },
   {
     key: "studio_expected_behavior",
+    subject: "お問い合わせいただいた動作について",
     name: "05 現在の仕様",
     category: "expected_behavior",
     sortOrder: 50,
@@ -177,6 +187,7 @@ export const seedReplyTemplates: ReplyTemplateSeed[] = [
   },
   {
     key: "studio_feature_request",
+    subject: "機能についてのご意見ありがとうございます",
     name: "06 機能要望",
     category: "feature_request",
     sortOrder: 60,
@@ -202,6 +213,7 @@ export const seedReplyTemplates: ReplyTemplateSeed[] = [
   },
   {
     key: "studio_feature_released",
+    subject: "以前ご要望いただいた機能について",
     name: "07 要望した機能の実装報告",
     category: "update_completed",
     sortOrder: 70,

@@ -37,6 +37,7 @@ export function ReplyTemplates() {
         name: template.name,
         category: template.category,
         appId: template.appId ?? null,
+        subject: template.subject ?? null,
         body: template.body,
         includeSignature: template.includeSignature,
         isActive: template.isActive,
@@ -179,6 +180,20 @@ function TemplateForm({
           </select>
         </label>
       </div>
+
+      <label className="block">
+        <span className="mb-1 block text-xs font-medium text-ink-soft">件名</span>
+        <input
+          className={inputClass}
+          value={value.subject ?? ""}
+          placeholder="お問い合わせいただいた件について"
+          onChange={(event) => onChange({ ...value, subject: event.target.value || undefined })}
+        />
+        <span className="mt-1 block text-xs text-ink-faint">
+          アプリの問い合わせフォームから届いたスレッドにだけ使われます。メールで届いたスレッドは、
+          相手の会話に返信が残るよう「Re: 元の件名」のままです。
+        </span>
+      </label>
 
       <label className="block">
         <span className="mb-1 block text-xs font-medium text-ink-soft">本文</span>
