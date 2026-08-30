@@ -3,6 +3,7 @@ import type { AppSummary, SupportThreadListPage } from "@tomokichi/admin-contrac
 import { Link, useSearchParams } from "react-router";
 import { Card, DataState, inputClass, Page, StatusPill, Timestamp } from "../components/primitives";
 import { api, query } from "../lib/api";
+import { supportSourceLabels } from "../lib/labels";
 
 const TABS = [
   { label: "すべて", status: "" },
@@ -110,7 +111,17 @@ export function SupportInbox() {
                 <StatusPill status={thread.status} />
               </div>
               <p className="mt-1 flex flex-wrap gap-x-3 text-xs text-ink-faint">
-                <span>{thread.requesterEmail}</span>
+                {/* The name only when the person gave one — an app's form asks
+                    for it, an email usually carries one, and neither is
+                    guaranteed. Never derived from the address. */}
+                <span>
+                  {thread.requesterName
+                    ? `${thread.requesterName} <${thread.requesterEmail}>`
+                    : thread.requesterEmail}
+                </span>
+                {thread.source !== "email" ? (
+                  <span>{supportSourceLabels[thread.source]}</span>
+                ) : null}
                 {thread.appName ? <span>{thread.appName}</span> : null}
                 <Timestamp value={thread.lastMessageAt} />
               </p>

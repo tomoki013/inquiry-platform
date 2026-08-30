@@ -7,6 +7,7 @@ import type {
   AuditTargetType,
   ReplyTemplateCategory,
   ReportStatus,
+  SupportSource,
   SupportStatus,
 } from "@tomokichi/admin-contracts";
 
@@ -159,4 +160,32 @@ const auditTargetPaths: Record<AuditTargetType, ((id: string) => string) | null>
 export function auditTargetPath(entry: Pick<AuditEntry, "targetType" | "targetId">): string | null {
   const build = auditTargetPaths[entry.targetType];
   return build && entry.targetId ? build(entry.targetId) : null;
+}
+
+export const supportSourceLabels: Record<SupportSource, string> = {
+  email: "メール",
+  web_form: "アプリの問い合わせフォーム",
+  internal: "運営が作成",
+};
+
+/**
+ * The shape `apps/api` gives a form submission when it hands one to Admin.
+ *
+ * `admin-bridge.ts` has no subject to pass on — a form has a category and a
+ * request id and no subject line — so it builds one as `[category] requestId`.
+ * That is fine as a subject and unreadable as a heading, so the two halves are
+ * pulled back apart for display here.
+ *
+ * Display only. The stored subject is untouched: it is what a reply quotes and
+ * what somebody searching for a request id will match on. A subject that does
+ * not have this shape — every real email — is returned as itself.
+ */
+export function splitFormSubject(subject: string): {
+  category?: string;
+  requestId?: string;
+  rest: string;
+} {
+  const match = /^\[([^\]]+)\]\s*(\S+)\s*$/.exec(subject);
+  if (!match?.[1] || !match[2]) return { rest: subject };
+  return { category: match[1], requestId: match[2], rest: subject };
 }
