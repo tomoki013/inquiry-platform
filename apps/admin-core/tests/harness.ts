@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { env } from "cloudflare:test";
 import type { MailProvider, MailResult, SupportReplyMail } from "@tomokichi/admin-mail";
 import { AppRepository } from "../src/db/apps";
@@ -21,6 +22,9 @@ export const testEnv = env as unknown as AdminCoreEnv;
  * migration was added, because the harness was still applying only the first
  * and every test met a column that existed in production and not here. A new
  * file is now picked up by existing.
+ *
+ * `import.meta.glob` is Vite's, which is why `vite` is a declared devDependency
+ * of this package rather than something inherited from vitest by accident.
  */
 const migrations = Object.entries(
   import.meta.glob("../migrations/*.sql", { query: "?raw", import: "default", eager: true }),
