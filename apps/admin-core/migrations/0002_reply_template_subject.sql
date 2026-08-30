@@ -1,0 +1,11 @@
+-- A template may choose the reply's subject.
+--
+-- Only used when the thread has no subject of its own — a submission from an
+-- app's support form, where the customer never sent a message to reply to and
+-- `[category] requestId` was going out as `Re: [bug] 8f21c…`. A mail thread
+-- still echoes what the sender wrote, because that is what keeps the answer in
+-- their conversation, so this column is ignored there. See `replySubjectFor`.
+--
+-- Nullable: an existing template, and any template that has nothing better to
+-- say than the default, simply has none.
+ALTER TABLE reply_templates ADD COLUMN subject TEXT;

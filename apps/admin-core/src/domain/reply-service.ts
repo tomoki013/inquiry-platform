@@ -16,7 +16,7 @@ import {
   nowIso,
   ok,
   renderTemplate,
-  replySubject,
+  replySubjectFor,
   saveSupportDraftInputSchema,
   sendSupportReplyInputSchema,
   setAppMailSettingsInputSchema,
@@ -230,7 +230,14 @@ export class ReplyService {
         if (signature && signature.trim().length > 0) body = `${rendered}\n\n${signature}`;
       }
 
-      return ok({ bodyText: body, unresolved: unresolvedVariables(body) });
+      return ok({
+        bodyText: body,
+        unresolved: unresolvedVariables(body),
+        subject: replySubjectFor(
+          { subject: thread.subject, source: thread.source as never },
+          template.subject,
+        ),
+      });
     } catch (error) {
       return internalFailure("reply.applyTemplate", error);
     }
@@ -317,7 +324,15 @@ export class ReplyService {
 
       const { references, inReplyTo } = await this.support.threadReferences(input.threadId);
       const from = `${this.addresses.fromName} <${this.addresses.supportEmail}>`;
-      const subject = replySubject(thread.subject);
+      // The subject is resolved here, from the thread and — for a thread that
+      // has no subject of its own — the template the operator inserted. The
+      // request carried that template's id and never its text, so a tampered
+      // one still cannot choose what a reply says it is about.
+      const template = input.templateId ? await this.templates.find(input.templateId) : undefined;
+      const subject = replySubjectFor(
+        { subject: thread.subject, source: thread.source as never },
+        template?.subject,
+      );
 
       const sent = await this.mail.sendSupportReply({
         to: thread.requester_email,

@@ -56,8 +56,8 @@ for (const template of seedReplyTemplates) {
     ? `(SELECT id FROM apps WHERE slug = ${text(template.appSlug)})`
     : "NULL";
   lines.push(
-    `INSERT INTO reply_templates (id, key, name, category, app_id, body, include_signature, is_active, sort_order, created_at, updated_at)`,
-    `SELECT ${text(randomUUID())}, ${text(template.key)}, ${text(template.name)}, ${text(template.category)}, ${scope}, ${text(template.body)}, ${template.includeSignature ? 1 : 0}, 1, ${template.sortOrder}, ${text(now)}, ${text(now)}`,
+    `INSERT INTO reply_templates (id, key, name, category, app_id, subject, body, include_signature, is_active, sort_order, created_at, updated_at)`,
+    `SELECT ${text(randomUUID())}, ${text(template.key)}, ${text(template.name)}, ${text(template.category)}, ${scope}, ${text(template.subject)}, ${text(template.body)}, ${template.includeSignature ? 1 : 0}, 1, ${template.sortOrder}, ${text(now)}, ${text(now)}`,
     `WHERE NOT EXISTS (SELECT 1 FROM reply_templates WHERE key = ${text(template.key)});`,
     "",
   );

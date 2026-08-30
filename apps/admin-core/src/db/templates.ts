@@ -14,6 +14,7 @@ interface TemplateRow {
   name: string;
   category: string;
   app_id: string | null;
+  subject: string | null;
   body: string;
   include_signature: number;
   is_active: number;
@@ -31,6 +32,7 @@ function toTemplate(row: TemplateRow): ReplyTemplate {
     category: row.category as ReplyTemplateCategory,
     appId: row.app_id ?? undefined,
     appSlug: row.app_slug ?? undefined,
+    subject: row.subject ?? undefined,
     body: row.body,
     includeSignature: row.include_signature === 1,
     isActive: row.is_active === 1,
@@ -94,9 +96,9 @@ export class TemplateRepository {
     await this.db
       .prepare(
         `INSERT INTO reply_templates
-           (id, key, name, category, app_id, body, include_signature,
+           (id, key, name, category, app_id, subject, body, include_signature,
             is_active, sort_order, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         id,
@@ -104,6 +106,7 @@ export class TemplateRepository {
         input.name,
         input.category,
         input.appId ?? null,
+        input.subject ?? null,
         input.body,
         input.includeSignature ? 1 : 0,
         input.isActive ? 1 : 0,
@@ -120,6 +123,7 @@ export class TemplateRepository {
       name: "name",
       category: "category",
       appId: "app_id",
+      subject: "subject",
       body: "body",
       includeSignature: "include_signature",
       isActive: "is_active",
