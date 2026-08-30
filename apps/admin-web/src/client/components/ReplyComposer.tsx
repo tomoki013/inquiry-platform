@@ -164,7 +164,12 @@ export function ReplyComposer({
   });
 
   const isSpam = thread.status === "spam";
-  const canSend = mailConfigured && !isSpam && body.trim().length > 0 && !send.isPending;
+  // Nothing to reply to. The app forms only ask for an address when somebody
+  // wants an answer, so a thread can legitimately arrive with nowhere to send
+  // one — the message is still here to be read, and 運営メモ still works.
+  const hasReplyAddress = Boolean(thread.requesterEmail);
+  const canSend =
+    mailConfigured && hasReplyAddress && !isSpam && body.trim().length > 0 && !send.isPending;
 
   return (
     <section className="rounded-lg border border-line bg-surface p-5">
@@ -180,7 +185,7 @@ export function ReplyComposer({
       {mode === "reply" ? (
         <>
           <dl className="mb-4 grid gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
-            <Meta label="宛先">{thread.requesterEmail}</Meta>
+            <Meta label="宛先">{thread.requesterEmail ?? "返信先なし"}</Meta>
             <Meta label="差出人">support@tmkch.io</Meta>
             <Meta label="件名">{appliedTemplate?.subject ?? replySubjectFor(thread)}</Meta>
           </dl>
@@ -233,9 +238,11 @@ export function ReplyComposer({
               title={
                 !mailConfigured
                   ? "メール送信機能が設定されていません"
-                  : isSpam
-                    ? "迷惑メールに分類されています。先に解除してください。"
-                    : undefined
+                  : !hasReplyAddress
+                    ? "返信先のアドレスがありません"
+                    : isSpam
+                      ? "迷惑メールに分類されています。先に解除してください。"
+                      : undefined
               }
               onClick={() => {
                 setSendError(null);
@@ -250,6 +257,11 @@ export function ReplyComposer({
 
           {!mailConfigured ? (
             <p className="mt-2 text-xs text-warn">メール送信機能が設定されていません。</p>
+          ) : null}
+          {!hasReplyAddress ? (
+            <p className="mt-2 text-xs text-warn">
+              返信を希望せずに送られた問い合わせです。返信先のアドレスがないため送信できません。
+            </p>
           ) : null}
           {isSpam ? (
             <p className="mt-2 text-xs text-warn">

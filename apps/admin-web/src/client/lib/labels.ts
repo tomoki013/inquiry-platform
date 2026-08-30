@@ -190,3 +190,25 @@ export function splitFormSubject(subject: string): {
   if (!match?.[1] || !match[2]) return { rest: subject };
   return { category: match[1], requestId: match[2], rest: subject };
 }
+
+/** Shown when a thread has no address to reply to. */
+export const NO_REPLY_ADDRESS = "返信先なし";
+
+/**
+ * Who a thread is from, in one line.
+ *
+ * Either half can be missing and both are missing surprisingly often: the app
+ * forms ask for a name only as an optional field, and ask for an address only
+ * when somebody wants an answer. The address is never inferred from anything,
+ * and its absence is said in words rather than rendered as an empty pair of
+ * angle brackets, which reads as a bug in the page.
+ */
+export function requesterLine(requester: {
+  requesterName?: string;
+  requesterEmail?: string;
+}): string {
+  const { requesterName: name, requesterEmail: email } = requester;
+  if (name && email) return `${name} <${email}>`;
+  if (name) return `${name}（${NO_REPLY_ADDRESS}）`;
+  return email ?? NO_REPLY_ADDRESS;
+}

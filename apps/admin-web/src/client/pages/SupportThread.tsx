@@ -11,7 +11,12 @@ import { useParams } from "react-router";
 import { Card, DataState, inputClass, Page, StatusPill, Timestamp } from "../components/primitives";
 import { ReplyComposer } from "../components/ReplyComposer";
 import { api } from "../lib/api";
-import { splitFormSubject, supportSourceLabels, supportStatusLabels } from "../lib/labels";
+import {
+  NO_REPLY_ADDRESS,
+  splitFormSubject,
+  supportSourceLabels,
+  supportStatusLabels,
+} from "../lib/labels";
 
 const DIRECTION_LABEL = {
   inbound: "お客様",
@@ -142,10 +147,12 @@ function ThreadHeader({ thread }: { thread: Thread }) {
           {thread.requesterName ? (
             <>
               <span className="text-ink">{thread.requesterName}</span>{" "}
-              <span className="text-ink-soft">&lt;{thread.requesterEmail}&gt;</span>
+              <span className="text-ink-soft">
+                {thread.requesterEmail ? `<${thread.requesterEmail}>` : `（${NO_REPLY_ADDRESS}）`}
+              </span>
             </>
           ) : (
-            thread.requesterEmail
+            (thread.requesterEmail ?? NO_REPLY_ADDRESS)
           )}
         </Row>
         {/* Which address it was sent to. Worth showing because there is more
@@ -181,9 +188,10 @@ function ThreadHeader({ thread }: { thread: Thread }) {
  */
 function Message({ thread, message }: { thread: Thread; message: SupportMessage }) {
   const note = message.direction === "internal_note";
-  const sender = message.sender ?? (message.direction === "inbound" ? thread.requesterEmail : "");
+  const sender =
+    message.sender ?? (message.direction === "inbound" ? (thread.requesterEmail ?? "") : "");
   const recipient =
-    message.recipient ?? (message.direction === "outbound" ? thread.requesterEmail : "");
+    message.recipient ?? (message.direction === "outbound" ? (thread.requesterEmail ?? "") : "");
 
   return (
     <li
