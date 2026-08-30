@@ -71,6 +71,7 @@ export const replyTemplateCategoryLabels: Record<ReplyTemplateCategory, string> 
   investigating: "調査中",
   need_more_information: "追加情報のお願い",
   known_issue: "既知の問題",
+  expected_behavior: "現在の仕様",
   feature_request: "機能のご要望",
   planned_update: "対応予定",
   resolved: "解決済み",

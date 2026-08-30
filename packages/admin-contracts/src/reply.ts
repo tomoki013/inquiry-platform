@@ -27,6 +27,10 @@ export const replyTemplateCategories = [
   "investigating",
   "need_more_information",
   "known_issue",
+  /** Working as intended, and said so. Distinct from `known_issue`, which
+   * concedes a problem: answering "that is the current behaviour" as though it
+   * were a known fault is a different thing to tell somebody. */
+  "expected_behavior",
   "feature_request",
   "planned_update",
   "resolved",
