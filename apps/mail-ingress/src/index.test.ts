@@ -14,6 +14,8 @@ import worker, { type MailIngressEnv } from "./index";
 class FakeMessage {
   forwardedTo: string[] = [];
   forwardShouldFail = false;
+  /** Every side effect, in the order it happened. See the ordering test. */
+  events: string[] = [];
 
   constructor(
     readonly from: string,
@@ -23,6 +25,7 @@ class FakeMessage {
   ) {}
 
   get raw(): ReadableStream {
+    this.events.push("raw");
     const bytes = new TextEncoder().encode(this.rawText);
     return new ReadableStream({
       start(controller) {
@@ -37,6 +40,7 @@ class FakeMessage {
   }
 
   forward(recipient: string): Promise<void> {
+    this.events.push("forward");
     if (this.forwardShouldFail) return Promise.reject(new Error("forward failed"));
     this.forwardedTo.push(recipient);
     return Promise.resolve();
@@ -82,6 +86,27 @@ beforeEach(() => {
 });
 
 describe("email()", () => {
+  /**
+   * The ordering, which is the whole reason the mail cannot be lost.
+   *
+   * On the free Workers plan a request gets 10ms of CPU, and a MIME parse of a
+   * mail carrying megabytes of base64 can exceed it. Exceeding CPU kills the
+   * isolate rather than throwing, so nothing after the parse runs — no `catch`,
+   * no forward. Every support mail goes through this Worker now, so parsing
+   * before delivering means a question that reaches nobody.
+   *
+   * Asserting "it forwards" is not enough, because that passed before too.
+   * What matters is that the forward happens before the raw stream is ever
+   * touched.
+   */
+  it("forwards before it reads the message body", async () => {
+    const { env } = makeEnv();
+    await worker.email(message as never, env, ctx);
+
+    expect(message.events[0]).toBe("forward");
+    expect(message.events).toContain("raw");
+  });
+
   it("hands a parsed message to Admin Core and forwards it on", async () => {
     const { env, ingest } = makeEnv();
     await worker.email(message as never, env, ctx);

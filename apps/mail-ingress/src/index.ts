@@ -12,13 +12,16 @@ import { parseInboundEmail } from "./parse";
  *
  * The Worker has two jobs and they fail independently on purpose:
  *
- *   1. record the message in Admin, so it can be answered from the admin screen;
- *   2. forward it to the address that was already receiving it.
+ *   1. forward the message to the address that was already receiving it;
+ *   2. record it in Admin, so it can be answered from the admin screen.
  *
- * Forwarding runs **whatever happened in step 1**. Before this Worker existed,
- * support mail went straight to a personal inbox; a bug in Admin must not be a
- * way to silently lose somebody's question. The reverse holds too: a forwarding
- * failure is logged and does not undo the stored copy.
+ * **In that order.** Before this Worker existed, support mail went straight to
+ * a personal inbox with nothing in the way; now every support mail goes through
+ * here, so this Worker not finishing has to mean "Admin is missing a copy" and
+ * never "nobody got the question". Delivering before parsing is what makes that
+ * true even when the parse is not merely wrong but killed — see `email` below.
+ *
+ * A forwarding failure is logged and does not stop the message being stored.
  */
 export interface MailIngressEnv {
   ADMIN_CORE: AdminCoreStub;
@@ -43,16 +46,30 @@ interface InboundMessage {
 
 export default {
   async email(message: InboundMessage, env: MailIngressEnv, ctx: ExecutionContext): Promise<void> {
-    let stored: "stored" | "skipped" | "failed" = "failed";
+    // Deliver first, parse second.
+    //
+    // The order used to be the other way round, with the parse wrapped in a
+    // `try` so that a failure there could not stop the forward. That covers an
+    // exception and not the thing most likely to happen on the free Workers
+    // plan: 10ms of CPU per request, against a MIME parse of a mail that may
+    // carry megabytes of base64. Exceeding CPU is not an exception — the
+    // isolate is killed — so the `catch` never runs and neither does anything
+    // after it. Every support mail now goes through this Worker, so that would
+    // have been a question nobody ever saw, in either place.
+    //
+    // Forwarding first cannot lose the mail that way. If parsing then fails
+    // for any reason at all, the worst case is a copy missing from Admin,
+    // which is logged and recoverable, rather than a message that reached
+    // nobody.
+    await forward(message, env);
+
     try {
-      stored = await store(message, env, ctx);
+      await store(message, env, ctx);
     } catch (error) {
       // Never rethrow: an exception here would make Cloudflare retry the whole
-      // delivery, and the forward below has not run yet.
+      // delivery, and the mail has already gone out once.
       log("mail.store_failed", { error: error instanceof Error ? error.name : "Unknown" });
     }
-
-    await forward(message, env, stored);
   },
 };
 
@@ -137,26 +154,17 @@ async function store(
  * destinations would deliver the raw mail twice on a retry and Admin's copy
  * once.
  */
-async function forward(
-  message: InboundMessage,
-  env: MailIngressEnv,
-  stored: "stored" | "skipped" | "failed",
-): Promise<void> {
+async function forward(message: InboundMessage, env: MailIngressEnv): Promise<void> {
   const to = env.SUPPORT_FORWARD_EMAIL;
   if (!to) {
-    log("mail.forward_unconfigured", { stored });
+    log("mail.forward_unconfigured", {});
     return;
   }
   try {
     await message.forward(to);
-    log("mail.forwarded", { stored });
+    log("mail.forwarded", {});
   } catch (error) {
-    // Both halves failed only if `stored` is also "failed" — and that is the
-    // one case worth finding in the logs.
-    log("mail.forward_failed", {
-      stored,
-      error: error instanceof Error ? error.name : "Unknown",
-    });
+    log("mail.forward_failed", { error: error instanceof Error ? error.name : "Unknown" });
   }
 }
 
