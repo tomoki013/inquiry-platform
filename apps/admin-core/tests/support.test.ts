@@ -148,6 +148,48 @@ describe("createThread from the support form", () => {
     expect(thread.source).toBe("web_form");
     expect(thread.messages).toHaveLength(1);
   });
+
+  /**
+   * The app forms ask for an address only when somebody wants an answer, so
+   * most of what arrives from inside an app has nowhere to write back to. It is
+   * still a message somebody has to read, and it has to reach the list.
+   */
+  it("takes a message that has nowhere to reply to", async () => {
+    const thread = expectOk<SupportThreadDetail>(
+      (await h.support.createThread(
+        {
+          source: "web_form",
+          requesterEmail: "",
+          subject: "[bug] req-2",
+          bodyText: "返信は要りませんが、落ちます。",
+        },
+        { type: "app", id: "tomokichi-api" },
+      )) as never,
+    );
+    expect(thread.requesterEmail).toBeUndefined();
+    expect(thread.messages).toHaveLength(1);
+
+    const listed = expectOk<{ items: { id: string; requesterEmail?: string }[] }>(
+      (await h.support.list({})) as never,
+    );
+    expect(listed.items.map((item) => item.id)).toContain(thread.id);
+    expect(listed.items.find((item) => item.id === thread.id)?.requesterEmail).toBeUndefined();
+  });
+
+  /** There is nowhere to send it, and saying so is the whole point. */
+  it("refuses to send a reply when there is no address", async () => {
+    const thread = expectOk<SupportThreadDetail>(
+      (await h.support.createThread(
+        { source: "web_form", requesterEmail: "", subject: "[bug] req-3", bodyText: "だめです" },
+        { type: "app", id: "tomokichi-api" },
+      )) as never,
+    );
+    const result = await h.reply.send(
+      { threadId: thread.id, bodyText: "お返事します。", idempotencyKey: "no-address-0001" },
+      admin,
+    );
+    expect(result.ok).toBe(false);
+  });
 });
 
 describe("status", () => {

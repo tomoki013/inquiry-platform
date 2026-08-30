@@ -16,6 +16,17 @@ interface ThreadRow {
   id: string;
   app_id: string | null;
   source: string;
+  /**
+   * Empty when the sender did not ask for a reply, which is what the app forms
+   * default to for everything that is not a question.
+   *
+   * The column stays `NOT NULL`: making it nullable means rebuilding the table,
+   * and SQLite cannot drop a parent table that `support_messages` still points
+   * at without foreign keys off — not something to do to the live database for
+   * a spelling. The empty string is the same absence the apps put on the wire
+   * (`email: ""`, never a missing key), and `reply-service` already refuses to
+   * send to it. Everything above this layer sees `undefined`.
+   */
   requester_email: string;
   requester_name: string | null;
   subject: string;
@@ -63,7 +74,7 @@ function toSummary(row: ThreadRow): SupportThreadSummary {
     appSlug: row.app_slug ?? undefined,
     appName: row.app_name ?? undefined,
     source: row.source as SupportSource,
-    requesterEmail: row.requester_email,
+    requesterEmail: row.requester_email.length > 0 ? row.requester_email : undefined,
     requesterName: row.requester_name ?? undefined,
     subject: row.subject,
     status: row.status as SupportStatus,
@@ -120,7 +131,7 @@ export class SupportRepository {
     id: string;
     appId?: string;
     source: SupportSource;
-    requesterEmail: string;
+    requesterEmail?: string;
     requesterName?: string;
     subject: string;
     at: string;
@@ -136,7 +147,7 @@ export class SupportRepository {
         values.id,
         values.appId ?? null,
         values.source,
-        values.requesterEmail,
+        values.requesterEmail ?? "",
         values.requesterName ?? null,
         values.subject,
         values.at,

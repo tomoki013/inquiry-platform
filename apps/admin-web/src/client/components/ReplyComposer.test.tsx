@@ -216,6 +216,29 @@ describe("sending", () => {
     expect(screen.getByText("メール送信機能が設定されていません。")).toBeInTheDocument();
   });
 
+  /**
+   * The app forms ask for an address only when somebody wants an answer, so a
+   * thread can arrive with nowhere to reply to. The message still has to be
+   * readable, and 運営メモ still has to work — it is the send button, and only
+   * the send button, that has nothing to do.
+   */
+  it("is disabled, and says why, when the thread has no reply address", async () => {
+    const user = userEvent.setup();
+    renderComposer(
+      <ReplyComposer thread={{ ...thread, requesterEmail: undefined }} mailConfigured />,
+    );
+    await waitFor(() => expect(screen.getByRole("textbox")).toBeInTheDocument());
+
+    await user.type(screen.getByRole("textbox"), "返信します");
+    expect(screen.getByRole("button", { name: "送信" })).toBeDisabled();
+    expect(screen.getByText(/返信先のアドレスがないため送信できません/)).toBeInTheDocument();
+    expect(screen.getByText("返信先なし")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "運営メモ" }));
+    await user.type(screen.getByRole("textbox"), "返信不要の報告");
+    expect(screen.getByRole("button", { name: "メモを追加" })).toBeEnabled();
+  });
+
   it("is disabled for a thread marked spam", async () => {
     renderComposer(<ReplyComposer thread={{ ...thread, status: "spam" }} mailConfigured />);
     await waitFor(() => expect(screen.getByRole("textbox")).toBeInTheDocument());

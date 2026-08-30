@@ -3,7 +3,7 @@ import type { AppSummary, SupportThreadListPage } from "@tomokichi/admin-contrac
 import { Link, useSearchParams } from "react-router";
 import { Card, DataState, inputClass, Page, StatusPill, Timestamp } from "../components/primitives";
 import { api, query } from "../lib/api";
-import { supportSourceLabels } from "../lib/labels";
+import { requesterLine, supportSourceLabels } from "../lib/labels";
 
 const TABS = [
   { label: "すべて", status: "" },
@@ -114,11 +114,7 @@ export function SupportInbox() {
                 {/* The name only when the person gave one — an app's form asks
                     for it, an email usually carries one, and neither is
                     guaranteed. Never derived from the address. */}
-                <span>
-                  {thread.requesterName
-                    ? `${thread.requesterName} <${thread.requesterEmail}>`
-                    : thread.requesterEmail}
-                </span>
+                <span>{requesterLine(thread)}</span>
                 {thread.source !== "email" ? (
                   <span>{supportSourceLabels[thread.source]}</span>
                 ) : null}

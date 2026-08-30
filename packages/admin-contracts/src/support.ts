@@ -43,7 +43,12 @@ const email = z.string().trim().email().max(320);
 export const createSupportThreadInputSchema = z.object({
   appSlug: z.string().min(1).max(64).optional(),
   source: z.enum(supportSources),
-  requesterEmail: email,
+  /** Absent when the sender did not ask for a reply — the app forms make that
+   * the default for everything that is not a question. There is then nowhere
+   * to write back to, which `sendReply` refuses, but the message is still one
+   * somebody has to read. An empty string means the same thing and is folded
+   * into `undefined` here, because the app sends the key either way. */
+  requesterEmail: email.optional().or(z.literal("").transform(() => undefined)),
   /** Only ever a name the person typed themselves. Never derived from the
    * address — see `replyTemplateVariables` in `reply.ts`. */
   requesterName: optionalText(120),
@@ -128,7 +133,8 @@ export interface SupportThreadSummary {
   appSlug?: string;
   appName?: string;
   source: SupportSource;
-  requesterEmail: string;
+  /** Absent when there is nobody to write back to. */
+  requesterEmail?: string;
   requesterName?: string;
   subject: string;
   status: SupportStatus;
