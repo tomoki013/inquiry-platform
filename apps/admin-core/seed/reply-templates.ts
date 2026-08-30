@@ -1,31 +1,25 @@
 import type { ReplyTemplateCategory } from "@tomokichi/admin-contracts";
 
 /**
- * Reply templates, and an honest account of where their words come from.
+ * Reply templates, in the Studio's own words.
  *
- * **No confirmed reply wording exists anywhere in the Studio's repositories.**
- * A search across every project for the Remeet phrases, for 定型文 / reply
- * template / 返信文面, and through `apps/api`'s support and report mail
- * templates, found nothing but the notification bodies the operator receives —
- * which are not replies to anybody.
+ * These replaced a set built entirely out of `{{placeholders}}`, which existed
+ * because no confirmed reply wording could be found anywhere in the Studio's
+ * repositories and inventing a house voice was the one thing not to do. The
+ * wording here is the operator's own, supplied for exactly this purpose, so
+ * the placeholders are gone from every line whose words are now known.
  *
- * So these templates carry exactly two kinds of text and nothing else:
+ * What is still a placeholder is what only a person can write for one specific
+ * question — the answer itself, what an update changed. `sendSupportReply`
+ * refuses a body that still contains any `{{…}}`, so a template cannot go out
+ * half-written.
  *
- * 1. The fixed phrases and the step order given in the Phase 2 instruction —
- *    the opening 「いつもRemeetをご利用いただきありがとうございます」 and the
- *    closing 「今後ともRemeetならびにTomokichi Studioをよろしくお願いいたします」.
- * 2. `{{placeholders}}` for every step whose wording was *not* given.
+ * `{{appName}}`, `{{userName}}` and `{{supportUrl}}` are filled automatically.
+ * `{{userName}}` stays unresolved when nobody typed a name, which blocks the
+ * send rather than guessing one from an address.
  *
- * The placeholders are load-bearing, not decoration. `sendSupportReply` refuses
- * a body that still contains any `{{…}}`, so a template cannot be sent until a
- * person has written the parts only they can write. That is deliberately more
- * annoying than pre-filled prose: inventing a house voice and shipping it under
- * the Studio's name is the one thing the instruction is most explicit about not
- * doing.
- *
- * `{{appName}}`, `{{userName}}` and `{{supportUrl}}` are the three that *are*
- * filled automatically — and `{{userName}}` stays unresolved when nobody typed
- * a name, which blocks the send rather than guessing one from an address.
+ * None of these are scoped to an app: every line that named one now says
+ * `{{appName}}`, so the same three templates serve every app in the Studio.
  */
 export interface ReplyTemplateSeed {
   key: string;
@@ -38,59 +32,78 @@ export interface ReplyTemplateSeed {
   sortOrder: number;
 }
 
+const GREETING = [
+  "{{userName}}様",
+  "",
+  "いつも{{appName}}をご利用いただきありがとうございます。",
+  "Tomokichi Studioの髙木です。",
+];
+
+const CLOSING = "今後とも{{appName}}ならびにTomokichi Studioをよろしくお願いいたします。";
+
 export const seedReplyTemplates: ReplyTemplateSeed[] = [
   {
-    key: "remeet_general_reply",
-    name: "Remeet — 一般的なお問い合わせへの返信",
+    key: "studio_general_reply",
+    name: "一般的なお問い合わせへの返信",
     category: "general",
-    appSlug: "remeet",
     sortOrder: 10,
     includeSignature: true,
     body: [
-      "{{userName}}様",
-      "",
-      "いつもRemeetをご利用いただきありがとうございます。",
-      "",
-      "{{answerToInquiry}}",
-      "",
-      "{{currentLimitations}}",
-      "",
-      "{{plannedImprovements}}",
-      "",
-      "{{thanksForFeedback}}",
-      "",
-      "{{welcomeFurtherQuestions}}",
-      "",
-      "今後ともRemeetならびにTomokichi Studioをよろしくお願いいたします。",
-    ].join("\n"),
-  },
-  {
-    key: "remeet_update_completed",
-    name: "Remeet — アップデートでの改善報告",
-    category: "update_completed",
-    appSlug: "remeet",
-    sortOrder: 20,
-    includeSignature: true,
-    body: [
-      "{{userName}}様",
+      ...GREETING,
       "",
       "この度はお問い合わせいただきありがとうございます。",
       "",
-      "{{referenceToPreviousInquiry}}",
+      // The one thing this template cannot supply. Named for what it is so the
+      // composer shows 「answer」 rather than a generic marker.
+      "{{answer}}",
       "",
-      "{{whatTheUpdateImproved}}",
+      "ほかにも気になる点やご不明な点がございましたら、お気軽にご連絡ください。",
       "",
-      "{{specificChanges}}",
+      CLOSING,
+    ].join("\n"),
+  },
+  {
+    key: "studio_feedback_acknowledged",
+    name: "ご意見・ご要望へのお礼",
+    category: "feature_request",
+    sortOrder: 20,
+    includeSignature: true,
+    body: [
+      ...GREETING,
       "",
-      "{{remainingItemsPlannedForFutureUpdates}}",
+      "この度はお問い合わせいただきありがとうございます。",
       "",
-      "{{thanksForFeedback}}",
+      "また、{{topic}}についてのご意見をお寄せいただきありがとうございます。",
       "",
-      "{{howToUseAfterUpdating}}",
+      "実際にアプリをご利用いただく中でのご意見として、今後の改善の参考にさせていただきます。",
       "",
-      "{{welcomeFurtherRequests}}",
+      "ほかにも「こうなったら使いやすい」といった点や、気になる点がございましたら、お気軽にご連絡ください。",
       "",
-      "今後ともRemeetならびにTomokichi Studioをよろしくお願いいたします。",
+      CLOSING,
+    ].join("\n"),
+  },
+  {
+    key: "studio_update_completed",
+    name: "アップデートでの改善報告",
+    category: "update_completed",
+    sortOrder: 30,
+    includeSignature: true,
+    body: [
+      ...GREETING,
+      "",
+      "以前お問い合わせいただいた内容について、その後のアップデートで改善を行いましたのでご連絡いたしました。",
+      "",
+      "{{whatTheUpdateChanged}}",
+      "",
+      "{{whatIsStillPlanned}}",
+      "",
+      "この度は、実際に{{appName}}をご利用いただく中で貴重なご意見をお寄せいただき、ありがとうございました。",
+      "いただいたご意見をもとに、より使いやすく改善することができました。",
+      "",
+      "ぜひアップデート後の{{appName}}をお試しいただけますと幸いです。",
+      "ほかにも気になる点やご要望などございましたら、お気軽にご連絡ください。",
+      "",
+      CLOSING,
     ].join("\n"),
   },
 ];
@@ -107,7 +120,6 @@ export const notSeededCategories: ReplyTemplateCategory[] = [
   "investigating",
   "need_more_information",
   "known_issue",
-  "feature_request",
   "planned_update",
   "resolved",
   "purchase",
@@ -121,4 +133,13 @@ export const notSeededCategories: ReplyTemplateCategory[] = [
  * — once, at insert time, so what the operator reads in the composer is what
  * leaves. An app can override it in `app_mail_settings`.
  */
-export const seedSignature = ["Tomokichi Studio", "https://tmkch.io"].join("\n");
+export const seedSignature = [
+  "────────────────────────",
+  "Tomokichi Studio",
+  "髙木 友喜",
+  "",
+  "Web: https://tmkch.io",
+  "Email: support@tmkch.io",
+  "TEL: 080-6648-1475",
+  "────────────────────────",
+].join("\n");
