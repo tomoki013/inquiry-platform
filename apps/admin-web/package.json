@@ -1,0 +1,41 @@
+{
+  "name": "@tomokichi/admin-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "check": "wrangler types --env-interface CloudflareBindings --strict-vars=false && tsc --noEmit",
+    "test": "vitest run --config vitest.worker.config.ts && vitest run",
+    "test:watch": "vitest",
+    "deploy": "pnpm build && wrangler deploy",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings --strict-vars=false"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.90.5",
+    "@tomokichi/admin-contracts": "workspace:*",
+    "hono": "^4.13.2",
+    "jose": "^6.2.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router": "^7.9.5"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.18.7",
+    "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "jsdom": "^28.0.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^6.0.3",
+    "vite": "^7.1.11",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.113.0"
+  }
+}

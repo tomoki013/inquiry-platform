@@ -1,0 +1,53 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "tomokichi-admin-web",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-07-23",
+
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    // The Worker sees every request first: it sets the security headers and
+    // answers `/api/*`, then hands anything else to the built client.
+    "run_worker_first": true,
+    "not_found_handling": "single-page-application"
+  },
+
+  // The one entrance. `workers.dev` is off deliberately: a Cloudflare Access
+  // policy is attached to a hostname, so leaving the `*.workers.dev` URL up
+  // would be a second door that Access does not cover. The Worker verifies the
+  // JWT itself and would refuse that door anyway — this closes it regardless.
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "admin.tmkch.io",
+      "custom_domain": true
+    }
+  ],
+
+  "observability": {
+    "enabled": true
+  },
+
+  "vars": {
+    // Cloudflare Access. The AUD tag identifies the Application and is not a
+    // secret — it appears in every JWT this Worker verifies. Fill both in after
+    // creating the Access application; empty means "refuse everything" in
+    // production, not "allow everything".
+    "ACCESS_TEAM_DOMAIN": "tomoki-ttttt.cloudflareaccess.com",
+    "ACCESS_AUD": "9863cfa41b1979226ae61a717e47100dccac18c83a4e14ac7248ff7a8e696599",
+    "ADMIN_ORIGIN": "https://admin.tmkch.io",
+    "ENVIRONMENT": "production"
+  },
+
+  "services": [
+    {
+      // The only binding this Worker has. No D1 and no R2: the internet-facing
+      // half of Admin cannot reach the database even if a route handler is
+      // wrong. Least privilege, and the reason Admin Core exists at all.
+      "binding": "ADMIN_CORE",
+      "service": "tomokichi-admin-core",
+      "entrypoint": "AdminCore"
+    }
+  ]
+}
