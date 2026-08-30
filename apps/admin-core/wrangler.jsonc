@@ -1,0 +1,44 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "tomokichi-admin-core",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-23",
+
+  // Never on the internet. No route, no custom domain, and `workers.dev` off:
+  // the only ways in are the Service Bindings declared by Admin Web, the mail
+  // Worker and `tomokichi-api`. That is what lets this Worker hold the D1 and
+  // R2 bindings while Admin Web holds neither.
+  "workers_dev": false,
+
+  "observability": {
+    "enabled": true
+  },
+
+  "vars": {
+    // Addresses live here, not in code, so a Workspace migration is a config
+    // change. The operator's own forwarding address is a Secret, not a var.
+    "SUPPORT_EMAIL": "support@tmkch.io",
+    "SUPPORT_FROM_NAME": "Tomokichi Studio Support",
+    "NOREPLY_EMAIL": "noreply@tmkch.io",
+    "REPORT_EMAIL": "report@tmkch.io",
+    "DEFAULT_SUPPORT_URL": "https://tmkch.io/support"
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tomokichi-admin",
+      "database_id": "303d025d-51a8-4a90-9a19-97a08d715ec3",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "r2_buckets": [
+    {
+      // Private. Report evidence and support attachments. No public URL is ever
+      // generated; bytes are read back through Admin Web behind Access.
+      "binding": "PRIVATE_FILES",
+      "bucket_name": "tomokichi-admin-files"
+    }
+  ]
+}

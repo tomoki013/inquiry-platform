@@ -1,0 +1,36 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "tomokichi-mail-ingress",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-23",
+  // postal-mime reaches for a few Node built-ins when parsing MIME.
+  "compatibility_flags": ["nodejs_compat"],
+
+  // An Email Worker is addressed by Cloudflare Email Routing, not by a URL.
+  // Nothing here should be reachable over HTTP.
+  "workers_dev": false,
+
+  "observability": {
+    "enabled": true
+  },
+
+  "vars": {
+    "SUPPORT_EMAIL": "support@tmkch.io",
+    // Bytes above this are forwarded but not stored: a 25MB mail parsed into a
+    // Worker's memory is a way to make ingestion fail for everybody.
+    "MAX_STORED_BYTES": "5242880"
+  },
+
+  "services": [
+    {
+      // The only thing this Worker can reach. No D1, no R2.
+      "binding": "ADMIN_CORE",
+      "service": "tomokichi-admin-core",
+      "entrypoint": "AdminCore"
+    }
+  ]
+
+  // SUPPORT_FORWARD_EMAIL is a Secret, not a var: it is the operator's personal
+  // address and does not belong in git. Set with:
+  //   wrangler secret put SUPPORT_FORWARD_EMAIL
+}
