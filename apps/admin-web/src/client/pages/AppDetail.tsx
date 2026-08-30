@@ -11,16 +11,9 @@ import type {
 import { appLinkTypes, appPlatforms, appStatuses } from "@tomokichi/admin-contracts";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
+import { ActivityList } from "../components/ActivityList";
 import { Dialog } from "../components/Dialog";
-import {
-  Button,
-  Card,
-  DataState,
-  inputClass,
-  Page,
-  StatusPill,
-  Timestamp,
-} from "../components/primitives";
+import { Button, Card, DataState, inputClass, Page, StatusPill } from "../components/primitives";
 import { api } from "../lib/api";
 import { appLinkTypeLabels, appPlatformLabels, appStatusLabels } from "../lib/labels";
 
@@ -382,16 +375,7 @@ function Activity({ appId }: { appId: string }) {
       empty={(activity.data?.length ?? 0) === 0}
       emptyMessage="記録がありません。"
     >
-      <ul className="space-y-2">
-        {(activity.data ?? []).map((entry) => (
-          <li key={entry.id} className="flex items-baseline justify-between gap-4 text-sm">
-            <span className="font-mono text-xs text-ink">{entry.action}</span>
-            <span className="text-xs text-ink-faint">
-              <Timestamp value={entry.createdAt} />
-            </span>
-          </li>
-        ))}
-      </ul>
+      <ActivityList entries={activity.data ?? []} />
     </DataState>
   );
 }

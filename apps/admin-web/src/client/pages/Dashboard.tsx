@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import type { DashboardSummary } from "@tomokichi/admin-contracts";
 import { Link } from "react-router";
-import { Card, DataState, Page, StatusPill, Timestamp } from "../components/primitives";
+import { ActivityList } from "../components/ActivityList";
+import { Card, DataState, Page, StatusPill } from "../components/primitives";
 import { api } from "../lib/api";
 
 /**
@@ -79,22 +80,7 @@ export function Dashboard() {
                 empty={dashboard.data.recentActivity.length === 0}
                 emptyMessage="まだ記録がありません。"
               >
-                <ul className="space-y-2">
-                  {dashboard.data.recentActivity.map((entry) => (
-                    <li
-                      key={entry.id}
-                      className="flex items-baseline justify-between gap-4 text-sm"
-                    >
-                      <span className="text-ink-soft">
-                        <span className="font-mono text-xs text-ink">{entry.action}</span>
-                        <span className="ml-2 text-ink-faint">{entry.actorType}</span>
-                      </span>
-                      <span className="shrink-0 text-xs text-ink-faint">
-                        <Timestamp value={entry.createdAt} />
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                <ActivityList entries={dashboard.data.recentActivity} />
               </DataState>
             </section>
           </>

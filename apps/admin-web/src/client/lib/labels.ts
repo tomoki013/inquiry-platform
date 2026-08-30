@@ -2,6 +2,9 @@ import type {
   AppLinkType,
   AppPlatform,
   AppStatus,
+  AuditActorType,
+  AuditEntry,
+  AuditTargetType,
   ReplyTemplateCategory,
   ReportStatus,
   SupportStatus,
@@ -94,4 +97,66 @@ export function statusLabel(status: string): string {
 
 export function labelFor(labels: Record<string, string>, value: string): string {
   return labels[value] ?? value;
+}
+
+/**
+ * What each audited action was, said as a person would say it.
+ *
+ * The stored `action` is a stable identifier — `support.reply_sent` is what is
+ * in the table forever and what a query filters on — so it is translated for
+ * display and never at the point it is written. An action added to Admin Core
+ * and not yet listed here falls through to its identifier, which is how the
+ * activity list stays honest about something having happened rather than
+ * dropping the row.
+ */
+export const auditActionLabels: Record<string, string> = {
+  "app.created": "アプリを追加",
+  "app.updated": "アプリを更新",
+  "app.link_added": "リンクを追加",
+  "app.link_removed": "リンクを削除",
+  "mail_settings.updated": "メール設定を更新",
+  "reply_template.created": "定型文を追加",
+  "reply_template.updated": "定型文を更新",
+  "reply_template.deactivated": "定型文を停止",
+  "report.created": "通報を受信",
+  "report.note_added": "通報にメモを追加",
+  "report.resolution_updated": "通報の対応を記録",
+  "support.received": "問い合わせを受信",
+  "support.reply_sent": "返信を送信",
+  "support.status_changed": "問い合わせのステータスを変更",
+  "support.app_assigned": "問い合わせのアプリを設定",
+  "support.internal_note_added": "問い合わせに運営メモを追加",
+};
+
+export const auditActorLabels: Record<AuditActorType, string> = {
+  admin: "運営",
+  system: "システム",
+  app: "アプリ",
+  email: "メール",
+};
+
+export function auditActionLabel(action: string): string {
+  return auditActionLabels[action] ?? action;
+}
+
+export function auditActorLabel(actorType: AuditActorType): string {
+  return auditActorLabels[actorType] ?? actorType;
+}
+
+/**
+ * Where an activity row points.
+ *
+ * `system` targets — templates, mail settings — have no screen of their own, so
+ * they get no link rather than a link to nowhere.
+ */
+const auditTargetPaths: Record<AuditTargetType, ((id: string) => string) | null> = {
+  report: (id) => `/reports/${id}`,
+  support_thread: (id) => `/support/${id}`,
+  app: (id) => `/apps/${id}`,
+  system: null,
+};
+
+export function auditTargetPath(entry: Pick<AuditEntry, "targetType" | "targetId">): string | null {
+  const build = auditTargetPaths[entry.targetType];
+  return build && entry.targetId ? build(entry.targetId) : null;
 }
