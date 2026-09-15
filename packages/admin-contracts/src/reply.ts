@@ -115,9 +115,10 @@ export const DEFAULT_REPLY_SUBJECT = "お問い合わせいただいた件につ
  * and a plain default otherwise.
  */
 export function replySubjectFor(
-  thread: { subject: string; source: SupportSource },
+  thread: { subject: string; source: SupportSource; mailSubject?: string },
   templateSubject?: string,
 ): string {
+  if (thread.mailSubject) return replySubject(thread.mailSubject);
   if (thread.source === "email") return replySubject(thread.subject);
   const chosen = templateSubject?.trim();
   return chosen && chosen.length > 0 ? chosen : DEFAULT_REPLY_SUBJECT;
@@ -138,10 +139,7 @@ export interface ReplyTemplate {
    * its own — see `replySubjectFor`. Absent means the default is used. */
   subject?: string;
   body: string;
-  /** Whether the app's signature is appended when this template is inserted.
-   * A column rather than a search for the signature's text in the body: a
-   * template that happens to quote part of the sign-off must not silently lose
-   * its real one. */
+  /** Legacy setting kept for stored templates. Signatures now always apply at send time. */
   includeSignature: boolean;
   isActive: boolean;
   sortOrder: number;
@@ -201,9 +199,7 @@ export const applyTemplateInputSchema = z.object({
 export type ApplyTemplateInput = z.infer<typeof applyTemplateInputSchema>;
 
 export interface AppliedTemplate {
-  /** The body as it would be sent: variables filled, signature already appended
-   * if the template asked for one. Nothing is added at send time, so what the
-   * operator reads in the box is what leaves. */
+  /** Variables filled. The signature is added separately at send time. */
   bodyText: string;
   /** Still standing after rendering. A non-empty list blocks sending. */
   unresolved: string[];

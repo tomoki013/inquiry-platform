@@ -2,6 +2,7 @@ import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test"
 import type { CreateReportResult, ReportDetail } from "@tomokichi/admin-contracts";
 import { INTERNAL_ORIGIN, INTERNAL_PATHS, MAX_ATTACHMENT_BYTES } from "@tomokichi/admin-contracts";
 import { beforeEach, describe, expect, it } from "vitest";
+import { expireReportEvidence } from "../src/domain/report-retention";
 import AdminCore from "../src/index";
 import { appActor, expectOk, type Harness, harness, testEnv } from "./harness";
 
@@ -69,6 +70,70 @@ describe("report evidence", () => {
 
     // And uploading it is part of the report's history.
     expect(detail.events.map((event) => event.eventType)).toContain("attachment_added");
+  });
+
+  it("does not duplicate evidence or renew its receipt date on retry", async () => {
+    const first = await put(INTERNAL_PATHS.reportAttachment(reportId), PNG);
+    const created = (await first.json()) as { attachmentId: string };
+    const before = expectOk<ReportDetail>((await h.reports.detail(reportId)) as never);
+    const second = await put(INTERNAL_PATHS.reportAttachment(reportId), PNG);
+    expect(second.status).toBe(200);
+    expect(((await second.json()) as { attachmentId: string }).attachmentId).toBe(
+      created.attachmentId,
+    );
+    const after = expectOk<ReportDetail>((await h.reports.detail(reportId)) as never);
+    expect(after.attachments).toEqual(before.attachments);
+    expect(after.events.filter((e) => e.eventType === "attachment_added")).toHaveLength(1);
+  });
+
+  it("denies expired evidence and deletes only expired report bytes", async () => {
+    const first = await put(INTERNAL_PATHS.reportAttachment(reportId), PNG);
+    const { attachmentId } = (await first.json()) as { attachmentId: string };
+    const key = `reports/${reportId}/${attachmentId}`;
+    await testEnv.DB.prepare("UPDATE report_attachments SET created_at = ? WHERE id = ?")
+      .bind(new Date(Date.now() - 31 * 86400_000).toISOString(), attachmentId)
+      .run();
+    await testEnv.PRIVATE_FILES.put("support/keep", PNG);
+    const response = await core.fetch(
+      new Request(`${INTERNAL_ORIGIN}${INTERNAL_PATHS.reportAttachment(reportId, attachmentId)}`),
+    );
+    expect(response.status).toBe(410);
+    const recent = await put(
+      INTERNAL_PATHS.reportAttachment(reportId),
+      new Uint8Array([...PNG, 5]),
+    );
+    const recentId = ((await recent.json()) as { attachmentId: string }).attachmentId;
+    await expireReportEvidence(testEnv);
+    expect(await testEnv.PRIVATE_FILES.get(key)).toBeNull();
+    expect(await testEnv.PRIVATE_FILES.head(`reports/${reportId}/${recentId}`)).not.toBeNull();
+    expect(await testEnv.PRIVATE_FILES.head("support/keep")).not.toBeNull();
+    const row = await testEnv.DB.prepare("SELECT expired_at FROM report_attachments WHERE id = ?")
+      .bind(attachmentId)
+      .first();
+    expect(row?.expired_at).toBeTruthy();
+    await expireReportEvidence(testEnv);
+  });
+
+  it("keeps the original upload date when transferring delayed evidence", async () => {
+    const date = new Date(Date.now() - 29 * 86400_000).toISOString();
+    const response = await core.fetch(
+      new Request(`${INTERNAL_ORIGIN}${INTERNAL_PATHS.reportAttachment(reportId)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "image/png", "X-Evidence-Created-At": date },
+        body: PNG,
+      }),
+    );
+    expect(response.status).toBe(201);
+    const detail = expectOk<ReportDetail>((await h.reports.detail(reportId)) as never);
+    expect(detail.attachments[0]?.createdAt).toBe(date);
+    const expired = await core.fetch(
+      new Request(`${INTERNAL_ORIGIN}${INTERNAL_PATHS.reportAttachment(reportId)}`, {
+        method: "PUT",
+        headers: { "X-Evidence-Created-At": new Date(Date.now() - 31 * 86400_000).toISOString() },
+        body: PNG,
+      }),
+    );
+    expect(expired.status).toBe(410);
   });
 
   it("serves it back with no-store and a nosniff header, never a public URL", async () => {

@@ -128,6 +128,8 @@ export const listSupportThreadsInputSchema = z
 export type ListSupportThreadsInput = z.infer<typeof listSupportThreadsInputSchema>;
 
 export interface SupportThreadSummary {
+  reportId?: string;
+  mailSubject?: string;
   id: string;
   appId?: string;
   appSlug?: string;

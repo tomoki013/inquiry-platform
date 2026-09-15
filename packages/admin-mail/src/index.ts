@@ -15,7 +15,7 @@
 export type MailFailureCode = "NOT_CONFIGURED" | "REJECTED" | "TRANSPORT_ERROR";
 
 export type MailResult =
-  | { ok: true; providerMessageId?: string }
+  | { ok: true; providerMessageId?: string; transportId?: string }
   | { ok: false; code: MailFailureCode /** For the log, never for the screen. */; detail: string };
 
 export interface MailAddress {
@@ -31,6 +31,8 @@ export interface BaseMail {
   /** The source of truth for every mail this system sends. HTML, where a
    * provider needs it, is derived from this and never edited separately. */
   text: string;
+  /** The trailing signature in text, rendered as a separate HTML signature block. */
+  signatureText?: string;
   /** Deduplicates a retried send at the provider, on top of Admin Core's own
    * check. Two layers because neither alone survives every failure mode. */
   idempotencyKey: string;
@@ -49,6 +51,7 @@ export interface MailProvider {
    * is disabled. */
   readonly configured: boolean;
   readonly name: string;
+  resolveMessageId?(transportId: string): Promise<string | undefined>;
   sendTransactional(mail: BaseMail): Promise<MailResult>;
   sendSupportReply(mail: SupportReplyMail): Promise<MailResult>;
   sendAdminNotification(mail: BaseMail): Promise<MailResult>;

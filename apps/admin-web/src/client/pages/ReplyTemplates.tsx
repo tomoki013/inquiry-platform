@@ -209,14 +209,7 @@ function TemplateForm({
       </p>
 
       <div className="flex flex-wrap items-center gap-4">
-        <label className="flex items-center gap-2 text-xs text-ink-soft">
-          <input
-            type="checkbox"
-            checked={value.includeSignature}
-            onChange={(event) => onChange({ ...value, includeSignature: event.target.checked })}
-          />
-          署名を付ける
-        </label>
+        <p className="text-xs text-ink-soft">署名はすべてのメールに送信時に自動挿入されます。</p>
         <label className="flex items-center gap-2 text-xs text-ink-soft">
           <input
             type="checkbox"

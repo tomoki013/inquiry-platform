@@ -254,3 +254,25 @@ describe("internal notes", () => {
     expect(after.lastMessageAt).toBe(before.lastMessageAt);
   });
 });
+
+it("opens the canonical conversation from an old merged URL and hides the old inbox entry", async () => {
+  const first = await h.support.ingestInboundEmail(inbound(), { type: "email" });
+  const second = await h.support.ingestInboundEmail(
+    inbound({ messageId: "<orphan@example.com>" }),
+    { type: "email" },
+  );
+  if (!first.ok || !second.ok) throw new Error("ingest failed");
+  await h.db.batch([
+    h.db
+      .prepare("UPDATE support_messages SET thread_id=? WHERE thread_id=?")
+      .bind(first.value.threadId, second.value.threadId),
+    h.db
+      .prepare("INSERT INTO support_thread_redirects VALUES (?,?,?)")
+      .bind(second.value.threadId, first.value.threadId, new Date().toISOString()),
+  ]);
+  const old = await h.support.detail(second.value.threadId);
+  expect(old.ok && old.value.id).toBe(first.value.threadId);
+  expect(old.ok && old.value.messages.length).toBe(2);
+  const inbox = await h.support.list({});
+  expect(inbox.ok && inbox.value.total).toBe(1);
+});

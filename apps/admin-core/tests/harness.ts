@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import { env } from "cloudflare:test";
+import type { RemeetModerationApi } from "@tomokichi/admin-contracts";
 import type { MailProvider, MailResult, SupportReplyMail } from "@tomokichi/admin-mail";
 import { AppRepository } from "../src/db/apps";
 import { AuditRepository } from "../src/db/audit";
@@ -74,14 +75,16 @@ export async function migrate(): Promise<void> {
  */
 export async function reset(): Promise<void> {
   const tables = [
+    "support_thread_redirects",
     "support_reply_sends",
     "support_drafts",
     "support_attachments",
     "support_messages",
-    "support_threads",
+    "report_operations",
     "report_attachments",
     "report_events",
     "reports",
+    "support_threads",
     "reply_templates",
     "app_mail_settings",
     "app_links",
@@ -139,7 +142,9 @@ export interface Harness {
   db: D1Database;
 }
 
-export async function harness(options: { mail?: FakeMailProvider } = {}): Promise<Harness> {
+export async function harness(
+  options: { mail?: FakeMailProvider; moderation?: RemeetModerationApi } = {},
+): Promise<Harness> {
   await migrate();
   const db = testEnv.DB;
   const appRepo = new AppRepository(db);
@@ -150,27 +155,38 @@ export async function harness(options: { mail?: FakeMailProvider } = {}): Promis
   const mail = options.mail ?? new FakeMailProvider();
   const supportService = new SupportService(db, supportRepo, appRepo, auditRepo);
 
+  const replyService = new ReplyService(
+    db,
+    supportRepo,
+    supportService,
+    templateRepo,
+    appRepo,
+    auditRepo,
+    mail,
+    {
+      supportEmail: "support@tmkch.io",
+      fromName: "Tomokichi Studio Support",
+      defaultSupportUrl: "https://tmkch.io/support",
+    },
+  );
+
   return {
     db,
     mail,
     audit: auditRepo,
     apps: new AppService(db, appRepo, auditRepo),
-    reports: new ReportService(db, reportRepo, appRepo, auditRepo, "test-pepper"),
-    support: supportService,
-    reply: new ReplyService(
+    reports: new ReportService(
       db,
-      supportRepo,
-      supportService,
-      templateRepo,
+      reportRepo,
       appRepo,
       auditRepo,
-      mail,
-      {
-        supportEmail: "support@tmkch.io",
-        fromName: "Tomokichi Studio Support",
-        defaultSupportUrl: "https://tmkch.io/support",
-      },
+      "test-pepper",
+      supportRepo,
+      replyService,
+      options.moderation,
     ),
+    support: supportService,
+    reply: replyService,
     dashboard: new DashboardService(reportRepo, supportRepo, appRepo, auditRepo),
   };
 }

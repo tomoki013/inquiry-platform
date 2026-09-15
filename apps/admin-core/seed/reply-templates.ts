@@ -253,20 +253,5 @@ export const notSeededCategories: ReplyTemplateCategory[] = [
   "other",
 ];
 
-/**
- * The Studio-wide signature.
- *
- * Appended by `applyReplyTemplate` when a template's `include_signature` is set
- * — once, at insert time, so what the operator reads in the composer is what
- * leaves. An app can override it in `app_mail_settings`.
- */
-export const seedSignature = [
-  "────────────────────────",
-  "Tomokichi Studio",
-  "髙木 友喜",
-  "",
-  "Web: https://tmkch.io",
-  "Email: support@tmkch.io",
-  "TEL: 080-6648-1475",
-  "────────────────────────",
-].join("\n");
+/** Shared signature, appended only when sending. */
+export { DEFAULT_MAIL_SIGNATURE as seedSignature } from "../../../packages/admin-contracts/src/signature.ts";

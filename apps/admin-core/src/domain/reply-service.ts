@@ -10,6 +10,7 @@ import type {
 import {
   applyTemplateInputSchema,
   createReplyTemplateInputSchema,
+  DEFAULT_MAIL_SIGNATURE,
   fail,
   listReplyTemplatesInputSchema,
   newId,
@@ -73,7 +74,12 @@ export class ReplyService {
   async getDraft(threadId: string): Promise<Result<SupportDraft | null>> {
     try {
       if (!(await this.support.findThread(threadId))) return notFound("問い合わせ");
-      return ok(await this.support.draft(threadId));
+      const draft = await this.support.draft(threadId);
+      return ok(
+        draft
+          ? { ...draft, bodyText: await this.withoutSignature(threadId, draft.bodyText) }
+          : null,
+      );
     } catch (error) {
       return internalFailure("reply.getDraft", error);
     }
@@ -92,7 +98,12 @@ export class ReplyService {
     if (!parsed.success) return validationFailure(parsed.error);
     try {
       if (!(await this.support.findThread(parsed.data.threadId))) return notFound("問い合わせ");
-      return ok(await this.support.saveDraft(parsed.data.threadId, parsed.data.bodyText));
+      return ok(
+        await this.support.saveDraft(
+          parsed.data.threadId,
+          await this.withoutSignature(parsed.data.threadId, parsed.data.bodyText),
+        ),
+      );
     } catch (error) {
       return internalFailure("reply.saveDraft", error);
     }
@@ -197,15 +208,7 @@ export class ReplyService {
     }
   }
 
-  /**
-   * Renders a template for one thread, and stops there.
-   *
-   * The signature is appended **here**, once, if the template says so — not at
-   * send time. So what the operator reads in the composer is exactly the text
-   * that will leave, and a template that already ends with a sign-off does not
-   * get a second one bolted on. Nothing is written: the composer puts the text
-   * in the box and a person decides.
-   */
+  /** Render only the editable body. Every outgoing mail gets its signature at send time. */
   async applyTemplate(raw: unknown): Promise<Result<AppliedTemplate>> {
     const parsed = applyTemplateInputSchema.safeParse(raw);
     if (!parsed.success) return validationFailure(parsed.error);
@@ -224,17 +227,17 @@ export class ReplyService {
         supportUrl: app?.support_url ?? this.addresses.defaultSupportUrl,
       });
 
-      let body = rendered;
-      if (template.includeSignature) {
-        const signature = await this.templates.signature(thread.app_id ?? undefined);
-        if (signature && signature.trim().length > 0) body = `${rendered}\n\n${signature}`;
-      }
+      const body = await this.withoutSignature(thread.id, rendered);
 
       return ok({
         bodyText: body,
         unresolved: unresolvedVariables(body),
         subject: replySubjectFor(
-          { subject: thread.subject, source: thread.source as never },
+          {
+            subject: thread.subject,
+            source: thread.source as never,
+            mailSubject: thread.mail_subject ?? undefined,
+          },
           template.subject,
         ),
       });
@@ -276,9 +279,57 @@ export class ReplyService {
     }
   }
 
+  private async withoutSignature(threadId: string, text: string): Promise<string> {
+    const thread = await this.support.findThread(threadId);
+    const configured = await this.templates.signature(thread?.app_id ?? undefined);
+    const legacy = [
+      "────────────────────────",
+      "Tomokichi Studio",
+      "髙木 友喜",
+      "",
+      "Web: https://tmkch.io",
+      "Email: support@tmkch.io",
+      "TEL: 080-6648-1475",
+      "────────────────────────",
+    ].join("\n");
+    let body = text;
+    for (const signature of [configured, DEFAULT_MAIL_SIGNATURE, legacy]) {
+      if (!signature?.trim()) continue;
+      const ending = `\n\n${signature.trim()}`;
+      while (body.trimEnd().endsWith(ending)) body = body.trimEnd().slice(0, -ending.length);
+    }
+    return body;
+  }
+
+  async refreshMessageIds(threadId?: string): Promise<void> {
+    if (!this.mail.resolveMessageId) return;
+    const { results } = await this.db
+      .prepare(`SELECT id, transport_id FROM support_messages
+      WHERE provider_message_id IS NULL AND transport_id IS NOT NULL
+      ${threadId ? "AND thread_id = ?" : ""} ORDER BY message_id_checked_at ASC, created_at DESC LIMIT 50`)
+      .bind(...(threadId ? [threadId] : []))
+      .all<{ id: string; transport_id: string }>();
+    for (const row of results) {
+      const messageId = await this.mail.resolveMessageId(row.transport_id);
+      await this.db
+        .prepare("UPDATE support_messages SET message_id_checked_at = ? WHERE id = ?")
+        .bind(nowIso(), row.id)
+        .run();
+      if (messageId)
+        await this.db
+          .prepare("UPDATE support_messages SET provider_message_id = ? WHERE id = ?")
+          .bind(messageId, row.id)
+          .run();
+    }
+  }
+
   // ---- sending -----------------------------------------------------------
 
-  async send(raw: unknown, actor: ActorRef): Promise<Result<SupportThreadDetail>> {
+  async send(
+    raw: unknown,
+    actor: ActorRef,
+    options: { preserveDraft?: boolean; initialMessage?: boolean } = {},
+  ): Promise<Result<SupportThreadDetail>> {
     const parsed = sendSupportReplyInputSchema.safeParse(raw);
     if (!parsed.success) return validationFailure(parsed.error);
     const input = parsed.data;
@@ -322,6 +373,7 @@ export class ReplyService {
         return fail("MAIL_ERROR", "メール送信機能が設定されていません。");
       }
 
+      await this.refreshMessageIds(input.threadId);
       const { references, inReplyTo } = await this.support.threadReferences(input.threadId);
       const from = `${this.addresses.fromName} <${this.addresses.supportEmail}>`;
       // The subject is resolved here, from the thread and — for a thread that
@@ -329,17 +381,36 @@ export class ReplyService {
       // request carried that template's id and never its text, so a tampered
       // one still cannot choose what a reply says it is about.
       const template = input.templateId ? await this.templates.find(input.templateId) : undefined;
-      const subject = replySubjectFor(
-        { subject: thread.subject, source: thread.source as never },
-        template?.subject,
-      );
+      const subject = options.initialMessage
+        ? thread.subject
+        : replySubjectFor(
+            {
+              subject: thread.subject,
+              source: thread.source as never,
+              mailSubject: thread.mail_subject ?? undefined,
+            },
+            template?.subject,
+          );
 
+      const signature =
+        (await this.templates.signature(thread.app_id ?? undefined))?.trim() ||
+        DEFAULT_MAIL_SIGNATURE;
+      const body = await this.withoutSignature(input.threadId, input.bodyText);
+      if (!body.trim()) return fail("VALIDATION_ERROR", "返信本文を入力してください。");
+      const linkedReport = await this.db
+        .prepare("SELECT external_report_id FROM reports WHERE support_thread_id=? LIMIT 1")
+        .bind(input.threadId)
+        .first<{ external_report_id: string }>();
+      const receiptLine = linkedReport ? `受付ID: ${linkedReport.external_report_id}` : undefined;
+      const reportFooter = receiptLine && !body.includes(receiptLine) ? `\n\n${receiptLine}` : "";
+      const text = `${body}${reportFooter}\n\n${signature}`;
       const sent = await this.mail.sendSupportReply({
         to: thread.requester_email,
         from,
         replyTo: this.addresses.supportEmail,
         subject,
-        text: input.bodyText,
+        text,
+        signatureText: signature,
         inReplyTo,
         references,
         idempotencyKey: input.idempotencyKey,
@@ -371,23 +442,29 @@ export class ReplyService {
       const at = nowIso();
       const messageId = newId();
       const statements: D1PreparedStatement[] = [
+        this.db
+          .prepare(
+            "UPDATE support_threads SET mail_subject = COALESCE(mail_subject, ?) WHERE id = ?",
+          )
+          .bind(subject, input.threadId),
         this.support.insertMessageStatement({
           id: messageId,
           threadId: input.threadId,
           direction: "outbound",
           providerMessageId: sent.providerMessageId,
+          transportId: sent.transportId,
           inReplyTo,
           sender: this.addresses.supportEmail,
           recipient: thread.requester_email,
           // The finished text, stored as sent. Never re-rendered from a
           // template later: editing a template must not change what somebody
           // was actually told.
-          bodyText: input.bodyText,
+          bodyText: text,
           at,
         }),
         this.support.touchThreadStatement(input.threadId, "outbound", at),
         this.support.recordSendStatement(input.idempotencyKey, input.threadId, messageId),
-        this.support.deleteDraftStatement(input.threadId),
+        ...(options.preserveDraft ? [] : [this.support.deleteDraftStatement(input.threadId)]),
         this.audit.statement({
           actor,
           action: "support.reply_sent",

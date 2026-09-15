@@ -1,3 +1,4 @@
+import type { RemeetModerationApi } from "@tomokichi/admin-contracts";
 /**
  * Everything Admin Core is given.
  *
@@ -7,6 +8,7 @@
  */
 export interface AdminCoreEnv {
   DB: D1Database;
+  REMEET_MODERATION?: RemeetModerationApi;
   PRIVATE_FILES: R2Bucket;
 
   SUPPORT_EMAIL: string;

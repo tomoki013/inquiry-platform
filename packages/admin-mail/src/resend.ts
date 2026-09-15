@@ -66,7 +66,7 @@ export class ResendMailProvider implements MailProvider {
           reply_to: mail.replyTo,
           subject: mail.subject,
           text: mail.text,
-          html: plainTextToSafeHtml(mail.text),
+          html: plainTextToSafeHtml(mail.text, mail.signatureText),
           ...(headers && Object.keys(headers).length > 0 ? { headers } : {}),
         }),
       });
@@ -84,16 +84,36 @@ export class ResendMailProvider implements MailProvider {
       return { ok: false, code: "REJECTED", detail: `resend responded ${response.status}` };
     }
 
-    let providerMessageId: string | undefined;
+    let transportId: string | undefined;
     try {
-      const body: unknown = await response.json();
-      const id = (body as { id?: unknown } | null)?.id;
-      if (typeof id === "string") providerMessageId = id;
+      const body = (await response.json()) as { id?: string };
+      if (typeof body.id === "string") transportId = body.id;
     } catch {
-      // Accepted but unparseable. The mail went; we simply cannot record which
-      // one it was, and that must not turn a success into a failure that makes
-      // an operator send it twice.
+      /* Accepted mail must never become a failed send. */
     }
-    return providerMessageId ? { ok: true, providerMessageId } : { ok: true };
+    const providerMessageId = transportId ? await this.resolveMessageId(transportId) : undefined;
+    return {
+      ok: true,
+      ...(transportId ? { transportId } : {}),
+      ...(providerMessageId ? { providerMessageId } : {}),
+    };
+  }
+
+  async resolveMessageId(transportId: string): Promise<string | undefined> {
+    try {
+      const response = await this.fetcher(
+        `https://api.resend.com/emails/${encodeURIComponent(transportId)}`,
+        {
+          headers: { Authorization: `Bearer ${this.apiKey}` },
+        },
+      );
+      if (!response.ok) return undefined;
+      const body = (await response.json()) as { message_id?: unknown };
+      return typeof body.message_id === "string" && /^<[^<>\s]+@[^<>\s]+>$/.test(body.message_id)
+        ? body.message_id
+        : undefined;
+    } catch {
+      return undefined;
+    }
   }
 }

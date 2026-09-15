@@ -13,6 +13,7 @@ import type {
 import { newId, nowIso } from "@tomokichi/admin-contracts";
 
 interface ThreadRow {
+  report_id: string | null;
   id: string;
   app_id: string | null;
   source: string;
@@ -30,6 +31,7 @@ interface ThreadRow {
   requester_email: string;
   requester_name: string | null;
   subject: string;
+  mail_subject: string | null;
   status: string;
   unread_count: number;
   created_at: string;
@@ -64,12 +66,13 @@ interface SupportAttachmentRow {
 }
 
 const SELECT_THREAD = `
-  SELECT t.*, a.slug AS app_slug, a.name AS app_name
+  SELECT t.*, a.slug AS app_slug, a.name AS app_name, (SELECT r.id FROM reports r WHERE r.support_thread_id=t.id LIMIT 1) AS report_id
     FROM support_threads t LEFT JOIN apps a ON a.id = t.app_id`;
 
 function toSummary(row: ThreadRow): SupportThreadSummary {
   return {
     id: row.id,
+    reportId: row.report_id ?? undefined,
     appId: row.app_id ?? undefined,
     appSlug: row.app_slug ?? undefined,
     appName: row.app_name ?? undefined,
@@ -77,6 +80,7 @@ function toSummary(row: ThreadRow): SupportThreadSummary {
     requesterEmail: row.requester_email.length > 0 ? row.requester_email : undefined,
     requesterName: row.requester_name ?? undefined,
     subject: row.subject,
+    mailSubject: row.mail_subject ?? undefined,
     status: row.status as SupportStatus,
     unreadCount: row.unread_count,
     lastMessageAt: row.last_message_at,
@@ -89,7 +93,12 @@ export class SupportRepository {
   constructor(private readonly db: D1Database) {}
 
   async findThread(id: string): Promise<ThreadRow | null> {
-    return await this.db.prepare(`${SELECT_THREAD} WHERE t.id = ?`).bind(id).first<ThreadRow>();
+    return await this.db
+      .prepare(
+        `${SELECT_THREAD} WHERE t.id = ? AND NOT EXISTS (SELECT 1 FROM support_thread_redirects x WHERE x.source_thread_id=t.id)`,
+      )
+      .bind(id)
+      .first<ThreadRow>();
   }
 
   /**
@@ -161,6 +170,7 @@ export class SupportRepository {
     threadId: string;
     direction: SupportDirection;
     providerMessageId?: string;
+    transportId?: string;
     inReplyTo?: string;
     sender?: string;
     recipient?: string;
@@ -171,8 +181,8 @@ export class SupportRepository {
       .prepare(
         `INSERT INTO support_messages
            (id, thread_id, direction, provider_message_id, in_reply_to,
-            sender, recipient, body_text, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            sender, recipient, body_text, created_at, transport_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         values.id,
@@ -184,6 +194,7 @@ export class SupportRepository {
         values.recipient ?? null,
         values.bodyText,
         values.at,
+        values.transportId ?? null,
       );
   }
 
@@ -241,7 +252,9 @@ export class SupportRepository {
   }
 
   async list(input: ListSupportThreadsInput): Promise<SupportThreadListPage> {
-    const where: string[] = [];
+    const where: string[] = [
+      "NOT EXISTS (SELECT 1 FROM support_thread_redirects x WHERE x.source_thread_id=t.id)",
+    ];
     const values: unknown[] = [];
     if (input.appId) {
       where.push("t.app_id = ?");
@@ -277,11 +290,16 @@ export class SupportRepository {
   }
 
   async detail(threadId: string): Promise<SupportThreadDetail | null> {
+    const redirect = await this.db
+      .prepare("SELECT target_thread_id FROM support_thread_redirects WHERE source_thread_id=?")
+      .bind(threadId)
+      .first<{ target_thread_id: string }>();
+    if (redirect) threadId = redirect.target_thread_id;
     const row = await this.findThread(threadId);
     if (!row) return null;
 
     const { results: messages } = await this.db
-      .prepare("SELECT * FROM support_messages WHERE thread_id = ? ORDER BY created_at, id")
+      .prepare("SELECT * FROM support_messages WHERE thread_id = ? ORDER BY created_at, rowid")
       .bind(threadId)
       .all<MessageRow>();
 
@@ -335,13 +353,14 @@ export class SupportRepository {
         `SELECT provider_message_id, direction FROM support_messages
           WHERE thread_id = ? AND provider_message_id IS NOT NULL
             AND direction IN ('inbound','outbound')
-          ORDER BY created_at, id`,
+          ORDER BY created_at, rowid`,
       )
       .bind(threadId)
       .all<{ provider_message_id: string; direction: string }>();
 
-    const references = results.map((row) => row.provider_message_id);
-    const lastInbound = [...results].reverse().find((row) => row.direction === "inbound");
+    const valid = results.filter((row) => /^<[^<>\s]+@[^<>\s]+>$/.test(row.provider_message_id));
+    const references = valid.map((row) => row.provider_message_id).slice(-50);
+    const lastInbound = [...valid].reverse().find((row) => row.direction === "inbound");
     return {
       references,
       inReplyTo: lastInbound?.provider_message_id ?? references[references.length - 1],
@@ -351,7 +370,7 @@ export class SupportRepository {
   async countOpen(): Promise<number> {
     const row = await this.db
       .prepare(
-        "SELECT COUNT(*) AS total FROM support_threads WHERE status IN ('open','pending_user')",
+        "SELECT COUNT(*) AS total FROM support_threads WHERE status IN ('open','pending_user') AND id NOT IN (SELECT source_thread_id FROM support_thread_redirects)",
       )
       .first<{ total: number }>();
     return row?.total ?? 0;
@@ -359,7 +378,9 @@ export class SupportRepository {
 
   async countAll(): Promise<number> {
     const row = await this.db
-      .prepare("SELECT COUNT(*) AS total FROM support_threads")
+      .prepare(
+        "SELECT COUNT(*) AS total FROM support_threads WHERE id NOT IN (SELECT source_thread_id FROM support_thread_redirects)",
+      )
       .first<{ total: number }>();
     return row?.total ?? 0;
   }

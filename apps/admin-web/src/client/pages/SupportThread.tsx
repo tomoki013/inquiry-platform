@@ -7,7 +7,7 @@ import type {
 } from "@tomokichi/admin-contracts";
 import { supportStatuses } from "@tomokichi/admin-contracts";
 import type { ReactNode } from "react";
-import { useParams } from "react-router";
+import { Link, Navigate, useParams } from "react-router";
 import { Card, DataState, inputClass, Page, StatusPill, Timestamp } from "../components/primitives";
 import { ReplyComposer } from "../components/ReplyComposer";
 import { api } from "../lib/api";
@@ -57,6 +57,7 @@ export function SupportThread() {
   });
 
   const data = thread.data;
+  if (data && data.id !== id) return <Navigate to={`/support/${data.id}`} replace />;
 
   return (
     <Page title={data?.subject ?? "問い合わせ"}>
@@ -64,6 +65,14 @@ export function SupportThread() {
         {data ? (
           <div className="space-y-6">
             <ThreadHeader thread={data} />
+            {data.reportId ? (
+              <p className="text-sm text-ink-soft">
+                このやり取りは通報に紐付いています。{" "}
+                <Link className="underline" to={`/reports/${data.reportId}`}>
+                  通報と対応履歴を開く
+                </Link>
+              </p>
+            ) : null}
 
             <Card className="flex flex-wrap items-end gap-4 p-4">
               <label className="block">
@@ -103,7 +112,11 @@ export function SupportThread() {
               ))}
             </ol>
 
-            <ReplyComposer thread={data} mailConfigured={session.data?.mailConfigured ?? false} />
+            <ReplyComposer
+              key={data.id}
+              thread={data}
+              mailConfigured={session.data?.mailConfigured ?? false}
+            />
           </div>
         ) : null}
       </DataState>

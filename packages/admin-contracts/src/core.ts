@@ -9,6 +9,7 @@ import type {
 import type { AuditActorType, AuditEntry, ListAuditInput } from "./audit";
 import type { DashboardSummary } from "./dashboard";
 import type { Result } from "./errors";
+import type { ModerationProposal } from "./moderation";
 import type {
   AppliedTemplate,
   ApplyTemplateInput,
@@ -79,6 +80,8 @@ export interface AdminIdentity {
  * than throws — see `errors.ts` for why.
  */
 export interface AdminCoreApi {
+  prepareReportDecision(input: unknown, actor: ActorRef): Promise<Result<ModerationProposal>>;
+  completeReportDecision(input: unknown, actor: ActorRef): Promise<Result<ReportDetail>>;
   // ---- Reports ----------------------------------------------------------
   createReport(input: CreateReportInput, actor: ActorRef): Promise<Result<CreateReportResult>>;
   listReports(input: ListReportsInput): Promise<Result<ReportListPage>>;

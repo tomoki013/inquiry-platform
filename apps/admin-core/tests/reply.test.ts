@@ -5,6 +5,7 @@ import type {
   SupportDraft,
   SupportThreadDetail,
 } from "@tomokichi/admin-contracts";
+import { DEFAULT_MAIL_SIGNATURE } from "@tomokichi/admin-contracts";
 import { beforeEach, describe, expect, it } from "vitest";
 import { admin, expectOk, FakeMailProvider, type Harness, harness, seedApp } from "./harness";
 
@@ -139,7 +140,7 @@ describe("templates", () => {
     if (!again.ok) expect(again.error.code).toBe("CONFLICT");
   });
 
-  it("fills the variables it knows and appends the signature once", async () => {
+  it("fills variables without putting the signature in the draft", async () => {
     await h.reply.setSettings({ appId: null, signatureText: "Tomokichi Studio" }, admin);
     const template = await makeTemplate();
     // A name the person actually typed.
@@ -154,7 +155,7 @@ describe("templates", () => {
 
     expect(applied.bodyText).toContain("ともきち様");
     expect(applied.bodyText).toContain("いつもremeetをご利用");
-    expect(applied.bodyText.match(/Tomokichi Studio/g)).toHaveLength(1);
+    expect(applied.bodyText).not.toContain("Tomokichi Studio");
     // The one step nobody can pre-write is still standing, and blocks sending.
     expect(applied.unresolved).toEqual(["answerToInquiry"]);
   });
@@ -201,7 +202,7 @@ describe("templates", () => {
     await h.reply.updateTemplate(template.id, { body: "書き換えた本文" }, admin);
 
     const thread = expectOk<SupportThreadDetail>((await h.support.detail(threadId)) as never);
-    expect(thread.messages.at(-1)?.bodyText).toBe("元の本文");
+    expect(thread.messages.at(-1)?.bodyText).toBe(`元の本文\n\n${DEFAULT_MAIL_SIGNATURE}`);
   });
 });
 
@@ -273,7 +274,7 @@ describe("sendSupportReply", () => {
       },
       admin,
     );
-    expect(h.mail.sent.at(-1)?.subject).toBe("不具合のご報告について");
+    expect(h.mail.sent.at(-1)?.subject).toBe("Re: お問い合わせいただいた件について");
   });
 
   /** A template never overrides the subject of a real mail thread: echoing it
@@ -331,7 +332,7 @@ describe("sendSupportReply", () => {
     );
 
     expect(updated.messages.at(-1)?.direction).toBe("outbound");
-    expect(updated.messages.at(-1)?.bodyText).toBe("送信本文");
+    expect(updated.messages.at(-1)?.bodyText).toBe(`送信本文\n\n${DEFAULT_MAIL_SIGNATURE}`);
     expect(updated.unreadCount).toBe(0);
 
     const draft = expectOk<SupportDraft | null>((await h.reply.getDraft(threadId)) as never);
@@ -470,5 +471,42 @@ describe("with no mail provider configured", () => {
       expect(result.error.code).toBe("MAIL_ERROR");
       expect(result.error.message).toContain("設定されていません");
     }
+  });
+});
+
+describe("automatic signatures and conversation continuity", () => {
+  it("adds a signature to handwritten replies and ignores the legacy template switch", async () => {
+    const template = await makeTemplate({ body: "本文", includeSignature: false });
+    const sent = await h.reply.send(
+      { threadId, bodyText: "本文", templateId: template.id, idempotencyKey: KEY },
+      admin,
+    );
+    expect(sent.ok).toBe(true);
+    expect(h.mail.sent[0]?.text).toBe(`本文\n\n${DEFAULT_MAIL_SIGNATURE}`);
+  });
+  it("removes an existing automatic signature from drafts and sends it only once", async () => {
+    const original = `書きかけ\n\n${DEFAULT_MAIL_SIGNATURE}`;
+    await h.reply.saveDraft({ threadId, bodyText: original });
+    const draft = await h.reply.getDraft(threadId);
+    expect(draft.ok && draft.value?.bodyText).toBe("書きかけ");
+    await h.reply.send({ threadId, bodyText: original, idempotencyKey: KEY }, admin);
+    expect(h.mail.sent[0]?.text).toBe(original);
+  });
+  it("reopens a resolved conversation when the customer replies", async () => {
+    await h.reply.send({ threadId, bodyText: "本文", idempotencyKey: KEY }, admin);
+    await h.support.setStatus({ threadId, status: "resolved" }, admin);
+    const incoming = await h.support.ingestInboundEmail(
+      {
+        from: "someone@example.com",
+        subject: "Re: アプリで共有できません",
+        bodyText: "追加の質問",
+        messageId: "<followup@example.com>",
+        inReplyTo: "<sent-1@test>",
+      },
+      { type: "email" },
+    );
+    expect(incoming.ok && incoming.value.threadId).toBe(threadId);
+    const detail = await h.support.detail(threadId);
+    expect(detail.ok && detail.value.status).toBe("open");
   });
 });

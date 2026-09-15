@@ -229,12 +229,11 @@ describe("sending", () => {
     );
     await waitFor(() => expect(screen.getByRole("textbox")).toBeInTheDocument());
 
-    await user.type(screen.getByRole("textbox"), "返信します");
-    expect(screen.getByRole("button", { name: "送信" })).toBeDisabled();
-    expect(screen.getByText(/返信先のアドレスがないため送信できません/)).toBeInTheDocument();
-    expect(screen.getByText("返信先なし")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "送信" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "返信" })).not.toBeInTheDocument();
+    expect(screen.getByText("返信先メールアドレスなし")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "運営メモ" })).toHaveAttribute("aria-selected", "true");
 
-    await user.click(screen.getByRole("tab", { name: "運営メモ" }));
     await user.type(screen.getByRole("textbox"), "返信不要の報告");
     expect(screen.getByRole("button", { name: "メモを追加" })).toBeEnabled();
   });
