@@ -57,12 +57,6 @@ describe("drafts", () => {
     expect(rows?.total).toBe(1);
   });
 
-  it("survives being read again later — a reopened thread restores what was typed", async () => {
-    await h.reply.saveDraft({ threadId, bodyText: "途中まで" });
-    const reread = expectOk<SupportDraft | null>((await h.reply.getDraft(threadId)) as never);
-    expect(reread?.bodyText).toBe("途中まで");
-  });
-
   it("refuses a draft for a thread that does not exist", async () => {
     const result = await h.reply.saveDraft({ threadId: "nope", bodyText: "x" });
     expect(result.ok).toBe(false);

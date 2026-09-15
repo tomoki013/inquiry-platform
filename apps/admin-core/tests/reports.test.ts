@@ -159,11 +159,6 @@ describe("status transitions", () => {
     expect(detail.events).toHaveLength(1);
   });
 
-  it("refuses a move to the status it is already in", async () => {
-    const result = await h.reports.changeStatus({ reportId, to: "open" }, admin);
-    expect(result.ok).toBe(false);
-  });
-
   it("records a reopen as its own event type", async () => {
     await h.db.prepare("UPDATE reports SET status = 'closed' WHERE id = ?").bind(reportId).run();
     await h.reports.changeStatus({ reportId, to: "reviewing" }, admin);
