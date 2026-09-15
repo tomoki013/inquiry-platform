@@ -67,6 +67,25 @@ export function registerApiRoutes(app: AdminApi): void {
     ),
   );
 
+  app.post("/api/reports/:id/decision/prepare", async (c) =>
+    respond(
+      c,
+      await c.env.ADMIN_CORE.prepareReportDecision(
+        { ...(await body(c)), reportId: c.req.param("id") },
+        actor(c),
+      ),
+    ),
+  );
+  app.post("/api/reports/:id/decision/complete", async (c) =>
+    respond(
+      c,
+      await c.env.ADMIN_CORE.completeReportDecision(
+        { ...(await body(c)), reportId: c.req.param("id") },
+        actor(c),
+      ),
+    ),
+  );
+
   app.get("/api/reports/:id", async (c) =>
     respond(c, await c.env.ADMIN_CORE.getReport(c.req.param("id"))),
   );

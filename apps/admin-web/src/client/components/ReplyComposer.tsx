@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   AppliedTemplate,
+  AppMailSettings,
   ReplyTemplate,
   SupportDraft,
   SupportThreadDetail,
 } from "@tomokichi/admin-contracts";
-import { replySubjectFor } from "@tomokichi/admin-contracts";
+import { DEFAULT_MAIL_SIGNATURE, replySubjectFor } from "@tomokichi/admin-contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { Dialog } from "./Dialog";
@@ -41,7 +42,7 @@ export function ReplyComposer({
   mailConfigured: boolean;
 }) {
   const client = useQueryClient();
-  const [mode, setMode] = useState<Mode>("reply");
+  const [mode, setMode] = useState<Mode>(thread.requesterEmail ? "reply" : "note");
   const [body, setBody] = useState("");
   const [note, setNote] = useState("");
   const [draftState, setDraftState] = useState<DraftState>("idle");
@@ -62,6 +63,8 @@ export function ReplyComposer({
     null,
   );
   const [confirmReopen, setConfirmReopen] = useState(false);
+  const [sending, setSending] = useState(false);
+  const draftWrite = useRef<Promise<unknown> | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
 
   // One key per composed reply, reused across retries so a double-click or a
@@ -73,6 +76,16 @@ export function ReplyComposer({
     queryKey: ["support-draft", thread.id],
     queryFn: () => api.get<SupportDraft | null>(`/api/support/threads/${thread.id}/draft`),
   });
+
+  const settings = useQuery({
+    queryKey: ["mail-settings"],
+    queryFn: () => api.get<AppMailSettings[]>("/api/support/mail-settings"),
+    enabled: Boolean(thread.requesterEmail),
+  });
+  const signature =
+    settings.data?.find((s) => s.appId === thread.appId)?.signatureText?.trim() ||
+    settings.data?.find((s) => !s.appId)?.signatureText?.trim() ||
+    DEFAULT_MAIL_SIGNATURE;
 
   const templates = useQuery({
     queryKey: ["reply-templates", thread.appId ?? "studio"],
@@ -105,11 +118,13 @@ export function ReplyComposer({
 
   /** Debounced, so a paragraph of typing is one write rather than forty. */
   useEffect(() => {
-    if (loadedDraftFor.current !== thread.id) return;
+    if (loadedDraftFor.current !== thread.id || sending) return;
     if (body === (draft.data?.bodyText ?? "")) return;
-    const timer = setTimeout(() => saveRef.current.mutate(body), DRAFT_DEBOUNCE_MS);
+    const timer = setTimeout(() => {
+      draftWrite.current = saveRef.current.mutateAsync(body).catch(() => undefined);
+    }, DRAFT_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [body, thread.id, draft.data?.bodyText]);
+  }, [body, thread.id, draft.data?.bodyText, sending]);
 
   const applyTemplate = useCallback(
     async (templateId: string) => {
@@ -133,7 +148,8 @@ export function ReplyComposer({
     setBody("");
     setAppliedTemplate(null);
     setDraftState("idle");
-    loadedDraftFor.current = null;
+    loadedDraftFor.current = thread.id;
+    client.setQueryData(["support-draft", thread.id], null);
     setSendError(null);
     client.setQueryData(["support-thread", thread.id], updated);
     void client.invalidateQueries({ queryKey: ["support-draft", thread.id] });
@@ -142,13 +158,18 @@ export function ReplyComposer({
   };
 
   const send = useMutation({
-    mutationFn: (reopenIfResolved: boolean) =>
-      api.post<SupportThreadDetail>(`/api/support/threads/${thread.id}/reply`, {
+    onMutate: () => setSending(true),
+    onSettled: () => setSending(false),
+    mutationFn: async (reopenIfResolved: boolean) => {
+      await draftWrite.current;
+      await saveRef.current.mutateAsync(body);
+      return api.post<SupportThreadDetail>(`/api/support/threads/${thread.id}/reply`, {
         bodyText: body,
         idempotencyKey: idempotencyKey.current,
         reopenIfResolved,
         templateId: appliedTemplate?.id,
-      }),
+      });
+    },
     onSuccess: onSent,
     onError: (error) =>
       setSendError(error instanceof Error ? error.message : "送信できませんでした。"),
@@ -173,16 +194,26 @@ export function ReplyComposer({
 
   return (
     <section className="rounded-lg border border-line bg-surface p-5">
+      {!hasReplyAddress ? (
+        <div className="mb-4 rounded-md bg-line-soft/60 p-4">
+          <p className="text-sm font-medium text-ink">返信先メールアドレスなし</p>
+          <p className="mt-1 text-xs text-ink-soft">
+            メールでの返信はできません。内容を確認し、運営メモに対応を記録できます。
+          </p>
+        </div>
+      ) : null}
       <div role="tablist" aria-label="返信モード" className="mb-4 flex gap-1">
-        <ModeTab active={mode === "reply"} onClick={() => setMode("reply")}>
-          返信
-        </ModeTab>
+        {hasReplyAddress ? (
+          <ModeTab active={mode === "reply"} onClick={() => setMode("reply")}>
+            返信
+          </ModeTab>
+        ) : null}
         <ModeTab active={mode === "note"} onClick={() => setMode("note")}>
           運営メモ
         </ModeTab>
       </div>
 
-      {mode === "reply" ? (
+      {mode === "reply" && hasReplyAddress ? (
         <>
           <dl className="mb-4 grid gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
             <Meta label="宛先">{thread.requesterEmail ?? "返信先なし"}</Meta>
@@ -221,6 +252,11 @@ export function ReplyComposer({
               placeholder="返信を書く"
             />
           </label>
+
+          <div className="mt-4 border-l-2 border-accent pl-4">
+            <p className="mb-2 text-xs text-ink-faint">送信時に自動挿入される署名</p>
+            <p className="text-xs whitespace-pre-wrap text-ink-soft">{signature}</p>
+          </div>
 
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
             <p aria-live="polite" className="text-xs text-ink-faint">

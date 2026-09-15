@@ -33,6 +33,7 @@ interface ReportRow {
   resolution_note: string | null;
   app_slug: string;
   app_name: string;
+  support_thread_id: string | null;
 }
 
 interface EventRow {
@@ -184,10 +185,11 @@ export class ReportRepository {
     originalFilename?: string;
     byteSize: number;
     sha256: string;
+    createdAt?: string;
   }): D1PreparedStatement {
     return this.db
       .prepare(
-        `INSERT INTO report_attachments
+        `INSERT OR IGNORE INTO report_attachments
            (id, report_id, r2_key, content_type, original_filename, byte_size, sha256, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
@@ -199,7 +201,7 @@ export class ReportRepository {
         values.originalFilename ?? null,
         values.byteSize,
         values.sha256,
-        nowIso(),
+        values.createdAt ?? nowIso(),
       );
   }
 
@@ -280,6 +282,7 @@ export class ReportRepository {
 
     return {
       ...toSummary(row),
+      supportThreadId: row.support_thread_id ?? undefined,
       contextExternalId: row.context_external_id ?? undefined,
       contentExternalId: row.content_external_id ?? undefined,
       reporterRefHash: row.reporter_ref_hash ?? undefined,

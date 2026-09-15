@@ -61,10 +61,17 @@ describe("ResendMailProvider", () => {
   });
 
   it("sends the plain text as the body and the idempotency key as a header", async () => {
-    const fetcher = fakeFetch(jsonResponse({ id: "resend-1" }));
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: "resend-1" }))
+      .mockResolvedValueOnce(jsonResponse({ message_id: "<actual@resend.dev>" }));
     const result = await new ResendMailProvider("key", fetcher as never).sendSupportReply(mail);
 
-    expect(result).toEqual({ ok: true, providerMessageId: "resend-1" });
+    expect(result).toEqual({
+      ok: true,
+      transportId: "resend-1",
+      providerMessageId: "<actual@resend.dev>",
+    });
     const [, init] = fetcher.mock.calls[0] as [string, RequestInit];
     expect((init.headers as Record<string, string>)["Idempotency-Key"]).toBe("idem-1234567890");
 
@@ -162,4 +169,21 @@ describe("plainTextToSafeHtml", () => {
     expect(plainTextToSafeHtml("a\nb")).toContain("a\nb");
     expect(plainTextToSafeHtml("a\nb")).toContain("white-space:pre-wrap");
   });
+});
+
+it("keeps an accepted send successful when Message-ID lookup fails", async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(jsonResponse({ id: "accepted" }))
+    .mockRejectedValueOnce(new Error("offline"));
+  const provider = new ResendMailProvider("key", fetcher);
+  expect(await provider.sendSupportReply(mail)).toEqual({ ok: true, transportId: "accepted" });
+});
+
+it("escapes the signature and renders it separately without duplicating it", () => {
+  const signature = "Studio <img src=x>\n髙木友喜 / Tomoki Takagi";
+  const html = plainTextToSafeHtml(`本文\n\n${signature}`, signature);
+  expect(html).toContain('role="presentation"');
+  expect(html).not.toContain("<img");
+  expect(html.match(/Tomoki Takagi/g)).toHaveLength(1);
 });

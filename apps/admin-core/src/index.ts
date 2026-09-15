@@ -38,6 +38,7 @@ import { DashboardService } from "./domain/dashboard-service";
 import { internalFailure, validationFailure } from "./domain/failures";
 import { sha256Hex } from "./domain/identity";
 import { ReplyService } from "./domain/reply-service";
+import { expireReportEvidence } from "./domain/report-retention";
 import { ReportService } from "./domain/report-service";
 import { SupportService } from "./domain/support-service";
 import type { AdminCoreEnv } from "./env";
@@ -67,6 +68,13 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
     return this.cached;
   }
 
+  prepareReportDecision(input: unknown, actor: ActorRef) {
+    return this.services.reports.prepareDecision(input, actor);
+  }
+  completeReportDecision(input: unknown, actor: ActorRef) {
+    return this.services.reports.completeDecision(input, actor);
+  }
+
   // ---- Reports ----------------------------------------------------------
 
   createReport(input: unknown, actor: ActorRef): Promise<Result<CreateReportResult>> {
@@ -90,7 +98,11 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
 
   // ---- Support ----------------------------------------------------------
 
-  ingestInboundEmail(input: unknown, actor: ActorRef): Promise<Result<IngestInboundEmailResult>> {
+  async ingestInboundEmail(
+    input: unknown,
+    actor: ActorRef,
+  ): Promise<Result<IngestInboundEmailResult>> {
+    await this.services.reply.refreshMessageIds();
     return this.services.support.ingestInboundEmail(input, actor);
   }
   createSupportThread(input: unknown, actor: ActorRef): Promise<Result<SupportThreadDetail>> {
@@ -214,6 +226,12 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
    * all, and adding a shared secret between two Workers in one account would be
    * a second thing to rotate for no additional guarantee.
    */
+  async scheduled(): Promise<void> {
+    await this.services.reports.retryReceipts();
+    await this.services.reply.refreshMessageIds();
+    await expireReportEvidence(this.env);
+  }
+
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const files = new FileStore(this.env.PRIVATE_FILES);
@@ -227,7 +245,17 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
       const body = await readBounded(request);
       if (!body) return json({ error: "TOO_LARGE" }, 413);
 
-      const attachmentId = newId();
+      const suppliedDate = request.headers.get("X-Evidence-Created-At");
+      const created = suppliedDate ? Date.parse(suppliedDate) : Date.now();
+      if (!Number.isFinite(created) || created > Date.now())
+        return json({ error: "INVALID_DATE" }, 400);
+      if (Date.now() >= created + 30 * 86400_000) return json({ error: "EXPIRED" }, 410);
+      const attachmentId = await sha256Hex(
+        new TextEncoder().encode(`${reportId}:${await sha256Hex(body)}`),
+      );
+      const existing = await reports.findAttachment(reportId, attachmentId);
+      if (existing)
+        return json({ attachmentId, sha256: existing.sha256, byteSize: existing.byte_size }, 200);
       const key = FileStore.reportKey(reportId, attachmentId);
       const contentType = request.headers.get("Content-Type") ?? "application/octet-stream";
       const filename = request.headers.get(ATTACHMENT_FILENAME_HEADER) ?? undefined;
@@ -242,6 +270,7 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
           originalFilename: filename,
           byteSize: stored.byteSize,
           sha256: stored.sha256,
+          createdAt: new Date(created).toISOString(),
         }),
         reports.eventStatement({ reportId, eventType: "attachment_added" }),
       ]);
@@ -257,6 +286,9 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
         decodeURIComponent(reportDownload[2] as string),
       );
       if (!attachment) return json({ error: "NOT_FOUND" }, 404);
+      if (Date.now() >= Date.parse(attachment.created_at) + 30 * 86400_000) {
+        return json({ error: "EXPIRED" }, 410);
+      }
       return await stream(
         files,
         attachment.r2_key,
@@ -334,15 +366,35 @@ function buildServices(env: AdminCoreEnv) {
 
   const supportService = new SupportService(env.DB, support, apps, audit);
 
-  return {
-    apps: new AppService(env.DB, apps, audit),
-    reports: new ReportService(env.DB, reports, apps, audit, env.HASH_PEPPER),
-    support: supportService,
-    reply: new ReplyService(env.DB, support, supportService, templates, apps, audit, mail, {
+  const replyService = new ReplyService(
+    env.DB,
+    support,
+    supportService,
+    templates,
+    apps,
+    audit,
+    mail,
+    {
       supportEmail: env.SUPPORT_EMAIL,
       fromName: env.SUPPORT_FROM_NAME,
       defaultSupportUrl: env.DEFAULT_SUPPORT_URL,
-    }),
+    },
+  );
+
+  return {
+    apps: new AppService(env.DB, apps, audit),
+    reports: new ReportService(
+      env.DB,
+      reports,
+      apps,
+      audit,
+      env.HASH_PEPPER,
+      support,
+      replyService,
+      env.REMEET_MODERATION,
+    ),
+    support: supportService,
+    reply: replyService,
     dashboard: new DashboardService(reports, support, apps, audit),
     audit,
   };

@@ -39,6 +39,7 @@ export const reportEventTypes = [
   "status_changed",
   "note_added",
   "attachment_added",
+  "attachment_pending",
   "resolution_updated",
   "reopened",
 ] as const;
@@ -68,6 +69,8 @@ export const DETAIL_LIMIT = 2000;
 export const NOTE_LIMIT = 4000;
 export const RESOLUTION_NOTE_LIMIT = 2000;
 
+export const reporterEmailSchema = z.string().trim().email().max(320).optional();
+
 export const createReportInputSchema = z.object({
   /** Slug, not id: the calling backend knows what it is called, not what row
    * Admin gave it. */
@@ -83,8 +86,18 @@ export const createReportInputSchema = z.object({
    * `pseudonymise()` in Admin Core, which the app backends use. */
   reporterRefHash: optionalText(128),
   authorRefHash: optionalText(128),
+  reporterEmail: reporterEmailSchema,
   reasonCode: slugish,
-  detail: optionalText(DETAIL_LIMIT),
+  evidenceExpected: z.boolean().optional(),
+  detail: z
+    .string()
+    .refine(
+      (value) =>
+        Array.from(new Intl.Segmenter("und", { granularity: "grapheme" }).segment(value)).length <=
+        DETAIL_LIMIT,
+    )
+    .transform((value) => value.trim() || undefined)
+    .optional(),
   snapshotText: optionalText(SNAPSHOT_LIMIT),
   priority: z.enum(reportPriorities).default("normal"),
   /** When the person pressed the button, not when this row was written. */
@@ -163,6 +176,7 @@ export interface ReportAttachmentMeta {
 }
 
 export interface ReportDetail extends ReportSummary {
+  supportThreadId?: string;
   contextExternalId?: string;
   contentExternalId?: string;
   reporterRefHash?: string;

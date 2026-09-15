@@ -21,6 +21,7 @@ import type { AppRepository } from "../db/apps";
 import type { AuditRepository } from "../db/audit";
 import type { SupportRepository } from "../db/support";
 import { internalFailure, notFound, validationFailure } from "./failures";
+import { findReportReplyThread } from "./report-threading";
 
 /**
  * Support threads, messages and internal notes.
@@ -43,7 +44,7 @@ export class SupportService {
   /**
    * One inbound email, already parsed and flattened to text by the mail Worker.
    *
-   * Threading is by `Message-ID` only — see `findThreadByHeaders`. Re-delivery
+   * Threading uses Message-ID, with a report ID + sender fallback. Re-delivery
    * of the same message is recognised and answered with the existing ids rather
    * than appending the message twice, because Cloudflare may retry an email
    * Worker and the customer wrote once.
@@ -71,10 +72,9 @@ export class SupportService {
 
       const at = input.receivedAt ?? nowIso();
       const appId = input.appSlug ? (await this.apps.findBySlug(input.appSlug))?.id : undefined;
-      const existingThreadId = await this.support.findThreadByHeaders(
-        input.inReplyTo,
-        input.references,
-      );
+      const existingThreadId =
+        (await this.support.findThreadByHeaders(input.inReplyTo, input.references)) ??
+        (await findReportReplyThread(this.db, input));
 
       const threadId = existingThreadId ?? newId();
       const messageId = newId();
@@ -92,6 +92,13 @@ export class SupportService {
             at,
           }),
         );
+      }
+
+      if (existingThreadId) {
+        const existing = await this.support.findThread(existingThreadId);
+        if (existing?.status === "resolved" || existing?.status === "pending_user") {
+          statements.push(this.support.statusStatement(existingThreadId, "open"));
+        }
       }
 
       statements.push(

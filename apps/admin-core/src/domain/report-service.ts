@@ -12,16 +12,23 @@ import {
   createReportInputSchema,
   fail,
   listReportsInputSchema,
+  type ModerationProposal,
   newId,
   nowIso,
   ok,
+  type RemeetModerationApi,
+  reportDecisionSchema,
   updateReportResolutionInputSchema,
 } from "@tomokichi/admin-contracts";
+import { z } from "zod";
 import type { AppRepository } from "../db/apps";
 import type { AuditRepository } from "../db/audit";
 import type { ReportRepository } from "../db/reports";
+import type { SupportRepository } from "../db/support";
 import { internalFailure, notFound, validationFailure } from "./failures";
 import { pseudonymise } from "./identity";
+import type { ReplyService } from "./reply-service";
+import { reportMailSubject } from "./report-threading";
 
 /**
  * Moderation, as far as the Studio is concerned.
@@ -38,6 +45,9 @@ export class ReportService {
     private readonly apps: AppRepository,
     private readonly audit: AuditRepository,
     private readonly hashPepper: string | undefined,
+    private readonly support: SupportRepository,
+    private readonly reply: ReplyService,
+    private readonly moderation?: RemeetModerationApi,
   ) {}
 
   /**
@@ -55,12 +65,16 @@ export class ReportService {
 
     try {
       const existing = await this.reports.findByExternalId(input.externalReportId);
-      if (existing) return ok({ reportId: existing.id, duplicate: true });
+      if (existing) {
+        await this.sendReceipt(existing.id);
+        return ok({ reportId: existing.id, duplicate: true });
+      }
 
       const app = await this.apps.findBySlug(input.appSlug);
       if (!app) return fail("NOT_FOUND", `アプリ "${input.appSlug}" は登録されていません。`);
 
       const id = newId();
+      const threadId = newId();
       const createdAt = input.reportedAt ?? nowIso();
       const [reporterRefHash, authorRefHash] = await Promise.all([
         input.reporterRefHash
@@ -75,6 +89,21 @@ export class ReportService {
       // at all. D1's `batch` rolls the whole sequence back on a failure, which
       // is the only transaction available here and is enough for this.
       await this.db.batch([
+        this.support.insertThreadStatement({
+          id: threadId,
+          appId: app.id,
+          source: "email",
+          requesterEmail: input.reporterEmail,
+          subject: reportMailSubject(app.name, input.externalReportId),
+          at: createdAt,
+        }),
+        this.support.insertMessageStatement({
+          id: newId(),
+          threadId,
+          direction: "internal_note",
+          bodyText: `通報を受け付けました。受付ID: ${input.externalReportId}`,
+          at: createdAt,
+        }),
         this.reports.insertStatement(input, {
           id,
           appId: app.id,
@@ -82,7 +111,11 @@ export class ReportService {
           authorRefHash,
           createdAt,
         }),
+        this.db.prepare("UPDATE reports SET support_thread_id = ? WHERE id = ?").bind(threadId, id),
         this.reports.eventStatement({ reportId: id, eventType: "created", toStatus: "open" }),
+        ...(input.evidenceExpected
+          ? [this.reports.eventStatement({ reportId: id, eventType: "attachment_pending" })]
+          : []),
         this.audit.statement({
           actor,
           action: "report.created",
@@ -96,6 +129,7 @@ export class ReportService {
         }),
       ]);
 
+      await this.sendReceipt(id);
       return ok({ reportId: id, duplicate: false });
     } catch (error) {
       // A racing duplicate loses the UNIQUE index rather than the check above.
@@ -103,9 +137,143 @@ export class ReportService {
       const existing = await this.reports
         .findByExternalId(input.externalReportId)
         .catch(() => null);
-      if (existing) return ok({ reportId: existing.id, duplicate: true });
+      if (existing) {
+        await this.sendReceipt(existing.id);
+        return ok({ reportId: existing.id, duplicate: true });
+      }
       return internalFailure("report.create", error);
     }
+  }
+
+  async prepareDecision(raw: unknown, actor: ActorRef): Promise<Result<ModerationProposal>> {
+    const parsed = reportDecisionSchema.safeParse(raw);
+    if (!parsed.success) return validationFailure(parsed.error);
+    try {
+      const row = await this.reports.findRow(parsed.data.reportId);
+      if (!row) return notFound("通報");
+      if (!this.moderation || row.app_slug !== "remeet" || !row.content_external_id) {
+        return fail("CONFLICT", "このアプリのコンテンツ操作は設定されていません。");
+      }
+      if (!["open", "reviewing"].includes(row.status))
+        return fail("CONFLICT", "確認中に戻してから操作してください。");
+      const proposal = await this.moderation.prepare({
+        reportId: row.external_report_id,
+        contentId: row.content_external_id,
+        contentType: row.content_type,
+        reunionId: row.context_external_id ?? undefined,
+        reason: row.reason_code,
+        decision: parsed.data.decision,
+        actorId: actor.id ?? "admin",
+      });
+      await this.db
+        .prepare("INSERT INTO report_operations (id,report_id,decision) VALUES (?,?,?)")
+        .bind(proposal.id, row.id, parsed.data.decision)
+        .run();
+      return ok(proposal);
+    } catch (error) {
+      return internalFailure("report.prepareDecision", error);
+    }
+  }
+
+  async completeDecision(raw: unknown, actor: ActorRef): Promise<Result<ReportDetail>> {
+    const parsed = z
+      .object({
+        reportId: z.string().min(1),
+        operationId: z.string().min(1),
+        envelope: z.string().max(4 * 1024 * 1024),
+      })
+      .safeParse(raw);
+    if (!parsed.success) return validationFailure(parsed.error);
+    const input = parsed.data;
+    try {
+      const operation = await this.db
+        .prepare("SELECT * FROM report_operations WHERE id=? AND report_id=?")
+        .bind(input.operationId, input.reportId)
+        .first<{ decision: "delete" | "dismiss"; completed_at: string | null }>();
+      if (!operation) return notFound("操作");
+      if (operation.completed_at) return this.detail(input.reportId);
+      if (!this.moderation) return fail("CONFLICT", "コンテンツ操作は設定されていません。");
+      const row = await this.reports.findRow(input.reportId);
+      if (!row) return notFound("通報");
+      const published = await this.moderation.complete(input.operationId, input.envelope);
+      const status = operation.decision === "delete" ? "actioned" : "closed";
+      const code = operation.decision === "delete" ? "content_deleted" : "no_action";
+      const note =
+        operation.decision === "delete"
+          ? `削除指示を公開しました（revision ${published.revision}）。アプリが受信した際に削除されます。`
+          : `対応なしでクローズしました（revision ${published.revision}）。アプリが受信した際にこの通報による非表示を解除します。`;
+      await this.db.batch([
+        // RPC completions can arrive out of order. Only the newest published
+        // decision may change the current report state.
+        this.db
+          .prepare(`UPDATE reports SET status=?, resolution_code=?, resolution_note=?,
+            updated_at=?, resolved_at=?, moderation_revision=?
+            WHERE id=? AND moderation_revision < ?`)
+          .bind(
+            status,
+            code,
+            note,
+            nowIso(),
+            nowIso(),
+            published.revision,
+            input.reportId,
+            published.revision,
+          ),
+        this.reports.eventStatement({
+          reportId: input.reportId,
+          eventType: "resolution_updated",
+          fromStatus: row.status as ReportDetail["status"],
+          toStatus: status,
+          actorId: actor.id,
+          note,
+        }),
+        this.audit.statement({
+          actor,
+          action: "report.resolution_updated",
+          targetType: "report",
+          targetId: input.reportId,
+          metadata: { resolutionCode: code, revision: published.revision },
+        }),
+        this.db
+          .prepare("UPDATE report_operations SET completed_at=? WHERE id=?")
+          .bind(nowIso(), input.operationId),
+      ]);
+      return this.detail(input.reportId);
+    } catch (error) {
+      return internalFailure("report.completeDecision", error);
+    }
+  }
+
+  async sendReceipt(reportId: string): Promise<void> {
+    try {
+      const row = await this.reports.findRow(reportId);
+      if (!row?.support_thread_id) return;
+      const thread = await this.support.findThread(row.support_thread_id);
+      if (!thread?.requester_email) return;
+      await this.reply.send(
+        {
+          threadId: thread.id,
+          bodyText: `通報を受け付けました。お知らせいただきありがとうございます。\n\n受付ID: ${row.external_report_id}\n\n運営で内容を確認し、必要な対応を行います。追加の情報がある場合は、このメールにご返信ください。`,
+          idempotencyKey: `report-receipt-${reportId}`,
+        },
+        { type: "system", id: "report-receipt" },
+        { preserveDraft: true, initialMessage: true },
+      );
+    } catch (error) {
+      // The report is durable even if receipt lookup or delivery fails.
+      internalFailure("report.sendReceipt", error);
+    }
+  }
+
+  async retryReceipts(): Promise<void> {
+    const { results } = await this.db
+      .prepare(`SELECT r.id FROM reports r
+      JOIN support_threads t ON t.id = r.support_thread_id
+      WHERE t.requester_email <> '' AND t.status = 'open'
+      AND NOT EXISTS (SELECT 1 FROM support_reply_sends s WHERE s.idempotency_key = 'report-receipt-' || r.id)
+      ORDER BY r.created_at LIMIT 25`)
+      .all<{ id: string }>();
+    for (const row of results) await this.sendReceipt(row.id);
   }
 
   async list(raw: unknown): Promise<Result<ReportListPage>> {
@@ -128,7 +296,7 @@ export class ReportService {
   }
 
   /**
-   * The only way a report's status changes.
+   * Non-moderation status changes.
    *
    * Update, history entry and audit line share one batch, so a partially
    * applied move cannot leave a report whose timeline disagrees with its
@@ -150,6 +318,16 @@ export class ReportService {
         return fail(
           "INVALID_STATUS_TRANSITION",
           `「${from}」から「${input.to}」へは変更できません。`,
+        );
+      }
+
+      if (
+        row.app_slug === "remeet" &&
+        ((input.to === "closed" && from !== "actioned") || input.to === "actioned")
+      ) {
+        return fail(
+          "CONFLICT",
+          "コンテンツ操作から削除、または対応なしでクローズを選択してください。",
         );
       }
 

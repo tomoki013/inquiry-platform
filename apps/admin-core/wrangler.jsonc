@@ -9,6 +9,7 @@
   // Worker and `tomokichi-api`. That is what lets this Worker hold the D1 and
   // R2 bindings while Admin Web holds neither.
   "workers_dev": false,
+  "triggers": { "crons": ["*/5 * * * *"] },
 
   "observability": {
     "enabled": true
@@ -23,6 +24,10 @@
     "REPORT_EMAIL": "report@tmkch.io",
     "DEFAULT_SUPPORT_URL": "https://tmkch.io/support"
   },
+
+  "services": [
+    { "binding": "REMEET_MODERATION", "service": "tomokichi-api", "entrypoint": "RemeetModeration" }
+  ],
 
   "d1_databases": [
     {

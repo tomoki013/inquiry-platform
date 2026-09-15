@@ -1,8 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ReportDetail as Report, ReportStatus } from "@tomokichi/admin-contracts";
+import type {
+  ModerationProposal,
+  ReportDetail as Report,
+  ReportStatus,
+  SupportThreadDetail,
+} from "@tomokichi/admin-contracts";
 import { allowedReportTransitions } from "@tomokichi/admin-contracts";
 import { useState } from "react";
 import { useParams } from "react-router";
+import { Dialog } from "../components/Dialog";
 import {
   Button,
   Card,
@@ -12,6 +18,7 @@ import {
   StatusPill,
   Timestamp,
 } from "../components/primitives";
+import { ReplyComposer } from "../components/ReplyComposer";
 import { api } from "../lib/api";
 import { reportStatusLabels } from "../lib/labels";
 
@@ -32,8 +39,6 @@ export function ReportDetail() {
   });
 
   const [note, setNote] = useState("");
-  const [resolutionCode, setResolutionCode] = useState("");
-  const [resolutionNote, setResolutionNote] = useState("");
 
   const onChanged = (updated: Report) => {
     client.setQueryData(["report", id], updated);
@@ -51,11 +56,6 @@ export function ReportDetail() {
       setNote("");
       onChanged(updated);
     },
-  });
-  const setResolution = useMutation({
-    mutationFn: () =>
-      api.post<Report>(`/api/reports/${id}/resolution`, { resolutionCode, resolutionNote }),
-    onSuccess: onChanged,
   });
 
   const data = report.data;
@@ -124,18 +124,37 @@ export function ReportDetail() {
 
             <Section title="証跡">
               {data.attachments.length === 0 ? (
-                <p className="text-sm text-ink-faint">添付はありません。</p>
+                <p className="text-sm text-ink-faint">
+                  {data.events.some((event) => event.eventType === "attachment_pending")
+                    ? Date.now() >= Date.parse(data.createdAt) + 30 * 86400_000
+                      ? "画像の保存期限が切れました。"
+                      : "画像の転送を待っています。時間がかかる場合は通報通知メールも確認してください。"
+                    : "添付はありません。"}
+                </p>
               ) : (
                 <ul className="flex flex-wrap gap-4">
                   {data.attachments.map((attachment) => (
                     <li key={attachment.id} className="w-48">
                       {/* Served through this Worker from the private bucket.
                           There is no public URL for any of these bytes. */}
-                      <img
-                        src={`/api/reports/${data.id}/attachments/${attachment.id}`}
-                        alt="通報された添付画像"
-                        className="w-full rounded-md border border-line object-cover"
-                      />
+                      {Date.now() >= Date.parse(attachment.createdAt) + 30 * 86400_000 ? (
+                        <p className="text-sm text-ink-faint">保存期限が切れました。</p>
+                      ) : (
+                        <img
+                          src={`/api/reports/${data.id}/attachments/${attachment.id}`}
+                          alt="通報された添付画像"
+                          className="w-full rounded-md border border-line object-cover"
+                          onError={(event) => {
+                            event.currentTarget.hidden = true;
+                            event.currentTarget.parentElement
+                              ?.querySelector("[data-image-error]")
+                              ?.removeAttribute("hidden");
+                          }}
+                        />
+                      )}
+                      <p data-image-error hidden role="status">
+                        画像を取得できません。再読み込みしても表示されない場合は通報通知メールを確認してください。
+                      </p>
                       <p className="mt-1 text-xs text-ink-faint">
                         {Math.round(attachment.byteSize / 1024)} KB · {attachment.contentType}
                       </p>
@@ -145,18 +164,29 @@ export function ReportDetail() {
               )}
             </Section>
 
+            {data.appSlug === "remeet" ? (
+              <ContentActions key={data.id} report={data} onChanged={onChanged} />
+            ) : null}
+            <ReportConversation threadId={data.supportThreadId} />
+
             <Section title="操作">
               <div className="flex flex-wrap gap-2">
-                {allowedReportTransitions[data.status].map((to) => (
-                  <Button
-                    key={to}
-                    variant={to === "closed" ? "default" : "primary"}
-                    disabled={changeStatus.isPending}
-                    onClick={() => changeStatus.mutate(to)}
-                  >
-                    {reportStatusLabels[to]}にする
-                  </Button>
-                ))}
+                {allowedReportTransitions[data.status]
+                  .filter(
+                    (to) =>
+                      data.appSlug !== "remeet" ||
+                      (to !== "actioned" && (to !== "closed" || data.status === "actioned")),
+                  )
+                  .map((to) => (
+                    <Button
+                      key={to}
+                      variant={to === "closed" ? "default" : "primary"}
+                      disabled={changeStatus.isPending}
+                      onClick={() => changeStatus.mutate(to)}
+                    >
+                      {reportStatusLabels[to]}にする
+                    </Button>
+                  ))}
               </div>
               {changeStatus.error ? (
                 <p role="alert" className="mt-2 text-xs text-danger">
@@ -208,43 +238,70 @@ export function ReportDetail() {
               </div>
             </Section>
 
+            {addNote.error ? <p role="alert">{addNote.error.message}</p> : null}
             <Section title="対応の記録">
               <p className="mb-3 text-xs text-ink-faint">
                 「対応記録済み」は運営が行った対応を記録した、という意味です。
                 アプリ内のコンテンツが必ず削除されたことを意味しません。
               </p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-ink-soft">対応コード</span>
-                  <input
-                    className={inputClass}
-                    value={resolutionCode || (data.resolutionCode ?? "")}
-                    onChange={(e) => setResolutionCode(e.target.value)}
-                    placeholder="content_hidden など"
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-ink-soft">対応メモ</span>
-                  <input
-                    className={inputClass}
-                    value={resolutionNote || (data.resolutionNote ?? "")}
-                    onChange={(e) => setResolutionNote(e.target.value)}
-                  />
-                </label>
-              </div>
-              <div className="mt-3">
-                <Button
-                  disabled={resolutionCode.trim().length === 0 || setResolution.isPending}
-                  onClick={() => setResolution.mutate()}
-                >
-                  記録する
-                </Button>
-              </div>
+              <ResolutionEditor
+                key={data.id + data.updatedAt}
+                report={data}
+                onChanged={onChanged}
+              />
             </Section>
           </div>
         ) : null}
       </DataState>
     </Page>
+  );
+}
+
+function ResolutionEditor({
+  report,
+  onChanged,
+}: {
+  report: Report;
+  onChanged: (report: Report) => void;
+}) {
+  const [resolutionCode, setResolutionCode] = useState(report.resolutionCode ?? "");
+  const [resolutionNote, setResolutionNote] = useState(report.resolutionNote ?? "");
+  const setResolution = useMutation({
+    mutationFn: () =>
+      api.post<Report>(`/api/reports/${report.id}/resolution`, { resolutionCode, resolutionNote }),
+    onSuccess: onChanged,
+  });
+  return (
+    <>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-ink-soft">対応コード</span>
+          <input
+            className={inputClass}
+            value={resolutionCode}
+            onChange={(e) => setResolutionCode(e.target.value)}
+            placeholder="content_hidden など"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-ink-soft">対応メモ</span>
+          <input
+            className={inputClass}
+            value={resolutionNote}
+            onChange={(e) => setResolutionNote(e.target.value)}
+          />
+        </label>
+      </div>
+      <div className="mt-3">
+        <Button
+          disabled={resolutionCode.trim().length === 0 || setResolution.isPending}
+          onClick={() => setResolution.mutate()}
+        >
+          記録する
+        </Button>
+      </div>
+      {setResolution.error ? <p role="alert">{setResolution.error.message}</p> : null}
+    </>
   );
 }
 
@@ -268,4 +325,157 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 function short(value: string | undefined): string {
   return value ? `${value.slice(0, 12)}…` : "—";
+}
+
+function ContentActions({
+  report,
+  onChanged,
+}: {
+  report: Report;
+  onChanged: (report: Report) => void;
+}) {
+  const [decision, setDecision] = useState<"delete" | "dismiss" | null>(null);
+  const [pending, setPending] = useState<{ id: string; envelope: string } | null>(null);
+  const action = useMutation({
+    mutationFn: async () => {
+      let signed = pending;
+      if (!signed) {
+        const proposal = await api.post<ModerationProposal>(
+          `/api/reports/${report.id}/decision/prepare`,
+          { decision },
+        );
+        let response: Response;
+        try {
+          response = await fetch("http://127.0.0.1:47831/sign", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ payload: proposal.payload }),
+          });
+        } catch {
+          throw new Error(
+            "Mac の署名サービスに接続できません。pnpm --filter @tomokichi/api moderation serve を起動し、ブラウザのローカルネットワーク接続を許可してください。",
+          );
+        }
+        if (!response.ok) throw new Error("署名できませんでした。Mac の署名鍵を確認してください。");
+        const { envelope } = (await response.json()) as { envelope: string };
+        signed = { id: proposal.id, envelope };
+        setPending(signed);
+      }
+      return api.post<Report>(`/api/reports/${report.id}/decision/complete`, {
+        operationId: signed.id,
+        envelope: signed.envelope,
+      });
+    },
+    onSuccess: (updated) => {
+      setPending(null);
+      setDecision(null);
+      onChanged(updated);
+    },
+  });
+  return (
+    <Section title="コンテンツへの対応">
+      <p className="mb-3 text-sm text-ink-soft">
+        削除指示・非表示解除は、アプリが次に対応情報を受信した際に反映されます。
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          disabled={!["open", "reviewing"].includes(report.status) || action.isPending}
+          onClick={() => {
+            setPending(null);
+            action.reset();
+            setDecision("delete");
+          }}
+        >
+          コンテンツを削除
+        </Button>
+        <Button
+          disabled={!["open", "reviewing"].includes(report.status) || action.isPending}
+          onClick={() => {
+            setPending(null);
+            action.reset();
+            setDecision("dismiss");
+          }}
+        >
+          対応なしでクローズ・非表示を解除
+        </Button>
+      </div>
+      <Dialog
+        open={decision !== null}
+        title={
+          decision === "delete" ? "コンテンツを削除しますか？" : "対応なしでクローズしますか？"
+        }
+        onClose={() => {
+          if (!action.isPending) setDecision(null);
+        }}
+        footer={
+          <>
+            <Button disabled={action.isPending} onClick={() => setDecision(null)}>
+              キャンセル
+            </Button>
+            <Button variant="primary" disabled={action.isPending} onClick={() => action.mutate()}>
+              {action.isPending ? "反映中…" : "確定する"}
+            </Button>
+          </>
+        }
+      >
+        <p>
+          {decision === "delete"
+            ? "アプリ内の対象コンテンツを削除します。実行された削除は元に戻せません。"
+            : "この通報によって非表示になったコンテンツを再表示します。ブロックなど別の理由で非表示のものはそのままです。"}
+        </p>
+        {action.error ? (
+          <p role="alert" className="mt-3 text-sm text-danger">
+            {action.error.message}
+          </p>
+        ) : null}
+      </Dialog>
+    </Section>
+  );
+}
+
+function ReportConversation({ threadId }: { threadId?: string }) {
+  const thread = useQuery({
+    queryKey: ["support-thread", threadId],
+    queryFn: () => api.get<SupportThreadDetail>(`/api/support/threads/${threadId}`),
+    enabled: Boolean(threadId),
+    refetchInterval: 30_000,
+  });
+  const session = useQuery({
+    queryKey: ["session"],
+    queryFn: () => api.get<{ mailConfigured: boolean }>("/api/session"),
+  });
+  return (
+    <Section title="通報者への連絡">
+      {!threadId ? (
+        <p className="text-sm text-ink-soft">
+          この通報には返信先メールアドレスが登録されていません。
+        </p>
+      ) : null}
+      {thread.error ? <p role="alert">{thread.error.message}</p> : null}
+      {thread.data ? (
+        <>
+          <ol className="mb-4 space-y-3">
+            {thread.data.messages.map((message) => (
+              <li key={message.id} className="rounded-md bg-line-soft/50 p-3">
+                <p className="mb-1 text-xs text-ink-soft">
+                  {message.direction === "outbound"
+                    ? "運営から送信"
+                    : message.direction === "internal_note"
+                      ? "運営メモ（メール送信なし）"
+                      : "通報者からの返信"}{" "}
+                  · <Timestamp value={message.createdAt} />
+                </p>
+                <p className="text-sm whitespace-pre-wrap">{message.bodyText}</p>
+              </li>
+            ))}
+          </ol>
+          <ReplyComposer
+            key={thread.data.id}
+            thread={thread.data}
+            mailConfigured={session.data?.mailConfigured ?? false}
+          />
+        </>
+      ) : null}
+    </Section>
+  );
 }

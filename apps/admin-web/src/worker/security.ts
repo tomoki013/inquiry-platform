@@ -21,7 +21,7 @@ const CSP = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self'",
-  "connect-src 'self'",
+  "connect-src 'self' http://127.0.0.1:47831",
   "frame-ancestors 'none'",
   "form-action 'none'",
   "base-uri 'none'",
