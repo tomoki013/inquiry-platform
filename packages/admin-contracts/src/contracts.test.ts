@@ -24,15 +24,14 @@ describe("report status machine", () => {
     expect(canTransitionReport("open", "actioned")).toBe(false);
     expect(canTransitionReport("closed", "actioned")).toBe(false);
     expect(canTransitionReport("actioned", "reviewing")).toBe(false);
+    // Nor is standing still a move.
+    expect(canTransitionReport("open", "open")).toBe(false);
   });
 });
 
 describe("replySubject", () => {
-  it("adds one prefix", () => {
+  it("prefixes once, however many round trips there have been", () => {
     expect(replySubject("アプリで共有できません")).toBe("Re: アプリで共有できません");
-  });
-
-  it("does not stack prefixes however many round trips there have been", () => {
     expect(replySubject("Re: Re: アプリで共有できません")).toBe("Re: アプリで共有できません");
     expect(replySubject("RE: アプリで共有できません")).toBe("Re: アプリで共有できません");
     expect(replySubject("Re[2]: hello")).toBe("Re: hello");
