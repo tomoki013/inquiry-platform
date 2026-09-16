@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { plainTextToSafeHtml } from "./html";
+import { plainTextToSafeHtml, SIGNATURE_LOGO_URL } from "./html";
 import { UnconfiguredMailProvider } from "./index";
 import { ResendMailProvider } from "./resend";
 
@@ -184,6 +184,9 @@ it("escapes the signature and renders it separately without duplicating it", () 
   const signature = "Studio <img src=x>\n髙木友喜 / Tomoki Takagi";
   const html = plainTextToSafeHtml(`本文\n\n${signature}`, signature);
   expect(html).toContain('role="presentation"');
-  expect(html).not.toContain("<img");
+  // The studio logo is the only image; the operator's `<img` stays escaped.
+  expect(html.match(/<img/g)).toHaveLength(1);
+  expect(html).toContain(`<img src="${SIGNATURE_LOGO_URL}"`);
+  expect(html).toContain("&lt;img src=x&gt;");
   expect(html.match(/Tomoki Takagi/g)).toHaveLength(1);
 });
