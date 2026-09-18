@@ -21,6 +21,73 @@ export type AdminApi = Hono<{ Bindings: AdminWebEnv; Variables: Variables }>;
 export function registerApiRoutes(app: AdminApi): void {
   const actor = (c: { get: (k: "identity") => AdminIdentity }) => actorFor(c.get("identity"));
 
+  app.get("/api/tickets", async (c) =>
+    respond(c, await c.env.ADMIN_CORE.listTickets({ ...c.req.query() })),
+  );
+  app.get("/api/tickets/masters", async (c) => respond(c, await c.env.ADMIN_CORE.ticketMasters()));
+  app.post("/api/tickets/masters", async (c) =>
+    respond(c, await c.env.ADMIN_CORE.saveTicketMaster(await body(c), actor(c))),
+  );
+  app.get("/api/tickets/dashboard", async (c) =>
+    respond(c, await c.env.ADMIN_CORE.ticketDashboard()),
+  );
+  app.get("/api/tickets/source/:kind/:id", async (c) =>
+    respond(c, await c.env.ADMIN_CORE.ticketSource(c.req.param("kind"), c.req.param("id"))),
+  );
+  app.get("/api/tickets/:id/reply-context", async (c) =>
+    respond(c, await c.env.ADMIN_CORE.ticketReplyContext(c.req.param("id"))),
+  );
+  app.get("/api/tickets/:id", async (c) =>
+    respond(
+      c,
+      await c.env.ADMIN_CORE.getTicket(c.req.param("id"), numberParam(c.req.query("offset"), 0)),
+    ),
+  );
+  app.post("/api/tickets", async (c) =>
+    respond(c, await c.env.ADMIN_CORE.createTicket(await body(c), actor(c))),
+  );
+  app.patch("/api/tickets/:id", async (c) =>
+    respond(
+      c,
+      await c.env.ADMIN_CORE.changeTicket({ ...(await body(c)), id: c.req.param("id") }, actor(c)),
+    ),
+  );
+  app.post("/api/tickets/:id/ack", async (c) =>
+    respond(c, await c.env.ADMIN_CORE.acknowledgeTicket(c.req.param("id"), actor(c))),
+  );
+  app.post("/api/tickets/:id/notes", async (c) =>
+    respond(
+      c,
+      await c.env.ADMIN_CORE.addTicketNote({ ...(await body(c)), id: c.req.param("id") }, actor(c)),
+    ),
+  );
+  app.post("/api/tickets/:id/relations", async (c) =>
+    respond(
+      c,
+      await c.env.ADMIN_CORE.relateTickets({ ...(await body(c)), id: c.req.param("id") }, actor(c)),
+    ),
+  );
+  app.post("/api/tickets/:id/merge", async (c) =>
+    respond(
+      c,
+      await c.env.ADMIN_CORE.mergeTickets({ ...(await body(c)), id: c.req.param("id") }, actor(c)),
+    ),
+  );
+
+  // Legacy read/transport endpoints remain; lifecycle edits must use Ticket Core.
+  for (const path of [
+    "/api/reports/:id/status",
+    "/api/reports/:id/resolution",
+    "/api/reports/:id/notes",
+    "/api/support/threads/:id/status",
+    "/api/support/threads/:id/app",
+    "/api/support/threads/:id/notes",
+  ]) {
+    app.post(path, (c) =>
+      failure(c, { code: "CONFLICT", message: "Ticket画面から操作してください。" }, 409),
+    );
+  }
+
   // ---- session ----------------------------------------------------------
   app.get("/api/session", async (c) => {
     const identity = c.get("identity");

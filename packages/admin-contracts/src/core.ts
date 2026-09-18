@@ -45,6 +45,7 @@ import type {
   SupportThreadDetail,
   SupportThreadListPage,
 } from "./support";
+import type { TicketDashboard, TicketDetail, TicketMasters, TicketPage } from "./tickets";
 
 /**
  * Who is acting, as far as the audit log is concerned.
@@ -80,6 +81,20 @@ export interface AdminIdentity {
  * than throws — see `errors.ts` for why.
  */
 export interface AdminCoreApi {
+  ticketReplyContext(id: string): Promise<Result<SupportThreadDetail>>;
+  listTickets(input: unknown): Promise<Result<TicketPage>>;
+  getTicket(id: string, offset?: number): Promise<Result<TicketDetail>>;
+  ticketSource(kind: string, id: string): Promise<Result<{ id: string }>>;
+  createTicket(input: unknown, actor: ActorRef): Promise<Result<TicketDetail>>;
+  changeTicket(input: unknown, actor: ActorRef): Promise<Result<TicketDetail>>;
+  acknowledgeTicket(id: string, actor: ActorRef): Promise<Result<TicketDetail>>;
+  addTicketNote(input: unknown, actor: ActorRef): Promise<Result<TicketDetail>>;
+  relateTickets(input: unknown, actor: ActorRef): Promise<Result<TicketDetail>>;
+  mergeTickets(input: unknown, actor: ActorRef): Promise<Result<TicketDetail>>;
+  ticketMasters(): Promise<Result<TicketMasters>>;
+  saveTicketMaster(input: unknown, actor: ActorRef): Promise<Result<TicketMasters>>;
+  ticketDashboard(): Promise<Result<TicketDashboard>>;
+
   prepareReportDecision(input: unknown, actor: ActorRef): Promise<Result<ModerationProposal>>;
   completeReportDecision(input: unknown, actor: ActorRef): Promise<Result<ReportDetail>>;
   // ---- Reports ----------------------------------------------------------

@@ -40,15 +40,32 @@ const migrations = Object.entries(
  * TABLE` in a fixture is how a test suite ends up passing against a database
  * that does not exist.
  */
+export function splitMigration(sql: string): string[] {
+  const statements: string[] = [];
+  let buffer = "";
+  let trigger = false;
+  for (const line of sql.split("\n")) {
+    if (line.trimStart().startsWith("--")) continue;
+    if (/^CREATE TRIGGER/i.test(line.trim())) trigger = true;
+    buffer += `${line}\n`;
+    if (trigger) {
+      if (line.trim() === "END;") {
+        statements.push(buffer.trim());
+        buffer = "";
+        trigger = false;
+      }
+    } else if (buffer.includes(";")) {
+      const parts = buffer.split(";");
+      buffer = parts.pop() ?? "";
+      statements.push(...parts.map((part) => part.trim()).filter(Boolean));
+    }
+  }
+  if (buffer.trim()) statements.push(buffer.trim());
+  return statements;
+}
+
 export async function migrate(): Promise<void> {
-  const statements = migrations
-    .join("\n;\n")
-    .split("\n")
-    .filter((line) => !line.trimStart().startsWith("--"))
-    .join("\n")
-    .split(";")
-    .map((statement) => statement.trim())
-    .filter((statement) => statement.length > 0);
+  const statements = migrations.flatMap(splitMigration);
   for (const statement of statements) {
     try {
       await testEnv.DB.prepare(statement).run();
@@ -75,6 +92,16 @@ export async function migrate(): Promise<void> {
  */
 export async function reset(): Promise<void> {
   const tables = [
+    "ticket_relations",
+    "ticket_reports",
+    "ticket_events",
+    "ticket_messages",
+    "ticket_sources",
+    "tickets",
+    "ticket_numbers",
+    "service_components",
+    "ticket_categories",
+    "ticket_assignees",
     "support_thread_redirects",
     "support_reply_sends",
     "support_drafts",
@@ -90,8 +117,10 @@ export async function reset(): Promise<void> {
     "app_links",
     "audit_logs",
     "apps",
+    "services",
   ];
   await testEnv.DB.batch(tables.map((table) => testEnv.DB.prepare(`DELETE FROM ${table}`)));
+  await testEnv.DB.prepare("INSERT INTO services VALUES ('studio','tmkch.io','tmkch-io',1)").run();
 }
 
 /**

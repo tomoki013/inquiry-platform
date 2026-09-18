@@ -38,9 +38,14 @@ export function Layout() {
             </Item>
           </Group>
           <Group label="運用">
+            <Item to="/tickets" end>
+              Tickets
+            </Item>
             <Item to="/reports">通報</Item>
+            <Item to="/incidents">障害</Item>
             <Item to="/support">問い合わせ</Item>
             <Item to="/support/templates">返信定型文</Item>
+            <Item to="/tickets/settings">運用設定</Item>
           </Group>
           <Group label="スタジオ">
             <Item to="/apps">アプリ</Item>

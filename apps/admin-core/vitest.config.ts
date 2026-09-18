@@ -1,5 +1,18 @@
+import { readdirSync, readFileSync } from "node:fs";
 import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
 import { defineConfig } from "vitest/config";
+import { unstable_splitSqlQuery } from "wrangler";
+
+// Exercise the deployment splitter too: CASE token spacing inside triggers matters.
+for (const file of readdirSync(new URL("./migrations/", import.meta.url))) {
+  if (!file.endsWith(".sql")) continue;
+  const sql = readFileSync(new URL(`./migrations/${file}`, import.meta.url), "utf8");
+  for (const statement of unstable_splitSqlQuery(sql)) {
+    if (/^CREATE TRIGGER/i.test(statement.trim()) && !/\bEND\s*;?\s*$/.test(statement)) {
+      throw new Error(`Wrangler cannot split ${file}: incomplete trigger`);
+    }
+  }
+}
 
 export default defineConfig({
   plugins: [

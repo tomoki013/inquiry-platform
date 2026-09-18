@@ -69,7 +69,7 @@ const coreStub = {
   mailProviderConfigured: () => Promise.resolve(true),
   getDashboard: () =>
     Promise.resolve({ ok: true, value: { openReports: 1, apps: [], recentActivity: [] } }),
-  changeReportStatus: () => Promise.resolve({ ok: true, value: { id: "r1" } }),
+  acknowledgeTicket: () => Promise.resolve({ ok: true, value: { id: "r1" } }),
 } as unknown as AdminWebEnv["ADMIN_CORE"];
 
 function env(overrides: Partial<AdminWebEnv> = {}): AdminWebEnv {
@@ -209,7 +209,7 @@ describe("mutation guard", () => {
   const local = () => env({ ENVIRONMENT: "local", DEV_ADMIN_EMAIL: "dev@example.com" });
 
   const post = (headers: Record<string, string>) =>
-    new Request("https://admin.tmkch.io/api/reports/r1/status", {
+    new Request("https://admin.tmkch.io/api/tickets/r1/ack", {
       method: "POST",
       headers,
       body: JSON.stringify({ to: "reviewing" }),
@@ -314,5 +314,57 @@ describe("unknown API paths", () => {
     expect(body.error.code).toBe("NOT_FOUND");
     expect(body.requestId).toBeTruthy();
     expect(JSON.stringify(body)).not.toContain("at ");
+  });
+});
+
+describe("Ticket API confidentiality", () => {
+  it.each([
+    "/api/tickets",
+    "/api/tickets/t1",
+    "/api/tickets/dashboard",
+    "/api/tickets/masters",
+    "/api/tickets/t1/reply-context",
+  ])("rejects unauthenticated reads of %s", async (path) => {
+    const response = await createApp().fetch(
+      get(path),
+      env({ ACCESS_TEAM_DOMAIN: newDomain(), ACCESS_AUD: AUD }),
+      ctx,
+    );
+    expect(response.status).toBe(401);
+  });
+  it.each(["ack", "notes", "relations", "merge"])("rejects unauthenticated %s", async (action) => {
+    const request = new Request(`https://admin.tmkch.io/api/tickets/t1/${action}`, {
+      method: "POST",
+      headers: { Origin: "https://admin.tmkch.io", "Content-Type": "application/json" },
+      body: JSON.stringify({ body: "internal" }),
+    });
+    expect(
+      (
+        await createApp().fetch(
+          request,
+          env({ ACCESS_TEAM_DOMAIN: newDomain(), ACCESS_AUD: AUD }),
+          ctx,
+        )
+      ).status,
+    ).toBe(401);
+  });
+});
+
+describe("Ticket RPC boundary", () => {
+  it("passes a serializable plain query object across the Service Binding", async () => {
+    const listTickets = vi.fn(async (query: unknown) => {
+      expect(Object.getPrototypeOf(query)).toBe(Object.prototype);
+      expect(query).toEqual({ status: "NEW", limit: "50" });
+      return { ok: true, value: { items: [], total: 0 } };
+    });
+    const bindings = env({ ENVIRONMENT: "local", DEV_ADMIN_EMAIL: "dev@example.com" });
+    bindings.ADMIN_CORE = { listTickets } as unknown as AdminWebEnv["ADMIN_CORE"];
+    const response = await createApp().fetch(
+      get("/api/tickets?status=NEW&limit=50"),
+      bindings,
+      ctx,
+    );
+    expect(response.status).toBe(200);
+    expect(listTickets).toHaveBeenCalledOnce();
   });
 });

@@ -154,8 +154,18 @@ export class ReportService {
       if (!this.moderation || row.app_slug !== "remeet" || !row.content_external_id) {
         return fail("CONFLICT", "このアプリのコンテンツ操作は設定されていません。");
       }
-      if (!["open", "reviewing"].includes(row.status))
-        return fail("CONFLICT", "確認中に戻してから操作してください。");
+      const ticket = await this.db
+        .prepare(
+          "SELECT t.status,t.merged_into FROM tickets t JOIN ticket_sources s ON s.ticket_id=t.id WHERE s.source_type='report' AND s.source_id=?",
+        )
+        .bind(row.id)
+        .first<{ status: string; merged_into: string | null }>();
+      if (
+        ticket
+          ? ticket.merged_into || ["CLOSED", "RESOLVED"].includes(ticket.status)
+          : !["open", "reviewing"].includes(row.status)
+      )
+        return fail("CONFLICT", "Ticketを再開してから操作してください。");
       const proposal = await this.moderation.prepare({
         reportId: row.external_report_id,
         contentId: row.content_external_id,

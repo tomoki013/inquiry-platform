@@ -31,6 +31,7 @@ import type { SupportRepository } from "../db/support";
 import type { TemplateRepository } from "../db/templates";
 import { internalFailure, notFound, validationFailure } from "./failures";
 import type { SupportService } from "./support-service";
+import { TicketService } from "./ticket-service";
 
 export interface ReplyAddresses {
   supportEmail: string;
@@ -346,6 +347,25 @@ export class ReplyService {
         return await this.supportService.detail(input.threadId);
       }
 
+      if (actor.type === "admin") {
+        const tickets = new TicketService(this.db);
+        const source = await tickets.source("support", input.threadId);
+        if (!source.ok) return source;
+        {
+          const ticket = await tickets.row(source.value.id);
+          if (!ticket) return notFound("Ticket");
+          if (ticket?.merged_into) return fail("CONFLICT", "統合先のTicketから返信してください。");
+          if (ticket && ["CLOSED", "RESOLVED"].includes(ticket.status)) {
+            if (!input.reopenIfResolved)
+              return fail("CONFLICT", "Ticketを再開してから返信してください。");
+            const reopened = await tickets.change(
+              { id: ticket.id, revision: ticket.revision, status: "IN_PROGRESS" },
+              actor,
+            );
+            if (!reopened.ok) return reopened;
+          }
+        }
+      }
       const thread = await this.support.findThread(input.threadId);
       if (!thread) return notFound("問い合わせ");
       if (thread.status === "spam") {

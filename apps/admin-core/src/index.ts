@@ -41,6 +41,7 @@ import { ReplyService } from "./domain/reply-service";
 import { expireReportEvidence } from "./domain/report-retention";
 import { ReportService } from "./domain/report-service";
 import { SupportService } from "./domain/support-service";
+import { TicketService } from "./domain/ticket-service";
 import type { AdminCoreEnv } from "./env";
 
 /**
@@ -66,6 +67,70 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
   private get services() {
     this.cached ??= buildServices(this.env);
     return this.cached;
+  }
+
+  async ticketReplyContext(id: string): Promise<Result<SupportThreadDetail>> {
+    try {
+      const ticket = await this.tickets.row(id);
+      if (!ticket?.thread_id)
+        return { ok: false, error: { code: "NOT_FOUND", message: "メール会話がありません。" } };
+      const thread = await new SupportRepository(this.env.DB).detail(ticket.thread_id, false);
+      if (!thread)
+        return { ok: false, error: { code: "NOT_FOUND", message: "メール会話がありません。" } };
+      return {
+        ok: true,
+        value: {
+          ...thread,
+          status:
+            ticket.status === "CLOSED" || ticket.status === "RESOLVED"
+              ? "resolved"
+              : ticket.status === "WAITING_CUSTOMER"
+                ? "pending_user"
+                : "open",
+        },
+      };
+    } catch (error) {
+      return internalFailure("ticket.replyContext", error);
+    }
+  }
+  private get tickets() {
+    return new TicketService(this.env.DB);
+  }
+  listTickets(input: unknown) {
+    return this.tickets.list(input);
+  }
+  getTicket(id: string, offset = 0) {
+    return this.tickets.detail(id, offset);
+  }
+  ticketSource(kind: string, id: string) {
+    return this.tickets.source(kind, id);
+  }
+  createTicket(input: unknown, actor: ActorRef) {
+    return this.tickets.create(input, actor);
+  }
+  changeTicket(input: unknown, actor: ActorRef) {
+    return this.tickets.change(input, actor);
+  }
+  acknowledgeTicket(id: string, actor: ActorRef) {
+    return this.tickets.ack(id, actor);
+  }
+  addTicketNote(input: unknown, actor: ActorRef) {
+    return this.tickets.note(input, actor);
+  }
+  relateTickets(input: unknown, actor: ActorRef) {
+    return this.tickets.relation(input, actor);
+  }
+  mergeTickets(input: unknown, actor: ActorRef) {
+    return this.tickets.merge(input, actor);
+  }
+  ticketMasters() {
+    return this.tickets.masters();
+  }
+  saveTicketMaster(input: unknown, actor: ActorRef) {
+    return this.tickets.saveMaster(input, actor);
+  }
+  ticketDashboard() {
+    return this.tickets.dashboard();
   }
 
   prepareReportDecision(input: unknown, actor: ActorRef) {

@@ -5,6 +5,9 @@ ask, for every app the Studio runs.
 
 ## Why three Workers
 
+Ticket lifecycle, priority/resolution rules, SLA settings, migration results and operations: [Operations Tickets](../../docs/operations-tickets.md).
+
+
 ```
                     Cloudflare Access
                             │
