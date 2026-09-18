@@ -5,12 +5,10 @@ import { BrowserRouter, Route, Routes } from "react-router";
 import { Layout } from "./components/Layout";
 import { AppDetail } from "./pages/AppDetail";
 import { Apps } from "./pages/Apps";
-import { Dashboard } from "./pages/Dashboard";
 import { ReplyTemplates } from "./pages/ReplyTemplates";
-import { ReportDetail } from "./pages/ReportDetail";
-import { Reports } from "./pages/Reports";
-import { SupportInbox } from "./pages/SupportInbox";
-import { SupportThread } from "./pages/SupportThread";
+import { TicketDetail } from "./pages/TicketDetail";
+import { TicketSettings } from "./pages/TicketSettings";
+import { LegacyTicketRedirect, TicketOperationsDashboard, Tickets } from "./pages/Tickets";
 import "./styles.css";
 
 const client = new QueryClient({
@@ -32,12 +30,16 @@ createRoot(document.getElementById("root") as HTMLElement).render(
       <BrowserRouter>
         <Routes>
           <Route element={<Layout />}>
-            <Route index element={<Dashboard />} />
-            <Route path="reports" element={<Reports />} />
-            <Route path="reports/:id" element={<ReportDetail />} />
-            <Route path="support" element={<SupportInbox />} />
+            <Route index element={<TicketOperationsDashboard />} />
+            <Route path="tickets" element={<Tickets />} />
+            <Route path="tickets/settings" element={<TicketSettings />} />
+            <Route path="tickets/:id" element={<TicketDetail />} />
+            <Route path="incidents" element={<Tickets type="INCIDENT" />} />
+            <Route path="reports" element={<Tickets type="REPORT" />} />
+            <Route path="reports/:id" element={<LegacyTicketRedirect kind="report" />} />
+            <Route path="support" element={<Tickets type="INQUIRY" />} />
             <Route path="support/templates" element={<ReplyTemplates />} />
-            <Route path="support/:id" element={<SupportThread />} />
+            <Route path="support/:id" element={<LegacyTicketRedirect kind="support" />} />
             <Route path="apps" element={<Apps />} />
             <Route path="apps/:id" element={<AppDetail />} />
             <Route path="*" element={<NotFound />} />

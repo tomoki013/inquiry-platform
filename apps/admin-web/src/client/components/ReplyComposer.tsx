@@ -37,7 +37,9 @@ const DRAFT_DEBOUNCE_MS = 800;
 export function ReplyComposer({
   thread,
   mailConfigured,
+  ticketId,
 }: {
+  ticketId?: string;
   thread: SupportThreadDetail;
   mailConfigured: boolean;
 }) {
@@ -155,6 +157,7 @@ export function ReplyComposer({
     void client.invalidateQueries({ queryKey: ["support-draft", thread.id] });
     void client.invalidateQueries({ queryKey: ["support-threads"] });
     void client.invalidateQueries({ queryKey: ["dashboard"] });
+    void client.invalidateQueries({ queryKey: ["tickets"] });
   };
 
   const send = useMutation({
@@ -177,9 +180,20 @@ export function ReplyComposer({
 
   const addNote = useMutation({
     mutationFn: () =>
-      api.post<SupportThreadDetail>(`/api/support/threads/${thread.id}/notes`, { bodyText: note }),
+      ticketId
+        ? api
+            .post(`/api/tickets/${ticketId}/notes`, {
+              body: note,
+              idempotencyKey: idempotencyKey.current,
+            })
+            .then(() => thread)
+        : api.post<SupportThreadDetail>(`/api/support/threads/${thread.id}/notes`, {
+            bodyText: note,
+          }),
     onSuccess: (updated) => {
       setNote("");
+      idempotencyKey.current = crypto.randomUUID();
+      void client.invalidateQueries({ queryKey: ["tickets"] });
       client.setQueryData(["support-thread", thread.id], updated);
     },
   });

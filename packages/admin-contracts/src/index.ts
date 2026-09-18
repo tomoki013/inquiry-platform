@@ -9,3 +9,5 @@ export * from "./reply";
 export * from "./reports";
 export * from "./signature";
 export * from "./support";
+
+export * from "./tickets";

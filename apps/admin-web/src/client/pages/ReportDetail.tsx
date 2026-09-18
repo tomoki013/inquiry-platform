@@ -327,7 +327,7 @@ function short(value: string | undefined): string {
   return value ? `${value.slice(0, 12)}…` : "—";
 }
 
-function ContentActions({
+export function ContentActions({
   report,
   onChanged,
 }: {

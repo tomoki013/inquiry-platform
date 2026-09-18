@@ -289,7 +289,7 @@ export class SupportRepository {
     };
   }
 
-  async detail(threadId: string): Promise<SupportThreadDetail | null> {
+  async detail(threadId: string, includeMessages = true): Promise<SupportThreadDetail | null> {
     const redirect = await this.db
       .prepare("SELECT target_thread_id FROM support_thread_redirects WHERE source_thread_id=?")
       .bind(threadId)
@@ -297,6 +297,9 @@ export class SupportRepository {
     if (redirect) threadId = redirect.target_thread_id;
     const row = await this.findThread(threadId);
     if (!row) return null;
+
+    if (!includeMessages)
+      return { ...toSummary(row), resolvedAt: row.resolved_at ?? undefined, messages: [] };
 
     const { results: messages } = await this.db
       .prepare("SELECT * FROM support_messages WHERE thread_id = ? ORDER BY created_at, rowid")
