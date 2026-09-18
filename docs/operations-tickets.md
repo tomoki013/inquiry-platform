@@ -104,3 +104,12 @@ These are rehearsal counts, not a claim that production migration has run. No ba
 5. If the new UI needs rollback, disable operator mutations while investigating. Retain additive tables/triggers and deploy a corrected Worker. Do not drop new tables or blindly restore the pre-migration export after new messages have arrived; that would discard later data. Restoring old admin editing routes also requires reconciliation of lifecycle edits, so prefer a forward fix.
 
 The initial release intentionally excludes automation, AI replies, on-call scheduling, complex SLA calendars and incident-specific root-cause forms. INCIDENT tickets, relations and manual follow-up are available on the shared core.
+
+## Production release — 2026-09-18
+
+Migration 0006 completed remotely (75 statements). Post-migration counts matched the rehearsal: 16 legacy conversations, 4 reports, 26 legacy/new messages, 18 tickets, 20 source mappings and 90 events. Missing support/report/message mappings, internal-note recipients and terminal tickets without resolutions were all zero; `foreign_key_check` returned no violations.
+
+- Admin Core version: `d9d8d0ff-a15f-47f0-b216-d8cdaf341354`
+- Admin Web version: `c831d31e-494d-4e5a-bbcf-cd34dcc50224`
+- Unauthenticated production ticket endpoints were denied. The browser reaches Cloudflare Access login; authenticated production screen verification is pending operator login.
+- Local and automated verification: 356 tests passed across Core, Admin Worker/UI, public API, contracts, mail provider and ingress; related typechecks/builds passed. Browser lifecycle verification used isolated local test data and sent no emails.
