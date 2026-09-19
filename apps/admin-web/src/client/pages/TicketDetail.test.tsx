@@ -93,9 +93,9 @@ function mount() {
 it("ACKs through the dedicated API and refreshes the lifecycle", async () => {
   mount();
   const u = userEvent.setup();
-  await u.click(await screen.findByRole("button", { name: "ACK・確認済みにする" }));
+  await u.click(await screen.findByRole("button", { name: "確認済みにする" }));
   await waitFor(() =>
-    expect(screen.queryByRole("button", { name: "ACK・確認済みにする" })).not.toBeInTheDocument(),
+    expect(screen.queryByRole("button", { name: "確認済みにする" })).not.toBeInTheDocument(),
   );
   expect(requests.some((r) => r.url.endsWith("/ack") && r.method === "POST")).toBe(true);
 });

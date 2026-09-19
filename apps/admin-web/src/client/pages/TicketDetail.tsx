@@ -154,7 +154,7 @@ export function TicketDetail() {
             <header className="ops-header">
               <div>
                 <Link className="text-accent text-xs" to="/tickets">
-                  ← Tickets
+                  ← 一覧
                 </Link>
                 <p className="ops-eyebrow mt-4">
                   {t.ticket_number} · {t.service_name} / {ticketTypeLabels[t.type]}
@@ -168,7 +168,7 @@ export function TicketDetail() {
               </div>
               {["NEW", "TRIAGE"].includes(t.status) && !t.merged_into && (
                 <Button variant="primary" disabled={ack.isPending} onClick={() => ack.mutate()}>
-                  ACK・確認済みにする
+                  確認済みにする
                 </Button>
               )}
             </header>
@@ -234,7 +234,7 @@ export function TicketDetail() {
                   </div>
                 )}
                 <h2 className="ops-section-title">
-                  Timeline{" "}
+                  履歴{" "}
                   <span className="text-xs text-ink-faint">
                     新しい順 · {detail.data.totalTimeline}件
                   </span>
@@ -329,7 +329,9 @@ export function TicketDetail() {
                   open={operationsOpen}
                   onToggle={(e) => setOperationsOpen(e.currentTarget.open)}
                 >
-                  <summary className="font-medium cursor-pointer mb-4">Ticketの運用情報</summary>
+                  <summary className="font-medium cursor-pointer mb-4">
+                    状態・担当・次の対応
+                  </summary>
                   {masters.data && (
                     <TicketEditor
                       key={`${t.id}:${t.revision}`}
@@ -339,8 +341,16 @@ export function TicketDetail() {
                     />
                   )}
                 </details>
-                <SlaPanel ticket={t} />
-                <Relations data={detail.data} onChanged={refresh} />
+                <details className="ops-panel ops-secondary">
+                  <summary>
+                    対応期限 <TicketBadge value={t.sla_state} />
+                  </summary>
+                  <SlaPanel ticket={t} />
+                </details>
+                <details className="ops-panel ops-secondary">
+                  <summary>関連チケット</summary>
+                  <Relations data={detail.data} onChanged={refresh} />
+                </details>
               </aside>
             </div>
           </>
@@ -577,8 +587,8 @@ function localDate(s: string | null) {
 function SlaPanel({ ticket: t }: { ticket: Ticket }) {
   return (
     <section className="ops-panel">
-      <h2 className="font-medium mb-3">SLA・内部運用目標</h2>
-      <p className="text-xs text-ink-faint mb-3">24時間の経過時間で計算。待機中も継続。</p>
+      <h2 className="font-medium mb-3">対応期限</h2>
+
       {[
         ["ACK", t.acknowledged_at, t.sla_ack_minutes],
         ["初回返信", t.first_response_at, t.sla_response_minutes],

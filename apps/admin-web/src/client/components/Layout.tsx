@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { NavLink, Outlet } from "react-router";
+import { useEffect, useState } from "react";
+import { NavLink, Outlet, useLocation } from "react-router";
 import { api } from "../lib/api";
 
 interface Session {
@@ -16,6 +17,11 @@ interface Session {
  * link to a 404 — every entry goes to a screen that exists.
  */
 export function Layout() {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const location = useLocation();
+  useEffect(() => {
+    if (location.pathname) setMenuOpen(false);
+  }, [location.pathname]);
   const session = useQuery({
     queryKey: ["session"],
     queryFn: () => api.get<Session>("/api/session"),
@@ -24,14 +30,30 @@ export function Layout() {
 
   return (
     <div className="flex min-h-full flex-col lg:flex-row">
-      <nav
-        aria-label="メインナビゲーション"
-        className="shrink-0 border-b border-line bg-surface px-6 py-5 lg:w-56 lg:border-r lg:border-b-0 lg:px-5 lg:py-8"
-      >
-        <p className="text-sm font-medium tracking-tight text-ink">Tomokichi Studio</p>
-        <p className="mt-0.5 text-xs text-ink-faint">Admin</p>
+      <nav aria-label="メインナビゲーション" className="admin-nav">
+        <div className="admin-nav-header">
+          <p className="text-sm font-medium tracking-tight text-ink">
+            Tomokichi Studio <span className="text-ink-soft">Admin</span>
+          </p>
+          <button
+            type="button"
+            className="admin-menu-toggle"
+            aria-expanded={menuOpen}
+            aria-controls="admin-menu"
+            onClick={() => setMenuOpen(!menuOpen)}
+          >
+            {menuOpen ? "閉じる" : "メニュー"}
+          </button>
+        </div>
+        <div className="admin-mobile-links">
+          <NavLink to="/" end>
+            ホーム
+          </NavLink>
+          <NavLink to="/tickets">チケット</NavLink>
+          <NavLink to="/reports">通報</NavLink>
+        </div>
 
-        <div className="mt-7 flex flex-wrap gap-x-6 gap-y-5 lg:block lg:space-y-6">
+        <div id="admin-menu" className={`admin-menu ${menuOpen ? "is-open" : ""}`}>
           <Group>
             <Item to="/" end>
               ダッシュボード
@@ -39,11 +61,13 @@ export function Layout() {
           </Group>
           <Group label="運用">
             <Item to="/tickets" end>
-              Tickets
+              チケット
             </Item>
             <Item to="/reports">通報</Item>
             <Item to="/incidents">障害</Item>
-            <Item to="/support">問い合わせ</Item>
+            <Item to="/support" end>
+              問い合わせ
+            </Item>
             <Item to="/support/templates">返信定型文</Item>
             <Item to="/tickets/settings">運用設定</Item>
           </Group>
@@ -85,7 +109,7 @@ function Item({ to, end, children }: { to: string; end?: boolean; children: Reac
         to={to}
         end={end}
         className={({ isActive }) =>
-          `block rounded-md px-2 py-1 text-sm transition-colors ${
+          `block rounded-md px-3 py-3 text-sm transition-colors ${
             isActive
               ? "bg-accent-soft text-accent"
               : "text-ink-soft hover:bg-line-soft hover:text-ink"

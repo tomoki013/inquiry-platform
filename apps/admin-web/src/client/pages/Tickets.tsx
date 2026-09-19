@@ -28,7 +28,20 @@ export function TicketBadge({ value }: { value: string }) {
     warn = ["P2", "AT_RISK", "NEW"].includes(value);
   return (
     <span className={`ops-badge ${danger ? "ops-danger" : warn ? "ops-warn" : ""}`}>
-      {ticketStatusLabels[value as keyof typeof ticketStatusLabels] ?? value}
+      {(
+        {
+          NEW: "未確認",
+          ACKNOWLEDGED: "確認済み",
+          WAITING_INTERNAL: "内部確認待ち",
+          WAITING_CUSTOMER: "返信待ち",
+          CLOSED: "クローズ",
+          AT_RISK: "SLA注意",
+          BREACHED: "SLA超過",
+          OK: "期限内",
+        } as Record<string, string>
+      )[value] ??
+        ticketStatusLabels[value as keyof typeof ticketStatusLabels] ??
+        value}
     </span>
   );
 }
@@ -38,80 +51,116 @@ function age(at: string) {
 }
 export function TicketTable({ items, masters }: { items: Ticket[]; masters?: TicketMasters }) {
   return (
-    <div className="ops-table-wrap">
-      <table className="ops-table">
-        <thead>
-          <tr>
-            {[
-              "Ticket",
-              "優先度",
-              "Service / Type",
-              "件名・次の対応",
-              "状態",
-              "担当",
-              "SLA",
-              "経過",
-              "更新",
-            ].map((x) => (
-              <th key={x}>{x}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((t) => (
-            <tr key={t.id}>
-              <td>
-                <Link className="text-accent font-mono" to={`/tickets/${t.id}`}>
-                  {t.ticket_number}
-                </Link>
-              </td>
-              <td>
-                <TicketBadge value={t.priority} />
-              </td>
-              <td>
-                {t.service_name}
-                <small>{ticketTypeLabels[t.type]}</small>
-              </td>
-              <td>
-                <Link to={`/tickets/${t.id}`}>{t.subject}</Link>
-                {t.next_action && (
-                  <small
-                    className={
-                      t.next_action_at && Date.parse(t.next_action_at) < Date.now()
-                        ? "text-danger"
-                        : ""
-                    }
-                  >
-                    次: {t.next_action}
-                    {t.next_action_at && (
-                      <>
-                        {" "}
-                        · <Timestamp value={t.next_action_at} />
-                      </>
-                    )}
-                  </small>
+    <>
+      <div className="ops-cards">
+        {items.map((t) => (
+          <Link key={t.id} to={`/tickets/${t.id}`} className="ops-card">
+            <div className="ops-card-top">
+              <span className="ops-ticket-number">{t.ticket_number}</span>
+              <TicketBadge value={t.priority} />
+              <TicketBadge value={t.status} />
+            </div>
+            <h3>{t.subject}</h3>
+            <div className="ops-card-meta">
+              <span>
+                {t.service_name} · {ticketTypeLabels[t.type]}
+              </span>
+              <span>{age(t.created_at)}</span>
+            </div>
+            {t.next_action && (
+              <p className="ops-card-next">
+                {t.next_action}
+                {t.next_action_at && (
+                  <>
+                    {" "}
+                    · <Timestamp value={t.next_action_at} />
+                  </>
                 )}
-              </td>
-              <td>
-                <TicketBadge value={t.status} />
-              </td>
-              <td>
-                {masters?.assignees.find((a) => a.id === t.assignee_id)?.name ??
-                  t.assignee_id ??
-                  "未割当"}
-              </td>
-              <td>
+              </p>
+            )}
+            {t.sla_state !== "OK" && (
+              <div className="ops-card-alert">
                 <TicketBadge value={t.sla_state} />
-              </td>
-              <td>{age(t.created_at)}</td>
-              <td>
-                <Timestamp value={t.updated_at} />
-              </td>
+              </div>
+            )}
+          </Link>
+        ))}
+      </div>
+      <div className="ops-table-wrap">
+        <table className="ops-table">
+          <thead>
+            <tr>
+              {[
+                "Ticket",
+                "優先度",
+                "サービス / 種別",
+                "件名・次の対応",
+                "状態",
+                "担当",
+                "SLA",
+                "経過",
+                "更新",
+              ].map((x) => (
+                <th key={x}>{x}</th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {items.map((t) => (
+              <tr key={t.id}>
+                <td>
+                  <Link className="text-accent font-mono" to={`/tickets/${t.id}`}>
+                    {t.ticket_number}
+                  </Link>
+                </td>
+                <td>
+                  <TicketBadge value={t.priority} />
+                </td>
+                <td>
+                  {t.service_name}
+                  <small>{ticketTypeLabels[t.type]}</small>
+                </td>
+                <td>
+                  <Link to={`/tickets/${t.id}`}>{t.subject}</Link>
+                  {t.next_action && (
+                    <small
+                      className={
+                        t.next_action_at && Date.parse(t.next_action_at) < Date.now()
+                          ? "text-danger"
+                          : ""
+                      }
+                    >
+                      次: {t.next_action}
+                      {t.next_action_at && (
+                        <>
+                          {" "}
+                          · <Timestamp value={t.next_action_at} />
+                        </>
+                      )}
+                    </small>
+                  )}
+                </td>
+                <td>
+                  <TicketBadge value={t.status} />
+                </td>
+                <td>
+                  {masters?.assignees.find((a) => a.id === t.assignee_id)?.name ??
+                    t.assignee_id ??
+                    "未割当"}
+                </td>
+                <td>
+                  <TicketBadge value={t.sla_state} />
+                </td>
+                <td>{age(t.created_at)}</td>
+                <td>
+                  <Timestamp value={t.updated_at} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 export function Tickets({ type }: { type?: TicketType }) {
@@ -119,6 +168,9 @@ export function Tickets({ type }: { type?: TicketType }) {
   const masters = useTicketMasters();
   const [creating, setCreating] = useState(false);
   const params = new URLSearchParams(search);
+  if (!params.has("queue") && !params.has("status") && params.get("view") !== "all")
+    params.set("queue", "OPEN");
+  params.delete("view");
   if (type) params.set("type", type);
   if (!params.has("limit")) params.set("limit", "50");
   const list = useQuery({
@@ -130,24 +182,58 @@ export function Tickets({ type }: { type?: TicketType }) {
     const p = new URLSearchParams(search);
     value ? p.set(key, value) : p.delete(key);
     p.delete("offset");
+    if (key === "status") {
+      p.delete("queue");
+      p.delete("view");
+    }
+    if (key === "service_id") p.delete("component_id");
+    if (key === "type") p.delete("category_id");
     setSearch(p);
   };
+  const quickViews = [
+    { label: "未完了", queue: "OPEN", status: "" },
+    { label: "未確認", queue: "UNACKNOWLEDGED", status: "" },
+    { label: "対応中", queue: "", status: "IN_PROGRESS" },
+    { label: "返信待ち", queue: "", status: "WAITING_CUSTOMER" },
+    { label: "クローズ済み", queue: "", status: "CLOSED" },
+    { label: "すべて", queue: "", status: "" },
+  ];
+  const quickView = (queue: string, status: string) => {
+    const p = new URLSearchParams(search);
+    for (const key of ["queue", "status", "view", "offset"]) p.delete(key);
+    if (queue) p.set("queue", queue);
+    else if (status) p.set("status", status);
+    else p.set("view", "all");
+    setSearch(p);
+  };
+  const filterCount = [
+    "priority",
+    "service_id",
+    "component_id",
+    "type",
+    "category_id",
+    "assignee_id",
+    "sla",
+    "next",
+    "created_from",
+    "created_to",
+  ].filter((k) => search.has(k)).length;
   const offset = Number(search.get("offset") ?? 0);
   const filters: Array<[string, string, Array<{ id: string; name: string }>]> = [
     ["status", "状態", ticketStatuses.map((id) => ({ id, name: ticketStatusLabels[id] }))],
     ["priority", "優先度", ticketPriorities.map((id) => ({ id, name: id }))],
-    ["service_id", "Service", masters.data?.services ?? []],
+    ["service_id", "サービス", masters.data?.services ?? []],
     [
       "component_id",
-      "Component",
+      "機能",
       (masters.data?.components ?? []).filter(
         (c) => !search.get("service_id") || c.service_id === search.get("service_id"),
       ),
     ],
-    ["type", "Type", ticketTypes.map((id) => ({ id, name: ticketTypeLabels[id] }))],
+    ["type", "種別", ticketTypes.map((id) => ({ id, name: ticketTypeLabels[id] }))],
     [
       "category_id",
-      "Category",
+      "分類",
       (masters.data?.categories ?? [])
         .filter((c) => !(type ?? search.get("type")) || c.type === (type ?? search.get("type")))
         .map((c) => ({
@@ -178,65 +264,117 @@ export function Tickets({ type }: { type?: TicketType }) {
     <section className="ops-page">
       <header className="ops-header">
         <div>
-          <p className="ops-eyebrow">OPERATIONS / QUEUE</p>
-          <h1>{type ? ticketTypeLabels[type] : "Tickets"}</h1>
-          <p className="text-ink-soft">{list.data?.total ?? "—"}件 · 優先度 → SLA → 経過時間</p>
+          <h1>
+            {type ? ticketTypeLabels[type] : "チケット"}
+            <span className="ops-count">{list.data?.total ?? "—"}</span>
+          </h1>
         </div>
         <Button variant="primary" onClick={() => setCreating(true)}>
-          Ticketを作成
+          新規作成
         </Button>
       </header>
-      <div className="ops-filters">
-        <Field label="検索: TK番号・件名・メール・ユーザーID・本文">
-          <input
-            className={inputClass}
-            value={search.get("query") ?? ""}
-            onChange={(e) => set("query", e.target.value)}
-            placeholder="検索語を入力"
-          />
-        </Field>
-        {filters
-          .filter(([key]) => !(key === "type" && type))
-          .map(([key, label, options]) => (
-            <Field key={key} label={label}>
-              <select
-                className={inputClass}
-                value={search.get(key) ?? ""}
-                onChange={(e) => set(key, e.target.value)}
-              >
-                <option value="">すべて</option>
-                {options.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          ))}
-        <Field label="作成日から (UTC)">
-          <input
-            type="date"
-            className={inputClass}
-            value={search.get("created_from")?.slice(0, 10) ?? ""}
-            onChange={(e) =>
-              set("created_from", e.target.value ? `${e.target.value}T00:00:00Z` : "")
-            }
-          />
-        </Field>
-        <Field label="作成日まで (UTC)">
-          <input
-            type="date"
-            className={inputClass}
-            value={search.get("created_to")?.slice(0, 10) ?? ""}
-            onChange={(e) => set("created_to", e.target.value ? `${e.target.value}T23:59:59Z` : "")}
-          />
-        </Field>
+      <nav className="ops-quick-views" aria-label="チケットの状態">
+        {quickViews.map((v) => {
+          const active = v.queue
+            ? params.get("queue") === v.queue
+            : v.status
+              ? params.get("status") === v.status && !params.has("queue")
+              : search.get("view") === "all" && !params.has("status") && !params.has("queue");
+          return (
+            <button
+              type="button"
+              key={v.label}
+              aria-pressed={active}
+              onClick={() => quickView(v.queue, v.status)}
+            >
+              {v.label}
+            </button>
+          );
+        })}
+      </nav>
+      <div className="ops-search">
+        <input
+          aria-label="チケットを検索"
+          className={inputClass}
+          value={search.get("query") ?? ""}
+          onChange={(e) => set("query", e.target.value)}
+          placeholder="件名・メール・チケット番号で検索"
+        />
       </div>
+      <details className="ops-filter-panel">
+        <summary>
+          絞り込み{filterCount > 0 && <span className="ops-filter-count">{filterCount}</span>}
+        </summary>
+        <div className="ops-filters">
+          {filters
+            .filter(([key]) => !(key === "type" && type))
+            .map(([key, label, options]) => (
+              <Field key={key} label={label}>
+                <select
+                  className={inputClass}
+                  value={search.get(key) ?? ""}
+                  onChange={(e) => set(key, e.target.value)}
+                >
+                  <option value="">すべて</option>
+                  {options.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            ))}
+          <Field label="作成日から (UTC)">
+            <input
+              type="date"
+              className={inputClass}
+              value={search.get("created_from")?.slice(0, 10) ?? ""}
+              onChange={(e) =>
+                set("created_from", e.target.value ? `${e.target.value}T00:00:00Z` : "")
+              }
+            />
+          </Field>
+          <Field label="作成日まで (UTC)">
+            <input
+              type="date"
+              className={inputClass}
+              value={search.get("created_to")?.slice(0, 10) ?? ""}
+              onChange={(e) =>
+                set("created_to", e.target.value ? `${e.target.value}T23:59:59Z` : "")
+              }
+            />
+          </Field>
+        </div>
+        <button
+          className="ops-clear-filters"
+          type="button"
+          onClick={() => {
+            const p = new URLSearchParams(search);
+            for (const key of [
+              "priority",
+              "service_id",
+              "component_id",
+              "type",
+              "category_id",
+              "assignee_id",
+              "sla",
+              "next",
+              "created_from",
+              "created_to",
+              "offset",
+            ])
+              p.delete(key);
+            setSearch(p);
+          }}
+        >
+          絞り込みを解除
+        </button>
+      </details>
       <DataState
         loading={list.isLoading}
         error={list.error ?? masters.error}
         empty={!list.data?.items.length}
-        emptyMessage="条件に合うTicketはありません。"
+        emptyMessage="該当するチケットはありません。"
       >
         {list.data && <TicketTable items={list.data.items} masters={masters.data} />}
       </DataState>
@@ -252,7 +390,8 @@ export function Tickets({ type }: { type?: TicketType }) {
           前へ
         </Button>
         <span>
-          {offset + 1}–{Math.min(offset + 50, list.data?.total ?? 0)} / {list.data?.total ?? 0}
+          {list.data?.total ? offset + 1 : 0}–{Math.min(offset + 50, list.data?.total ?? 0)} /{" "}
+          {list.data?.total ?? 0}
         </span>
         <Button
           disabled={offset + 50 >= (list.data?.total ?? 0)}
@@ -310,7 +449,7 @@ function CreateTicket({
   return (
     <Dialog
       open
-      title="Ticketを作成"
+      title="新規作成"
       onClose={onClose}
       footer={
         <Button
@@ -323,7 +462,7 @@ function CreateTicket({
       }
     >
       <div className="space-y-4">
-        <Field label="Type">
+        <Field label="種別">
           <select
             className={inputClass}
             value={type}
@@ -336,7 +475,7 @@ function CreateTicket({
             ))}
           </select>
         </Field>
-        <Field label="Service">
+        <Field label="サービス">
           <select
             className={inputClass}
             value={service}
@@ -394,12 +533,10 @@ export function TicketOperationsDashboard() {
     <section className="ops-page">
       <header className="ops-header">
         <div>
-          <p className="ops-eyebrow">TOMOKICHI STUDIO</p>
-          <h1>Operations</h1>
-          <p className="text-ink-soft">確認する、対応する、次につなぐ。</p>
+          <h1>ダッシュボード</h1>
         </div>
         <Link className="text-accent" to="/tickets">
-          すべてのTicket →
+          チケット一覧 →
         </Link>
       </header>
       <DataState loading={data.isLoading} error={data.error} empty={false} emptyMessage="">
@@ -407,12 +544,12 @@ export function TicketOperationsDashboard() {
           <>
             <div className="ops-metrics">
               {[
-                ["Open Tickets", d.open, "queue=OPEN"],
-                ["未ACK", d.unacknowledged, "queue=UNACKNOWLEDGED"],
-                ["P1 / P2", d.urgent, "queue=URGENT"],
-                ["SLA Risk", d.slaRisk, "queue=SLA_RISK"],
-                ["次の対応・期限超過", d.overdue, "next=OVERDUE"],
-                ["ユーザー待ち", d.waitingCustomer, "status=WAITING_CUSTOMER"],
+                ["未完了", d.open, "queue=OPEN"],
+                ["未確認", d.unacknowledged, "queue=UNACKNOWLEDGED"],
+                ["優先対応", d.urgent, "queue=URGENT"],
+                ["SLA注意", d.slaRisk, "queue=SLA_RISK"],
+                ["期限超過", d.overdue, "next=OVERDUE"],
+                ["返信待ち", d.waitingCustomer, "status=WAITING_CUSTOMER"],
               ].map(([label, n, query]) => (
                 <Link key={label} to={`/tickets?${query}`}>
                   <span>{label}</span>
@@ -420,20 +557,17 @@ export function TicketOperationsDashboard() {
                 </Link>
               ))}
             </div>
-            <h2 className="ops-section-title">Priority Queue</h2>
+            <h2 className="ops-section-title">優先対応</h2>
             {d.priorityQueue.length ? (
               <TicketTable items={d.priorityQueue} masters={masters.data} />
             ) : (
-              <p>対応待ちのTicketはありません。</p>
+              <p>対応待ちのチケットはありません。</p>
             )}
-            <h2 className="ops-section-title">Needs Attention</h2>
-            <p className="mb-3 text-sm text-ink-soft">
-              SLAリスク・次の対応の期限超過・未割当・3日以上の待機
-            </p>
+            <h2 className="ops-section-title">要確認</h2>
             {d.needsAttention.length ? (
               <TicketTable items={d.needsAttention} masters={masters.data} />
             ) : (
-              <p>注意が必要なTicketはありません。</p>
+              <p>確認が必要なチケットはありません。</p>
             )}
           </>
         )}
