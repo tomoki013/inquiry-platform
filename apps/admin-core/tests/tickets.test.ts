@@ -2,6 +2,7 @@ import type { Result, SupportThreadDetail } from "@tomokichi/admin-contracts";
 import { defaultSlaGoals, slaClock, ticketPriority } from "@tomokichi/admin-contracts";
 import { describe, expect, it } from "vitest";
 import migration from "../migrations/0006_ticket_core.sql?raw";
+import receiptMigration from "../migrations/0008_report_receipt_first_response.sql?raw";
 import { TicketService } from "../src/domain/ticket-service";
 import { admin, appActor, harness, seedApp, splitMigration } from "./harness";
 
@@ -142,7 +143,7 @@ describe("Ticket operations", () => {
     expect(value(await tickets.list({ query: "secretneedle" })).total).toBe(1);
     expect((await tickets.note({ ...input, visibility: "PUBLIC" }, admin)).ok).toBe(false);
   });
-  it("projects existing support input and keeps automatic receipt out of first response SLA", async () => {
+  it("counts a successful automatic receipt as first response and preserves it after a manual reply", async () => {
     const h = await harness(),
       app = await seedApp(h),
       tickets = new TicketService(h.db);
@@ -161,7 +162,7 @@ describe("Ticket operations", () => {
     const source = value(await tickets.source("report", report.reportId));
     const t = value(await tickets.detail(source.id)).ticket;
     expect(t.type).toBe("REPORT");
-    expect(t.first_response_at).toBeNull();
+    expect(t.first_response_at).not.toBeNull();
     expect(value(await tickets.list({})).total).toBe(1);
     value(
       await h.reply.send(
@@ -173,7 +174,7 @@ describe("Ticket operations", () => {
         admin,
       ),
     );
-    expect(value(await tickets.detail(t.id)).ticket.first_response_at).not.toBeNull();
+    expect(value(await tickets.detail(t.id)).ticket.first_response_at).toBe(t.first_response_at);
     expect(app).toBe(t.service_id);
   });
   it("reopens the Ticket when a customer replies to a closed conversation", async () => {
@@ -492,4 +493,62 @@ it("refuses merges across requesters and terminal edits before reopening", async
   expect(
     (await tickets.note({ id: t.id, body: "cannot add", idempotencyKey: "closed-note" }, admin)).ok,
   ).toBe(false);
+});
+
+it("leaves failed/no-address receipts unanswered, then records the successful retry", async () => {
+  const h = await harness();
+  await seedApp(h);
+  const tickets = new TicketService(h.db);
+  const input = {
+    appSlug: "remeet",
+    externalReportId: "failed-receipt",
+    contentType: "wish",
+    reasonCode: "spam",
+    reporterEmail: "person@example.com",
+  };
+  h.mail.failNext = true;
+  const report = value(await h.reports.create(input, appActor));
+  const source = value(await tickets.source("report", report.reportId));
+  expect(value(await tickets.detail(source.id)).ticket.first_response_at).toBeNull();
+  await h.reports.sendReceipt(report.reportId);
+  const at = value(await tickets.detail(source.id)).ticket.first_response_at;
+  expect(at).not.toBeNull();
+  await h.reports.sendReceipt(report.reportId);
+  expect(value(await tickets.detail(source.id)).ticket.first_response_at).toBe(at);
+  const noEmail = value(
+    await h.reports.create(
+      { ...input, externalReportId: "no-email", reporterEmail: undefined },
+      appActor,
+    ),
+  );
+  const noEmailSource = value(await tickets.source("report", noEmail.reportId));
+  expect(value(await tickets.detail(noEmailSource.id)).ticket.first_response_at).toBeNull();
+});
+
+it("backfills an earlier receipt safely even when a manual response was already recorded", async () => {
+  const h = await harness();
+  await seedApp(h);
+  const tickets = new TicketService(h.db);
+  const report = value(
+    await h.reports.create(
+      {
+        appSlug: "remeet",
+        externalReportId: "backfill",
+        contentType: "wish",
+        reasonCode: "spam",
+        reporterEmail: "person@example.com",
+      },
+      appActor,
+    ),
+  );
+  const source = value(await tickets.source("report", report.reportId));
+  const original = value(await tickets.detail(source.id)).ticket.first_response_at;
+  await h.db
+    .prepare("UPDATE tickets SET first_response_at='2099-01-01T00:00:00.000Z' WHERE id=?")
+    .bind(source.id)
+    .run();
+  for (let i = 0; i < 2; i++) {
+    for (const sql of splitMigration(receiptMigration)) await h.db.prepare(sql).run();
+    expect(value(await tickets.detail(source.id)).ticket.first_response_at).toBe(original);
+  }
 });

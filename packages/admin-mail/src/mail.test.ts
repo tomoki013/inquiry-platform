@@ -190,3 +190,14 @@ it("escapes the signature and renders it separately without duplicating it", () 
   expect(html).toContain("&lt;img src=x&gt;");
   expect(html.match(/Tomoki Takagi/g)).toHaveLength(1);
 });
+
+it("renders one dark-mode aware mail document with escaped body and signature", () => {
+  const signature = "Tomokichi Studio\n髙木友喜 / Tomoki Takagi";
+  const html = plainTextToSafeHtml(`<script>unsafe</script>\n\n${signature}`, signature);
+  expect(html.match(/<!doctype html>/g)).toHaveLength(1);
+  expect(html).toContain('name="color-scheme" content="light dark"');
+  expect(html).toContain("@media (prefers-color-scheme: dark)");
+  expect(html).toContain('class="mail-brand"');
+  expect(html).toContain("&lt;script&gt;unsafe&lt;/script&gt;");
+  expect(html).not.toContain("<script>");
+});

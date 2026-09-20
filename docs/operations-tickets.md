@@ -20,7 +20,7 @@ Admin Core owns D1 and private R2. Admin Web is authenticated on every route by 
 | report low / normal / high | P4 / P3 / P2 |
 | content_deleted / no_action | CONTENT_REMOVED / NO_ACTION_REQUIRED |
 
-A linked report takes lifecycle precedence over its mail thread during migration: a resolved correspondence does not imply moderation has completed. Unknown historical resolution codes are retained and map to OTHER. Historical ACKs are not invented. Automatic receipt emails do not count as a human first response.
+A linked report takes lifecycle precedence over its mail thread during migration: a resolved correspondence does not imply moderation has completed. Unknown historical resolution codes are retained and map to OTHER. Historical ACKs are not invented. Successfully sent report receipt emails count as the first customer response. Failed sends and reports without an email address remain unanswered. Migration 0008 backfills the earliest successful receipt time, including tickets with a later manual reply. The automatic flag remains visible on the message.
 
 ## Rollout
 
@@ -37,7 +37,7 @@ NEW → TRIAGE → ACKNOWLEDGED → IN_PROGRESS → RESOLVED → CLOSED. ACK is 
 
 ## Priority and SLA
 
-Impact × urgency: HIGH/HIGH=P1; HIGH/MEDIUM or LOW=P2; MEDIUM/HIGH=P2; LOW/LOW=P4; remaining combinations=P3. Overrides require a recorded reason. SLA defaults (minutes): P1 15/30/240, P2 60/240/1440, P3 480/1440/4320, P4 1440/2880/best-effort for ACK/first human response/resolution. Elapsed UTC time, no business calendar or paused waiting clock. Risk begins at 80%; breached at the deadline. Imported unknown ACKs remain visibly unknown. Goals are snapshotted for existing tickets so settings edits do not retroactively rewrite targets.
+Impact × urgency: HIGH/HIGH=P1; HIGH/MEDIUM or LOW=P2; MEDIUM/HIGH=P2; LOW/LOW=P4; remaining combinations=P3. Overrides require a recorded reason. SLA defaults (minutes): P1 15/30/240, P2 60/240/1440, P3 480/1440/4320, P4 1440/2880/best-effort for ACK/first customer response/resolution. Elapsed UTC time, no business calendar or paused waiting clock. Risk begins at 80%; breached at the deadline. Imported unknown ACKs remain visibly unknown. Goals are snapshotted for existing tickets so settings edits do not retroactively rewrite targets.
 
 ## Integrity
 

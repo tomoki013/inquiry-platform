@@ -94,3 +94,11 @@ API と Admin Core には既存の相互連携があるため、API の新しい
 
 
 The Operations Ticket UI now wraps this signed moderation flow. See [Operations Tickets](operations-tickets.md) for lifecycle, internal notes, migration and administration.
+
+### 投稿者ごとの通報履歴
+
+管理画面の通報対象に、同じアプリ内の `author_ref_hash` ごとの通報件数、通報者ID数、対応あり件数、直近10件へのリンクを表示する。クローズ済みも集計に残し、再送された同一通報は既存の受付重複排除により加算しない。本文や証拠を複製せず、既存の `reports` を参照する。0007 は検索用インデックスのみを追加する。
+
+これはアプリ申告の仮名IDによる集計であり、実名・本人確認済みアカウント・違反確定数ではない。投稿者IDのない旧コンテンツや Remeet の Wish は不明として表示し、不明同士を同じ人として集計しない。「対応あり」は現在の対応済み状態または削除等の対応結果がある通報を数える。
+
+送信メールは light/dark の color-scheme 宣言と暗色の本文・署名配色を持つ。HTMLを独自変換するメールクライアントでは表示が異なるため、実際の受信アプリで最終確認する。過去に送信済みのメールは変わらない。

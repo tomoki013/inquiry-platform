@@ -167,6 +167,7 @@ describe("templates", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("textbox")).toHaveValue("定型文の本文");
+      expect(screen.getByRole("combobox")).toHaveValue("tpl-1");
     });
   });
 
@@ -188,6 +189,7 @@ describe("templates", () => {
     await user.click(screen.getByRole("button", { name: "末尾に追加" }));
     await waitFor(() => {
       expect(screen.getByRole("textbox")).toHaveValue("書きかけの返信\n\n定型文の本文");
+      expect(screen.getByRole("combobox")).toHaveValue("tpl-1");
     });
   });
 
@@ -203,6 +205,7 @@ describe("templates", () => {
     await user.keyboard("{Escape}");
 
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByRole("combobox")).toHaveValue("");
     expect(screen.getByRole("textbox")).toHaveValue("書きかけの返信");
   });
 });

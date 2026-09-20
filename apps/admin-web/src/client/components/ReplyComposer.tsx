@@ -64,6 +64,7 @@ export function ReplyComposer({
   const [appliedTemplate, setAppliedTemplate] = useState<{ id: string; subject: string } | null>(
     null,
   );
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [confirmReopen, setConfirmReopen] = useState(false);
   const [sending, setSending] = useState(false);
   const draftWrite = useRef<Promise<unknown> | null>(null);
@@ -138,6 +139,7 @@ export function ReplyComposer({
       if (body.trim().length === 0) {
         setBody(applied.bodyText);
         setAppliedTemplate({ id: templateId, subject: applied.subject });
+        setSelectedTemplateId(templateId);
       } else {
         setPendingTemplate({ ...applied, id: templateId });
       }
@@ -149,6 +151,7 @@ export function ReplyComposer({
     idempotencyKey.current = crypto.randomUUID();
     setBody("");
     setAppliedTemplate(null);
+    setSelectedTemplateId("");
     setDraftState("idle");
     loadedDraftFor.current = thread.id;
     client.setQueryData(["support-draft", thread.id], null);
@@ -240,7 +243,7 @@ export function ReplyComposer({
               <span className="mb-1 block text-xs font-medium text-ink-soft">定型文を選択</span>
               <select
                 className={inputClass}
-                value=""
+                value={pendingTemplate?.id ?? selectedTemplateId}
                 onChange={(event) => void applyTemplate(event.target.value)}
               >
                 <option value="">選択してください</option>
@@ -362,6 +365,7 @@ export function ReplyComposer({
                 // Appending mixes two templates' words together; whichever
                 // subject is already in force stays in force.
                 setBody((current) => `${current}\n\n${pendingTemplate?.bodyText ?? ""}`);
+                setSelectedTemplateId(pendingTemplate?.id ?? "");
                 setPendingTemplate(null);
               }}
             >
@@ -372,6 +376,7 @@ export function ReplyComposer({
               onClick={() => {
                 setBody(pendingTemplate?.bodyText ?? "");
                 if (pendingTemplate) {
+                  setSelectedTemplateId(pendingTemplate.id);
                   setAppliedTemplate({ id: pendingTemplate.id, subject: pendingTemplate.subject });
                 }
                 setPendingTemplate(null);

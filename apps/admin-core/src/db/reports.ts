@@ -280,8 +280,37 @@ export class ReportRepository {
         .bind(id),
     ]);
 
+    // Missing identities never form a shared "unknown author" group. Keep the
+    // lookup scoped to the app even when two apps happen to supply the same ID.
+    let authorHistory: ReportDetail["authorHistory"];
+    if (row.author_ref_hash) {
+      const [counts, recent] = await this.db.batch([
+        this.db
+          .prepare(`SELECT COUNT(*) AS total,
+          COUNT(DISTINCT reporter_ref_hash) AS uniqueReporters,
+          SUM(CASE WHEN status = 'actioned' OR resolution_code IN ('content_deleted', 'content_removed', 'account_actioned') THEN 1 ELSE 0 END) AS actioned
+          FROM reports WHERE app_id = ? AND author_ref_hash = ?`)
+          .bind(row.app_id, row.author_ref_hash),
+        this.db
+          .prepare(`${SELECT_WITH_APP} WHERE r.app_id = ? AND r.author_ref_hash = ?
+          ORDER BY r.created_at DESC, r.id DESC LIMIT 10`)
+          .bind(row.app_id, row.author_ref_hash),
+      ]);
+      if (!counts?.results[0] || !recent) throw new Error("ReportAuthorHistoryUnavailable");
+      const totals = counts.results[0] as {
+        total: number;
+        uniqueReporters: number;
+        actioned: number;
+      };
+      authorHistory = {
+        ...totals,
+        recent: (recent.results as unknown as ReportRow[]).map(toSummary),
+      };
+    }
+
     return {
       ...toSummary(row),
+      authorHistory,
       supportThreadId: row.support_thread_id ?? undefined,
       contextExternalId: row.context_external_id ?? undefined,
       contentExternalId: row.content_external_id ?? undefined,

@@ -181,6 +181,13 @@ export interface ReportDetail extends ReportSummary {
   contentExternalId?: string;
   reporterRefHash?: string;
   authorRefHash?: string;
+  /** Same-app pseudonymous identity, reported by the client; not a verified account. */
+  authorHistory?: {
+    total: number;
+    uniqueReporters: number;
+    actioned: number;
+    recent: ReportSummary[];
+  };
   detail?: string;
   snapshotText?: string;
   resolvedAt?: string;

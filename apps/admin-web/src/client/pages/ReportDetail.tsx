@@ -19,6 +19,7 @@ import {
   Timestamp,
 } from "../components/primitives";
 import { ReplyComposer } from "../components/ReplyComposer";
+import { ReportAuthorHistory } from "../components/ReportAuthorHistory";
 import { api } from "../lib/api";
 import { reportStatusLabels } from "../lib/labels";
 
@@ -102,6 +103,7 @@ export function ReportDetail() {
                   </span>
                 </Row>
               </dl>
+              <ReportAuthorHistory report={data} />
               {data.snapshotText ? (
                 <div className="mt-4">
                   <p className="mb-1 text-xs font-medium text-ink-soft">通報対象の本文</p>

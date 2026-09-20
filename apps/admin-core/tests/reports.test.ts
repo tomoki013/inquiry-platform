@@ -425,3 +425,37 @@ describe("report reply correlation without provider headers", () => {
     expect(result.ok && result.value.threadId).not.toBe(first);
   });
 });
+
+describe("author history", () => {
+  it("counts distinct reports and reporter IDs, retaining closed reports and ignoring retries", async () => {
+    const first = expectOk<CreateReportResult>(
+      (await h.reports.create(report(), appActor)) as never,
+    );
+    await h.reports.create(report(), appActor);
+    const second = expectOk<CreateReportResult>(
+      (await h.reports.create(
+        report({ externalReportId: "second", reporterRefHash: "another-reporter" }),
+        appActor,
+      )) as never,
+    );
+    await h.reports.changeStatus({ reportId: second.reportId, to: "closed" }, admin);
+    await h.reports.create(
+      report({ externalReportId: "other-author", authorRefHash: "someone-else" }),
+      appActor,
+    );
+    await seedApp(h, "yohaku");
+    await h.reports.create(report({ externalReportId: "other-app", appSlug: "yohaku" }), admin);
+    const detail = expectOk<ReportDetail>((await h.reports.detail(first.reportId)) as never);
+    expect(detail.authorHistory).toMatchObject({ total: 2, uniqueReporters: 2, actioned: 0 });
+    expect(detail.authorHistory?.recent.map((item) => item.id).sort()).toEqual(
+      [first.reportId, second.reportId].sort(),
+    );
+  });
+  it("does not group reports without an author identity", async () => {
+    const first = expectOk<CreateReportResult>(
+      (await h.reports.create(report({ authorRefHash: undefined }), appActor)) as never,
+    );
+    const detail = expectOk<ReportDetail>((await h.reports.detail(first.reportId)) as never);
+    expect(detail.authorHistory).toBeUndefined();
+  });
+});

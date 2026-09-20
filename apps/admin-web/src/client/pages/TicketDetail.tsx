@@ -21,6 +21,7 @@ import { Link, useParams } from "react-router";
 import { Dialog } from "../components/Dialog";
 import { Button, DataState, Field, inputClass, Timestamp } from "../components/primitives";
 import { ReplyComposer } from "../components/ReplyComposer";
+import { ReportAuthorHistory } from "../components/ReportAuthorHistory";
 import { api } from "../lib/api";
 import { ContentActions } from "./ReportDetail";
 import { TicketBadge, useTicketMasters } from "./Tickets";
@@ -201,6 +202,7 @@ export function TicketDetail() {
                 {report.data && (
                   <div className="ops-panel mb-5">
                     <h2 className="font-medium mb-3">通報対象</h2>
+                    <ReportAuthorHistory report={report.data} />
                     <p className="text-xs text-ink-soft">
                       {report.data.contentType} · {report.data.reasonCode} · 受付ID{" "}
                       {report.data.externalReportId}
@@ -249,7 +251,9 @@ export function TicketDetail() {
                               ? "内部メモ・送信なし"
                               : item.value.direction === "INBOUND"
                                 ? "ユーザーから受信"
-                                : "運営から送信"
+                                : item.value.is_automatic
+                                  ? "自動受付メール"
+                                  : "運営から送信"
                             : (eventLabels[item.value.event_type] ?? item.value.event_type)}
                         </strong>
                         <Timestamp value={item.value.created_at} />

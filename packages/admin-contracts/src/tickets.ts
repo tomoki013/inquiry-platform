@@ -184,6 +184,7 @@ export interface TicketMessage {
   body: string;
   created_at: string;
   legacy_message_id: string | null;
+  is_automatic?: number;
   attachments?: Array<{ id: string; originalFilename: string | null }>;
 }
 export interface TicketEvent {
