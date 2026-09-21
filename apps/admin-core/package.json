@@ -13,11 +13,13 @@
     "migrate:local": "wrangler d1 migrations apply tomokichi-admin --local",
     "migrate:remote": "wrangler d1 migrations apply tomokichi-admin --remote",
     "seed": "node --experimental-strip-types scripts/seed.ts",
+    "vapid:generate": "node --experimental-strip-types scripts/generate-vapid-keys.ts",
     "cf-typegen": "wrangler types --env-interface CloudflareBindings --strict-vars=false"
   },
   "dependencies": {
     "@tomokichi/admin-contracts": "workspace:*",
     "@tomokichi/admin-mail": "workspace:*",
+    "@tomokichi/admin-push": "workspace:*",
     "hono": "^4.13.2",
     "zod": "^4.4.2"
   },

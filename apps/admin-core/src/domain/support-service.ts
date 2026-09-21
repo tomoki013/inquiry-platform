@@ -21,6 +21,7 @@ import type { AppRepository } from "../db/apps";
 import type { AuditRepository } from "../db/audit";
 import type { SupportRepository } from "../db/support";
 import { internalFailure, notFound, validationFailure } from "./failures";
+import type { NotificationHook } from "./notification-service";
 import { findReportReplyThread } from "./report-threading";
 
 /**
@@ -39,6 +40,12 @@ export class SupportService {
     private readonly support: SupportRepository,
     private readonly apps: AppRepository,
     private readonly audit: AuditRepository,
+    /**
+     * Told about a new ticket after — and only after — its batch committed.
+     * Given an id and a kind; see `TicketCreatedRef`. Absent in environments
+     * with nothing to notify.
+     */
+    private readonly notify?: NotificationHook,
   ) {}
 
   /**
@@ -130,6 +137,11 @@ export class SupportService {
       );
 
       await this.db.batch(statements);
+      // Push only: the operator already receives the mail itself, and a
+      // second mail saying "there is mail" would be noise.
+      if (!existingThreadId) {
+        this.notify?.({ ticketId: threadId, category: "inquiry", channels: { email: false } });
+      }
       return ok({ threadId, messageId, duplicate: false, newThread: !existingThreadId });
     } catch (error) {
       return internalFailure("support.ingestInboundEmail", error);
@@ -144,6 +156,15 @@ export class SupportService {
     const input = parsed.data;
 
     try {
+      // The form's request id travels as `providerMessageId`. Now that the
+      // submission is accepted only once this row exists, the sender's client
+      // may retry a request whose response was lost — and one press must be
+      // one ticket, with one notification.
+      if (input.providerMessageId) {
+        const seen = await this.support.messageExists(input.providerMessageId);
+        if (seen) return await this.detail(seen.thread_id);
+      }
+
       const appId = input.appSlug ? (await this.apps.findBySlug(input.appSlug))?.id : undefined;
       const at = input.createdAt ?? nowIso();
       const threadId = newId();
@@ -180,6 +201,7 @@ export class SupportService {
         }),
       ]);
 
+      this.notify?.({ ticketId: threadId, category: "inquiry" });
       return await this.detail(threadId);
     } catch (error) {
       return internalFailure("support.createThread", error);

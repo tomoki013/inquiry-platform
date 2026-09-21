@@ -10,6 +10,9 @@ import type {
   CreateReportResult,
   DashboardSummary,
   IngestInboundEmailResult,
+  NotificationOverview,
+  NotificationSettings,
+  PushDeviceSummary,
   ReplyTemplate,
   ReportDetail,
   ReportListPage,
@@ -27,9 +30,11 @@ import {
 } from "@tomokichi/admin-contracts";
 import type { MailProvider } from "@tomokichi/admin-mail";
 import { ResendMailProvider, UnconfiguredMailProvider } from "@tomokichi/admin-mail";
+import { importVapid, sendWebPush, type VapidSigner } from "@tomokichi/admin-push";
 import { AppRepository } from "./db/apps";
 import { AuditRepository } from "./db/audit";
 import { dispositionFor, FileStore } from "./db/files";
+import { NotificationRepository } from "./db/notifications";
 import { ReportRepository } from "./db/reports";
 import { SupportRepository } from "./db/support";
 import { TemplateRepository } from "./db/templates";
@@ -37,6 +42,7 @@ import { AppService } from "./domain/app-service";
 import { DashboardService } from "./domain/dashboard-service";
 import { internalFailure, validationFailure } from "./domain/failures";
 import { sha256Hex } from "./domain/identity";
+import { NotificationService, type TicketCreatedRef } from "./domain/notification-service";
 import { ReplyService } from "./domain/reply-service";
 import { expireReportEvidence } from "./domain/report-retention";
 import { ReportService } from "./domain/report-service";
@@ -65,7 +71,7 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
   private cached?: ReturnType<typeof buildServices>;
 
   private get services() {
-    this.cached ??= buildServices(this.env);
+    this.cached ??= buildServices(this.env, (work) => this.ctx.waitUntil(work));
     return this.cached;
   }
 
@@ -266,6 +272,21 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
     return this.services.apps.removeLink(linkId, actor);
   }
 
+  // ---- Notifications ----------------------------------------------------
+
+  notificationOverview(actor: ActorRef): Promise<Result<NotificationOverview>> {
+    return this.services.notifications.overview(actor);
+  }
+  saveNotificationSettings(input: unknown, actor: ActorRef): Promise<Result<NotificationSettings>> {
+    return this.services.notifications.saveSettings(input, actor);
+  }
+  registerPushSubscription(input: unknown, actor: ActorRef): Promise<Result<PushDeviceSummary>> {
+    return this.services.notifications.register(input, actor);
+  }
+  revokePushSubscription(input: unknown, actor: ActorRef): Promise<Result<null>> {
+    return this.services.notifications.revoke(input, actor);
+  }
+
   // ---- Cross-cutting ----------------------------------------------------
 
   async listActivity(input: unknown): Promise<Result<AuditEntry[]>> {
@@ -295,6 +316,7 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
     await this.services.reports.retryReceipts();
     await this.services.reply.refreshMessageIds();
     await expireReportEvidence(this.env);
+    await this.services.notifications.purgeRevoked();
   }
 
   override async fetch(request: Request): Promise<Response> {
@@ -416,7 +438,13 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
   }
 }
 
-function buildServices(env: AdminCoreEnv) {
+/**
+ * @param schedule Runs notification work outside the caller's result —
+ * `ctx.waitUntil` in the Worker. The ticket is committed before this is
+ * called, so nothing here can fail it; it only decides whether the caller
+ * waits.
+ */
+function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknown>) => void) {
   const apps = new AppRepository(env.DB);
   const reports = new ReportRepository(env.DB);
   const support = new SupportRepository(env.DB);
@@ -429,7 +457,28 @@ function buildServices(env: AdminCoreEnv) {
     ? new ResendMailProvider(env.MAIL_API_KEY)
     : new UnconfiguredMailProvider();
 
-  const supportService = new SupportService(env.DB, support, apps, audit);
+  const vapid = lazyVapid(env);
+  const notifications = new NotificationService(
+    env.DB,
+    new NotificationRepository(env.DB),
+    audit,
+    mail,
+    {
+      vapid,
+      send: (target, payload) =>
+        vapid
+          ? sendWebPush(target, payload, vapid)
+          : Promise.resolve({ ok: false, gone: false, reason: "payload" }),
+    },
+    {
+      notifyEmail: env.NOTIFICATION_EMAIL,
+      from: `${env.SUPPORT_FROM_NAME} <${env.NOREPLY_EMAIL}>`,
+      adminOrigin: env.ADMIN_ORIGIN,
+    },
+  );
+  const notify = (ref: TicketCreatedRef) => schedule(notifications.ticketCreated(ref));
+
+  const supportService = new SupportService(env.DB, support, apps, audit, notify);
 
   const replyService = new ReplyService(
     env.DB,
@@ -457,11 +506,38 @@ function buildServices(env: AdminCoreEnv) {
       support,
       replyService,
       env.REMEET_MODERATION,
+      notify,
     ),
     support: supportService,
     reply: replyService,
     dashboard: new DashboardService(reports, support, apps, audit),
     audit,
+    notifications,
+  };
+}
+
+/**
+ * The VAPID signer, imported on first use.
+ *
+ * `importVapid` is asynchronous and `buildServices` is not; the public key is
+ * known synchronously either way, which is all the settings screen needs
+ * before anybody presses anything. A malformed private key surfaces as a
+ * failed first send in the log, not as a Worker that will not start.
+ */
+function lazyVapid(env: AdminCoreEnv): VapidSigner | undefined {
+  if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY) return undefined;
+  const config = {
+    publicKey: env.VAPID_PUBLIC_KEY,
+    privateKey: env.VAPID_PRIVATE_KEY,
+    subject: env.VAPID_SUBJECT ?? `mailto:${env.SUPPORT_EMAIL}`,
+  };
+  let signer: Promise<VapidSigner> | undefined;
+  return {
+    publicKey: config.publicKey,
+    authorization(endpoint, now) {
+      signer ??= importVapid(config);
+      return signer.then((ready) => ready.authorization(endpoint, now));
+    },
   };
 }
 

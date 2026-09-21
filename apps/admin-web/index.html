@@ -7,6 +7,16 @@
          previewed anywhere. -->
     <meta name="robots" content="noindex, nofollow" />
     <title>Tomokichi Studio Admin</title>
+    <!-- Installable. The manifest is fetched with the Access cookie
+         (`use-credentials`); the icons are exempt from the gate in the Worker
+         because a browser fetches them bare. -->
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="theme-color" content="#fcfcfd" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Tomokichi Admin" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   </head>
   <body>
     <div id="root"></div>

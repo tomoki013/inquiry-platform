@@ -27,6 +27,7 @@ import type { ReportRepository } from "../db/reports";
 import type { SupportRepository } from "../db/support";
 import { internalFailure, notFound, validationFailure } from "./failures";
 import { pseudonymise } from "./identity";
+import type { NotificationHook } from "./notification-service";
 import type { ReplyService } from "./reply-service";
 import { reportMailSubject } from "./report-threading";
 
@@ -48,6 +49,8 @@ export class ReportService {
     private readonly support: SupportRepository,
     private readonly reply: ReplyService,
     private readonly moderation?: RemeetModerationApi,
+    /** See `SupportService`: an id and a kind, after the batch committed. */
+    private readonly notify?: NotificationHook,
   ) {}
 
   /**
@@ -129,6 +132,8 @@ export class ReportService {
         }),
       ]);
 
+      // The ticket is the thread's row: `ticket_report_insert` retyped it.
+      this.notify?.({ ticketId: threadId, category: "report" });
       await this.sendReceipt(id);
       return ok({ reportId: id, duplicate: false });
     } catch (error) {

@@ -368,3 +368,117 @@ describe("Ticket RPC boundary", () => {
     expect(listTickets).toHaveBeenCalledOnce();
   });
 });
+
+/**
+ * The PWA surface and the push routes.
+ *
+ * What is pinned: the manifest and icons are served bare (a browser fetches an
+ * install icon without cookies), and *nothing else* is — the service worker,
+ * the bundle and a ticket deep link all still meet the gate, so a
+ * notification tap while signed out goes to Access's login and comes back to
+ * the same path. And a push subscription can only be registered, or removed,
+ * by a same-origin JSON request from a signed-in operator, under that
+ * operator's own identity.
+ */
+describe("PWA and push", () => {
+  const local = (overrides: Partial<AdminWebEnv> = {}) =>
+    env({ ENVIRONMENT: "local", DEV_ADMIN_EMAIL: "dev@example.com", ...overrides });
+  const gated = () => env({ ACCESS_TEAM_DOMAIN: newDomain(), ACCESS_AUD: AUD });
+
+  it.each(["/manifest.webmanifest", "/icons/icon-192.png"])(
+    "serves %s without a token",
+    async (path) => {
+      const response = await createApp().fetch(get(path), gated(), ctx);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    },
+  );
+
+  it.each(["/sw.js", "/tickets/TK-000123", "/settings/notifications", "/icons", "/iconsx"])(
+    "still gates %s",
+    async (path) => {
+      const response = await createApp().fetch(get(path), gated(), ctx);
+      expect(response.status).toBe(401);
+    },
+  );
+
+  it("keeps the service worker out of the asset cache", async () => {
+    const response = await createApp().fetch(get("/sw.js"), local(), ctx);
+    expect(response.headers.get("Cache-Control")).toBe("no-cache");
+  });
+
+  it("registers a subscription under the signed-in operator, with the request's user agent", async () => {
+    const registerPushSubscription = vi.fn().mockResolvedValue({ ok: true, value: { id: "d1" } });
+    const response = await createApp().fetch(
+      new Request("https://admin.tmkch.io/api/notifications/push/subscriptions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Origin: "http://localhost:4330",
+          "User-Agent": "TestBrowser/1.0",
+        },
+        body: JSON.stringify({
+          endpoint: "https://push.example/x",
+          keys: { p256dh: "k", auth: "a" },
+          // A body claiming a different device or operator changes nothing.
+          userAgent: "Forged/9.9",
+          adminUserId: "somebody-else",
+        }),
+      }),
+      local({ ADMIN_CORE: { registerPushSubscription } as never }),
+      ctx,
+    );
+    expect(response.status).toBe(200);
+    const [input, actor] = registerPushSubscription.mock.calls[0] as [
+      Record<string, unknown>,
+      unknown,
+    ];
+    expect(input.userAgent).toBe("TestBrowser/1.0");
+    expect(actor).toEqual({ type: "admin", id: "local:dev@example.com" });
+  });
+
+  it("refuses a cross-site subscription registration before Admin Core hears of it", async () => {
+    const registerPushSubscription = vi.fn();
+    const response = await createApp().fetch(
+      new Request("https://admin.tmkch.io/api/notifications/push/subscriptions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: "https://evil.example.com" },
+        body: JSON.stringify({ endpoint: "https://push.example/x", keys: {} }),
+      }),
+      local({ ADMIN_CORE: { registerPushSubscription } as never }),
+      ctx,
+    );
+    expect(response.status).toBe(403);
+    expect(registerPushSubscription).not.toHaveBeenCalled();
+  });
+
+  it("refuses unauthenticated push and settings calls", async () => {
+    for (const request of [
+      get("/api/notifications"),
+      new Request("https://admin.tmkch.io/api/notifications/push/subscriptions/d1", {
+        method: "DELETE",
+        headers: { Origin: "https://admin.tmkch.io" },
+      }),
+    ]) {
+      const response = await createApp().fetch(request, gated(), ctx);
+      expect(response.status).toBe(401);
+    }
+  });
+
+  it("removes a device by id under the operator's identity", async () => {
+    const revokePushSubscription = vi.fn().mockResolvedValue({ ok: true, value: null });
+    const response = await createApp().fetch(
+      new Request("https://admin.tmkch.io/api/notifications/push/subscriptions/d1", {
+        method: "DELETE",
+        headers: { Origin: "http://localhost:4330" },
+      }),
+      local({ ADMIN_CORE: { revokePushSubscription } as never }),
+      ctx,
+    );
+    expect(response.status).toBe(200);
+    expect(revokePushSubscription).toHaveBeenCalledWith(
+      { id: "d1" },
+      { type: "admin", id: "local:dev@example.com" },
+    );
+  });
+});

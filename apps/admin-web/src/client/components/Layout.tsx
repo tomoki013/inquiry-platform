@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router";
 import { api } from "../lib/api";
+import { useServiceWorkerUpdate } from "../lib/pwa";
 
 interface Session {
   email?: string;
@@ -27,9 +28,18 @@ export function Layout() {
     queryFn: () => api.get<Session>("/api/session"),
     staleTime: 5 * 60 * 1000,
   });
+  const update = useServiceWorkerUpdate();
 
   return (
     <div className="flex min-h-full flex-col lg:flex-row">
+      {update.updateReady ? (
+        <div role="status" className="admin-update-banner">
+          <span>管理画面の新しいバージョンがあります。</span>
+          <button type="button" onClick={update.reload}>
+            再読み込み
+          </button>
+        </div>
+      ) : null}
       <nav aria-label="メインナビゲーション" className="admin-nav">
         <div className="admin-nav-header">
           <p className="text-sm font-medium tracking-tight text-ink">
@@ -70,6 +80,7 @@ export function Layout() {
             </Item>
             <Item to="/support/templates">返信定型文</Item>
             <Item to="/tickets/settings">運用設定</Item>
+            <Item to="/settings/notifications">通知設定</Item>
           </Group>
           <Group label="スタジオ">
             <Item to="/apps">アプリ</Item>

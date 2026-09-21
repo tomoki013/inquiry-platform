@@ -519,3 +519,34 @@ body {
     left: -20px;
   }
 }
+
+/* A newer deploy is waiting behind the service worker. One line, one button. */
+.admin-update-banner {
+  position: fixed;
+  inset: auto 16px 16px 16px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  background: var(--color-surface);
+  box-shadow: 0 8px 24px oklch(0 0 0 / 0.08);
+  font-size: 0.875rem;
+  color: var(--color-ink);
+}
+.admin-update-banner button {
+  padding: 4px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-accent);
+  font: inherit;
+}
+@media (min-width: 1024px) {
+  .admin-update-banner {
+    inset: auto 24px 24px auto;
+  }
+}

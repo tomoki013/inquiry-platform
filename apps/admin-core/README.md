@@ -138,6 +138,11 @@ cannot be created before the Worker it points at exists.
    pnpm --filter @tomokichi/admin-core migrate:remote
    openssl rand -hex 32 | pnpm --filter @tomokichi/admin-core exec wrangler secret put HASH_PEPPER
    pnpm --filter @tomokichi/admin-core exec wrangler secret put MAIL_API_KEY   # optional
+   # New-ticket notifications (docs/support-notifications.md). Both optional:
+   # without them the ticket still exists and the screen still works.
+   pnpm --filter @tomokichi/admin-core exec wrangler secret put NOTIFICATION_EMAIL
+   pnpm --filter @tomokichi/admin-core run vapid:generate   # public → wrangler.jsonc, private ↓
+   pnpm --filter @tomokichi/admin-core exec wrangler secret put VAPID_PRIVATE_KEY
    ```
 
    `HASH_PEPPER` is effectively permanent once reports exist: changing it means
@@ -185,9 +190,17 @@ cannot be created before the Worker it points at exists.
    the Access login rather than to the app.
 
 9. **Connect Remeet**: uncomment the `services` block in
-   `apps/api/wrangler.jsonc` and deploy `tomokichi-api`. Until this step
-   `env.ADMIN_CORE` is absent and `apps/api/src/services/admin-bridge.ts` does
-   nothing — reports and support mail behave exactly as they did before.
+   `apps/api/wrangler.jsonc` and deploy `tomokichi-api`. Since the
+   notification-only change, `env.ADMIN_CORE` is where a support message or
+   a report *lives* — without the binding `apps/api` refuses both with 502,
+   because there is no longer a mail carrying them anywhere.
+
+9b. **Access bypass for the install assets**: add a second Access application
+    for `admin.tmkch.io/manifest.webmanifest` and `admin.tmkch.io/icons/*`
+    with a **Bypass** policy (Everyone). Browsers fetch a PWA's icons without
+    cookies, and the Worker already serves those two paths bare; without the
+    matching bypass the install sheet shows Access's login page as the icon.
+    Nothing else — not `/sw.js`, not the bundle — is bypassed.
 
 10. **Deploy the mail Worker** and give it the forwarding address:
 
