@@ -216,6 +216,10 @@ describe("report email", () => {
     );
     expect(h.mail.sent[0]?.text).toContain("髙木友喜 / Tomoki Takagi");
     expect(h.mail.sent[0]?.text).not.toContain("報告された本文");
+    // The way back from a mis-tap is this mail, and the mail says so: the
+    // app's 表示に戻す and deleting the content are not withdrawals.
+    expect(h.mail.sent[0]?.text).toContain("間違って通報した場合は、このメールにそのまま返信");
+    expect(h.mail.sent[0]?.text).toContain("「表示に戻す」にしても通報は取り消されません");
     const detail = await h.reports.detail(created.value.reportId);
     if (!detail.ok) throw new Error("missing report");
     const inbound = await h.support.ingestInboundEmail(
