@@ -238,7 +238,7 @@ export async function harness(
     push,
     {
       notifyEmail: options.notifyEmail,
-      from: "Tomokichi Studio Support <noreply@tmkch.io>",
+      from: "Tomokichi Studio Support <notification@tmkch.io>",
       adminOrigin: "https://admin.tmkch.io",
     },
   );

@@ -83,6 +83,7 @@ describe("ticket notifications carry a reference, never content", () => {
     expect(h.mail.sent).toHaveLength(1);
     const mail = h.mail.sent[0] as NonNullable<(typeof h.mail.sent)[0]>;
     expect(mail.to).toBe("operator@example.com");
+    expect(mail.from).toBe("Tomokichi Studio Support <notification@tmkch.io>");
     expect(mail.subject).toBe("[Tomokichi Studio] 新しいお問い合わせがあります");
     expect(mail.text).toContain(`Ticket ID: #${ticketNumber}`);
     expect(mail.text).toContain(`https://admin.tmkch.io/tickets/${ticketNumber}`);
