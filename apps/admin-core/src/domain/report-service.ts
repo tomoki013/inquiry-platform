@@ -268,7 +268,7 @@ export class ReportService {
       await this.reply.send(
         {
           threadId: thread.id,
-          bodyText: `通報を受け付けました。お知らせいただきありがとうございます。\n\n受付ID: ${row.external_report_id}\n\n運営で内容を確認し、必要な対応を行います。追加の情報がある場合は、このメールにご返信ください。`,
+          bodyText: `通報を受け付けました。お知らせいただきありがとうございます。\n\n受付ID: ${row.external_report_id}\n\n運営で内容を確認し、必要な対応を行います。追加の情報がある場合は、このメールにご返信ください。\n\n間違って通報した場合は、このメールにそのまま返信してお知らせください。アプリで内容を「表示に戻す」にしても通報は取り消されません。また、内容を削除しても通報は取り消されず、削除した内容は元に戻せませんので、削除せずにこのメールへご返信ください。`,
           idempotencyKey: `report-receipt-${reportId}`,
         },
         { type: "system", id: "report-receipt" },
