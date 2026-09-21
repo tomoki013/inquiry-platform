@@ -29,7 +29,7 @@
     // it is a var; the private half is the Secret `VAPID_PRIVATE_KEY`. Empty
     // means push is unavailable and the settings screen says so. Generate a
     // pair with `pnpm --filter @tomokichi/admin-core run vapid:generate`.
-    "VAPID_PUBLIC_KEY": "",
+    "VAPID_PUBLIC_KEY": "BH_x4ecKrNnv73trqmRzVywqkJWYyVIRySWdiK8XP8GQYF1UlSFcO5jXYoZeWIPasjEcCaULEdS58hmLWmWbES0",
     "VAPID_SUBJECT": "mailto:support@tmkch.io"
   },
 
