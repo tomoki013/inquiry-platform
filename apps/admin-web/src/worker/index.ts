@@ -32,6 +32,14 @@ export function createApp() {
    * be sure about than two.
    */
   app.use("*", async (c, next) => {
+    // The install surface of the PWA — the manifest and its icons — carries
+    // nothing but a name and a picture, and a browser fetches the icons
+    // without credentials, so behind the gate they would be broken images on
+    // the install sheet. Nothing else is exempt: the bundle, the service
+    // worker and every `/api/*` route stay behind Access. (The Access policy at
+    // the edge needs the matching bypass; see `apps/admin-core/README.md`.)
+    if (isInstallAsset(new URL(c.req.url).pathname)) return await next();
+
     const identity = await resolveIdentity(c.req.raw, c.env);
     if (!identity) {
       // Access normally redirects to the login page before a request ever gets
@@ -54,6 +62,11 @@ export function createApp() {
   app.all("*", (c) => c.env.ASSETS.fetch(c.req.raw));
 
   return app;
+}
+
+/** `/manifest.webmanifest` and `/icons/*` — see the gate above. */
+export function isInstallAsset(pathname: string): boolean {
+  return pathname === "/manifest.webmanifest" || pathname.startsWith("/icons/");
 }
 
 export default createApp();

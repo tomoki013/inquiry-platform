@@ -2,13 +2,16 @@
 import { env } from "cloudflare:test";
 import type { RemeetModerationApi } from "@tomokichi/admin-contracts";
 import type { MailProvider, MailResult, SupportReplyMail } from "@tomokichi/admin-mail";
+import type { PushDeliveryResult, PushSubscriptionTarget } from "@tomokichi/admin-push";
 import { AppRepository } from "../src/db/apps";
 import { AuditRepository } from "../src/db/audit";
+import { NotificationRepository } from "../src/db/notifications";
 import { ReportRepository } from "../src/db/reports";
 import { SupportRepository } from "../src/db/support";
 import { TemplateRepository } from "../src/db/templates";
 import { AppService } from "../src/domain/app-service";
 import { DashboardService } from "../src/domain/dashboard-service";
+import { NotificationService, type PushTransport } from "../src/domain/notification-service";
 import { ReplyService } from "../src/domain/reply-service";
 import { ReportService } from "../src/domain/report-service";
 import { SupportService } from "../src/domain/support-service";
@@ -99,6 +102,8 @@ export async function reset(): Promise<void> {
     "ticket_sources",
     "tickets",
     "ticket_numbers",
+    "push_subscriptions",
+    "admin_notification_settings",
     "service_components",
     "ticket_categories",
     "ticket_assignees",
@@ -160,6 +165,37 @@ export class FakeMailProvider implements MailProvider {
   }
 }
 
+/**
+ * A push transport that records instead of posting.
+ *
+ * `answer` decides what the push service "said" for an endpoint; the default
+ * is acceptance. `sent` holds the payload exactly as it would have been
+ * encrypted, which is what the PII tests read.
+ */
+export class FakePushTransport implements PushTransport {
+  sent: Array<{ endpoint: string; payload: string }> = [];
+  answers = new Map<string, PushDeliveryResult>();
+  throwNext = false;
+
+  readonly vapid: PushTransport["vapid"];
+
+  /** `configured: false` is an environment with no VAPID keys. */
+  constructor(configured = true) {
+    this.vapid = configured
+      ? { publicKey: "BFAKE-public-key", authorization: () => Promise.resolve("vapid") }
+      : undefined;
+  }
+
+  send(target: PushSubscriptionTarget, payload: string): Promise<PushDeliveryResult> {
+    if (this.throwNext) {
+      this.throwNext = false;
+      return Promise.reject(new Error("push transport exploded"));
+    }
+    this.sent.push({ endpoint: target.endpoint, payload });
+    return Promise.resolve(this.answers.get(target.endpoint) ?? { ok: true, status: 201 });
+  }
+}
+
 export interface Harness {
   reports: ReportService;
   support: SupportService;
@@ -168,11 +204,22 @@ export interface Harness {
   dashboard: DashboardService;
   audit: AuditRepository;
   mail: FakeMailProvider;
+  push: FakePushTransport;
+  notifications: NotificationService;
+  /** Waits for every notification the services fired so far. Production runs
+   * them in `ctx.waitUntil`; here they are collected instead. */
+  settled(): Promise<void>;
   db: D1Database;
 }
 
 export async function harness(
-  options: { mail?: FakeMailProvider; moderation?: RemeetModerationApi } = {},
+  options: {
+    mail?: FakeMailProvider;
+    moderation?: RemeetModerationApi;
+    push?: FakePushTransport;
+    /** Unset means "no mail channel", like an environment without the Secret. */
+    notifyEmail?: string;
+  } = {},
 ): Promise<Harness> {
   await migrate();
   const db = testEnv.DB;
@@ -182,7 +229,24 @@ export async function harness(
   const templateRepo = new TemplateRepository(db);
   const auditRepo = new AuditRepository(db);
   const mail = options.mail ?? new FakeMailProvider();
-  const supportService = new SupportService(db, supportRepo, appRepo, auditRepo);
+  const push = options.push ?? new FakePushTransport();
+  const notifications = new NotificationService(
+    db,
+    new NotificationRepository(db),
+    auditRepo,
+    mail,
+    push,
+    {
+      notifyEmail: options.notifyEmail,
+      from: "Tomokichi Studio Support <noreply@tmkch.io>",
+      adminOrigin: "https://admin.tmkch.io",
+    },
+  );
+  const pending: Promise<unknown>[] = [];
+  const notify = (ref: Parameters<NotificationService["ticketCreated"]>[0]) => {
+    pending.push(notifications.ticketCreated(ref));
+  };
+  const supportService = new SupportService(db, supportRepo, appRepo, auditRepo, notify);
 
   const replyService = new ReplyService(
     db,
@@ -202,6 +266,11 @@ export async function harness(
   return {
     db,
     mail,
+    push,
+    notifications,
+    settled: async () => {
+      await Promise.all(pending.splice(0));
+    },
     audit: auditRepo,
     apps: new AppService(db, appRepo, auditRepo),
     reports: new ReportService(
@@ -213,6 +282,7 @@ export async function harness(
       supportRepo,
       replyService,
       options.moderation,
+      notify,
     ),
     support: supportService,
     reply: replyService,

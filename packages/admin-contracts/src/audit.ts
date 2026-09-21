@@ -63,6 +63,10 @@ const forbiddenMetadataKeys = new Set([
   "secret",
   "apikey",
   "password",
+  // A push endpoint is a capability URL and the keys decrypt for it.
+  "endpoint",
+  "p256dh",
+  "auth",
 ]);
 
 export function assertSafeAuditMetadata(metadata: Record<string, unknown>): void {

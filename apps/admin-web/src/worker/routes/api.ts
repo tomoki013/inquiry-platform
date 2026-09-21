@@ -342,6 +342,39 @@ export function registerApiRoutes(app: AdminApi): void {
     respond(c, await c.env.ADMIN_CORE.setAppMailSettings((await body(c)) as never, actor(c))),
   );
 
+  // ---- notifications ----------------------------------------------------
+  //
+  // Everything here is scoped to the signed-in operator by Admin Core, which
+  // takes the actor and looks up only that actor's rows. The browser never
+  // receives an endpoint or a key back; it only ever sends its own.
+  app.get("/api/notifications", async (c) =>
+    respond(c, await c.env.ADMIN_CORE.notificationOverview(actor(c))),
+  );
+  app.put("/api/notifications/settings", async (c) =>
+    respond(c, await c.env.ADMIN_CORE.saveNotificationSettings((await body(c)) as never, actor(c))),
+  );
+  app.post("/api/notifications/push/subscriptions", async (c) =>
+    respond(
+      c,
+      await c.env.ADMIN_CORE.registerPushSubscription(
+        {
+          ...(await body(c)),
+          // From the request, so a body cannot claim to be a different device.
+          userAgent: c.req.header("User-Agent")?.slice(0, 300),
+        } as never,
+        actor(c),
+      ),
+    ),
+  );
+  /** "This device": the browser names its own endpoint. */
+  app.post("/api/notifications/push/unsubscribe", async (c) =>
+    respond(c, await c.env.ADMIN_CORE.revokePushSubscription((await body(c)) as never, actor(c))),
+  );
+  /** Another of the operator's devices, from the list. */
+  app.delete("/api/notifications/push/subscriptions/:id", async (c) =>
+    respond(c, await c.env.ADMIN_CORE.revokePushSubscription({ id: c.req.param("id") }, actor(c))),
+  );
+
   // ---- apps -------------------------------------------------------------
   app.get("/api/apps", async (c) =>
     respond(

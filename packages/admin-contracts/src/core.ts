@@ -11,6 +11,13 @@ import type { DashboardSummary } from "./dashboard";
 import type { Result } from "./errors";
 import type { ModerationProposal } from "./moderation";
 import type {
+  NotificationOverview,
+  NotificationSettings,
+  PushDeviceSummary,
+  RegisterPushSubscriptionInput,
+  RevokePushSubscriptionInput,
+} from "./notifications";
+import type {
   AppliedTemplate,
   ApplyTemplateInput,
   AppMailSettings,
@@ -190,6 +197,25 @@ export interface AdminCoreApi {
   restoreApp(appId: string, actor: ActorRef): Promise<Result<AppDetail>>;
   addAppLink(input: CreateAppLinkInput, actor: ActorRef): Promise<Result<AppDetail>>;
   removeAppLink(linkId: string, actor: ActorRef): Promise<Result<AppDetail>>;
+
+  // ---- Notifications ----------------------------------------------------
+  /** The signed-in operator's settings and devices. Never an endpoint or a key. */
+  notificationOverview(actor: ActorRef): Promise<Result<NotificationOverview>>;
+  saveNotificationSettings(
+    input: NotificationSettings,
+    actor: ActorRef,
+  ): Promise<Result<NotificationSettings>>;
+  /** Upserts on `endpoint` for the acting operator only: a subscription is a
+   * device's, and a second operator presenting the same endpoint is refused. */
+  registerPushSubscription(
+    input: RegisterPushSubscriptionInput,
+    actor: ActorRef,
+  ): Promise<Result<PushDeviceSummary>>;
+  /** Marks revoked. Only the owner can, and only their own devices are found. */
+  revokePushSubscription(
+    input: RevokePushSubscriptionInput,
+    actor: ActorRef,
+  ): Promise<Result<null>>;
 
   // ---- Cross-cutting ----------------------------------------------------
   listActivity(input: ListAuditInput): Promise<Result<AuditEntry[]>>;

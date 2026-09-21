@@ -128,6 +128,11 @@ export const auditActionLabels: Record<string, string> = {
   "support.status_changed": "問い合わせのステータスを変更",
   "support.app_assigned": "問い合わせのアプリを設定",
   "support.internal_note_added": "問い合わせに運営メモを追加",
+  "notification.settings_updated": "通知設定を更新",
+  "push.subscribed": "Push通知の端末を登録",
+  "push.resubscribed": "Push通知の端末を再登録",
+  "push.unsubscribed": "Push通知の端末を解除",
+  "push.revoked": "Push通知の端末が無効化",
 };
 
 export const auditActorLabels: Record<AuditActorType, string> = {

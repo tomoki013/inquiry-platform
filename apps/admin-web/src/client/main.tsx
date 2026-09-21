@@ -3,8 +3,10 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router";
 import { Layout } from "./components/Layout";
+import { registerServiceWorker } from "./lib/pwa";
 import { AppDetail } from "./pages/AppDetail";
 import { Apps } from "./pages/Apps";
+import { NotificationSettings } from "./pages/NotificationSettings";
 import { ReplyTemplates } from "./pages/ReplyTemplates";
 import { TicketDetail } from "./pages/TicketDetail";
 import { TicketSettings } from "./pages/TicketSettings";
@@ -33,6 +35,7 @@ createRoot(document.getElementById("root") as HTMLElement).render(
             <Route index element={<TicketOperationsDashboard />} />
             <Route path="tickets" element={<Tickets />} />
             <Route path="tickets/settings" element={<TicketSettings />} />
+            <Route path="settings/notifications" element={<NotificationSettings />} />
             <Route path="tickets/:id" element={<TicketDetail />} />
             <Route path="incidents" element={<Tickets type="INCIDENT" />} />
             <Route path="reports" element={<Tickets type="REPORT" />} />
@@ -49,6 +52,10 @@ createRoot(document.getElementById("root") as HTMLElement).render(
     </QueryClientProvider>
   </StrictMode>,
 );
+
+// Installable and push-capable; asks for nothing. Permission is requested
+// only from the notification settings screen, by a button.
+window.addEventListener("load", () => void registerServiceWorker());
 
 function NotFound() {
   return (

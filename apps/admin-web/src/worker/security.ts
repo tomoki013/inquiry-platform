@@ -43,8 +43,15 @@ export async function securityHeaders(c: AdminContext, next: Next): Promise<void
   headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
   headers.set("X-Frame-Options", "DENY");
   // Nothing here is public and nothing should sit in a shared cache.
-  if (new URL(c.req.url).pathname.startsWith("/api/")) {
+  const pathname = new URL(c.req.url).pathname;
+  if (pathname.startsWith("/api/")) {
     headers.set("Cache-Control", "private, no-store");
+  }
+  // The service worker must be picked up on deploy, not whenever the asset
+  // cache expires; and it may only control the app, not some future path.
+  if (pathname === "/sw.js") {
+    headers.set("Cache-Control", "no-cache");
+    headers.set("Service-Worker-Allowed", "/");
   }
 }
 
