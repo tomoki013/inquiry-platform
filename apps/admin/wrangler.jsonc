@@ -37,7 +37,10 @@
     "ACCESS_TEAM_DOMAIN": "tomoki-ttttt.cloudflareaccess.com",
     "ACCESS_AUD": "9863cfa41b1979226ae61a717e47100dccac18c83a4e14ac7248ff7a8e696599",
     "ADMIN_ORIGIN": "https://admin.tmkch.io",
-    "ENVIRONMENT": "production"
+    "ENVIRONMENT": "production",
+    // Everybody the Access policy admits. One operator today, who administers
+    // everything; name others by Access subject id in ADMIN_ROLES.
+    "DEFAULT_ADMIN_ROLE": "admin"
   },
 
   "services": [

@@ -100,6 +100,7 @@ function env(overrides: Partial<AdminWebEnv> = {}): AdminWebEnv {
     ACCESS_AUD: "",
     ADMIN_ORIGIN: "https://admin.example.com",
     ENVIRONMENT: "production",
+    DEFAULT_ADMIN_ROLE: "admin",
     ...overrides,
   };
 }
@@ -524,5 +525,65 @@ describe("PWA and push", () => {
       { id: "d1" },
       { type: "admin", id: "local:dev@example.com" },
     );
+  });
+});
+
+describe("authorization", () => {
+  const as = (overrides: Partial<AdminWebEnv>) =>
+    env({ ENVIRONMENT: "local", DEV_ADMIN_EMAIL: "dev@example.com", ...overrides });
+  const write = (path: string, method = "POST") =>
+    new Request(`https://admin.example.com${path}`, {
+      method,
+      headers: { Origin: "https://admin.example.com", "Content-Type": "application/json" },
+      body: "{}",
+    });
+
+  it("lets a viewer read but not act on a ticket", async () => {
+    const viewer = as({ DEFAULT_ADMIN_ROLE: "viewer" });
+    expect((await createApp().fetch(get("/api/dashboard"), viewer, ctx)).status).toBe(200);
+    const acted = await createApp().fetch(write("/api/tickets/r1/ack"), viewer, ctx);
+    expect(acted.status).toBe(403);
+    expect(await acted.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
+  });
+
+  it("lets an operator act on a ticket but not change configuration", async () => {
+    const operator = as({ DEFAULT_ADMIN_ROLE: "operator" });
+    expect((await createApp().fetch(write("/api/tickets/r1/ack"), operator, ctx)).status).toBe(200);
+    expect((await createApp().fetch(write("/api/apps"), operator, ctx)).status).toBe(403);
+    expect(
+      (await createApp().fetch(write("/api/support/mail-settings", "PUT"), operator, ctx)).status,
+    ).toBe(403);
+  });
+
+  it("treats an unset or unknown default role as viewer", async () => {
+    for (const DEFAULT_ADMIN_ROLE of [undefined, "owner", "ADMIN"]) {
+      const response = await createApp().fetch(
+        write("/api/tickets/r1/ack"),
+        as({ DEFAULT_ADMIN_ROLE }),
+        ctx,
+      );
+      expect(response.status).toBe(403);
+    }
+  });
+
+  it("gives a person named in ADMIN_ROLES their own role, by subject id", async () => {
+    const response = await createApp().fetch(
+      write("/api/tickets/r1/ack"),
+      as({
+        DEFAULT_ADMIN_ROLE: "viewer",
+        ADMIN_ROLES: { "local:dev@example.com": "operator" },
+      }),
+      ctx,
+    );
+    expect(response.status).toBe(200);
+  });
+
+  it("refuses a method the API does not accept, whatever the role", async () => {
+    const response = await createApp().fetch(
+      new Request("https://admin.example.com/api/tickets", { method: "OPTIONS" }),
+      as({ DEFAULT_ADMIN_ROLE: "admin" }),
+      ctx,
+    );
+    expect(response.status).toBe(403);
   });
 });

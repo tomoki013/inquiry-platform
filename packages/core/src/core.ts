@@ -7,6 +7,7 @@ import type {
   UpdateAppInput,
 } from "./apps";
 import type { AuditActorType, AuditEntry, ListAuditInput } from "./audit";
+import type { AdminRole } from "./authorization";
 import type { ConsoleProfile } from "./branding";
 import type { DashboardSummary } from "./dashboard";
 import type { Result } from "./errors";
@@ -69,11 +70,6 @@ export interface ActorRef {
    * Not a full address. */
   id?: string;
 }
-
-/** The single role Phase 1–3 has. The shape is a union already so that adding
- * `support` or `viewer` later is a change to this line and to the checks, not
- * to every call site. */
-export type AdminRole = "owner";
 
 export interface AdminIdentity {
   id: string;

@@ -1,4 +1,5 @@
-import type { ActorRef, AdminIdentity } from "@inquiry-platform/core";
+import type { ActorRef, AdminIdentity, AdminRole } from "@inquiry-platform/core";
+import { isAdminRole } from "@inquiry-platform/core";
 import { verifyAccessJwt } from "./access";
 import type { AdminWebEnv } from "./env";
 
@@ -22,11 +23,10 @@ export async function resolveIdentity(
       // in an audit row that is kept forever.
       id: verified.claims.sub,
       email: verified.claims.email,
-      // One role in Phase 1–3. Reaching Access at all means being a member of
-      // the Cloudflare account, which the Access policy enforces; there is no
-      // second check to make here yet, and hard-coding an address to decide it
-      // is exactly what the design forbids.
-      role: "owner",
+      // Reaching Access at all means the Access policy let this person in.
+      // What they may do once inside is configuration keyed by the subject
+      // id — hard-coding an address to decide it is what the design forbids.
+      role: roleFor(verified.claims.sub, env),
     };
   }
 
@@ -34,10 +34,18 @@ export async function resolveIdentity(
   // must say it is local, and a developer must have named themselves. Neither
   // is true of the production Worker.
   if (verified.reason === "not_configured" && env.ENVIRONMENT === "local" && env.DEV_ADMIN_EMAIL) {
-    return { id: `local:${env.DEV_ADMIN_EMAIL}`, email: env.DEV_ADMIN_EMAIL, role: "owner" };
+    const id = `local:${env.DEV_ADMIN_EMAIL}`;
+    return { id, email: env.DEV_ADMIN_EMAIL, role: roleFor(id, env) };
   }
 
   return null;
+}
+
+/** `ADMIN_ROLES[subject]`, else `DEFAULT_ADMIN_ROLE`, else `viewer`. */
+export function roleFor(subject: string, env: AdminWebEnv): AdminRole {
+  const named = env.ADMIN_ROLES?.[subject];
+  if (isAdminRole(named)) return named;
+  return isAdminRole(env.DEFAULT_ADMIN_ROLE) ? env.DEFAULT_ADMIN_ROLE : "viewer";
 }
 
 export function actorFor(identity: AdminIdentity): ActorRef {

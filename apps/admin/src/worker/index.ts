@@ -1,4 +1,5 @@
 import type { AdminIdentity } from "@inquiry-platform/core";
+import { can, permissionFor } from "@inquiry-platform/core";
 import { Hono } from "hono";
 import { brandHtml, brandManifest } from "./branding";
 import type { AdminWebEnv } from "./env";
@@ -54,6 +55,20 @@ export function createApp() {
   });
 
   app.use("/api/*", requireSafeMutation);
+
+  /**
+   * Authorization. After the gate (so there is an identity) and before every
+   * route (so no route can forget it). The permission comes from the method
+   * and path alone — see `permissionFor` — so a new route is covered the day
+   * it is added.
+   */
+  app.use("/api/*", async (c, next) => {
+    const permission = permissionFor(c.req.method, new URL(c.req.url).pathname);
+    if (!permission || !can(c.get("identity").role, permission)) {
+      return failure(c, { code: "FORBIDDEN", message: "この操作の権限がありません。" }, 403);
+    }
+    return await next();
+  });
 
   registerApiRoutes(app as AdminApi);
 

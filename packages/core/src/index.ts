@@ -1,5 +1,6 @@
 export * from "./apps";
 export * from "./audit";
+export * from "./authorization";
 export * from "./branding";
 export * from "./core";
 export * from "./dashboard";

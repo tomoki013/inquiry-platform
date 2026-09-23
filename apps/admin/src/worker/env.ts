@@ -5,7 +5,7 @@ export interface AdminWebEnv {
   ADMIN_CORE: AdminCoreStub;
   ASSETS: Fetcher;
 
-  /** e.g. `tomokichi.cloudflareaccess.com`. Empty means Access is not wired up
+  /** e.g. `example.cloudflareaccess.com`. Empty means Access is not wired up
    * yet, which in production means every request is refused. */
   ACCESS_TEAM_DOMAIN: string;
   /** The Access Application's AUD tag. Not a secret — it is a claim in every
@@ -13,6 +13,16 @@ export interface AdminWebEnv {
   ACCESS_AUD: string;
   ADMIN_ORIGIN: string;
   ENVIRONMENT: string;
+
+  /**
+   * The role of anybody Access lets in and `ADMIN_ROLES` does not name.
+   * `viewer`, `operator` or `admin`; anything else, or unset, is `viewer`,
+   * so a typo narrows access rather than widening it.
+   */
+  DEFAULT_ADMIN_ROLE?: string;
+  /** Per-person roles, keyed by the Access subject id (never an address):
+   * `{ "<sub>": "operator" }`. A JSON object in `vars`. */
+  ADMIN_ROLES?: Record<string, string>;
 
   /** Local development only, and only honoured when `ENVIRONMENT` is `local`.
    * There is no code path that lets this stand in for Access in production. */
