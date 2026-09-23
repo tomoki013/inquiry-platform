@@ -1,6 +1,6 @@
 {
-  "name": "@inquiry-platform/core",
-  "version": "0.0.0",
+  "name": "@inquiry-platform/sdk",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -10,10 +10,6 @@
     "check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
-  },
-  "dependencies": {
-    "@inquiry-platform/sdk": "workspace:*",
-    "zod": "^4.4.2"
   },
   "devDependencies": {
     "typescript": "^6.0.3",

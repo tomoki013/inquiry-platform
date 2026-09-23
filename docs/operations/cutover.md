@@ -7,8 +7,8 @@
 | Phase | 内容 | 状態 |
 |---|---|---|
 | 1 | 依存箇所の棚卸し | 完了（tomokichi-studio `docs/inquiry-platform-extraction.md`） |
-| 2 | 本 Repository へ抽出（履歴付き）、ブランド・アプリ固有分岐・認可の分離 | **進行中**（本 Repository の最初の PR） |
-| 3 | 基盤の汎用受付 API / SDK、tomokichi-api をそれ経由に | 未着手 |
+| 2 | 本 Repository へ抽出（履歴付き）、ブランド・アプリ固有分岐・認可の分離 | PR #1（レビュー待ち） |
+| 3 | Project 用 `Intake` entrypoint と SDK、tomokichi-api をそれ経由に | 基盤側: PR #2。tomokichi-studio 側: 切替 PR（Core のデプロイ後にマージ） |
 | 4 | 本 Repository からのデプロイへ切替、旧管理画面との比較 | 未着手 |
 | 5 | tomokichi-studio から旧コードを削除 | 未着手 |
 
@@ -22,6 +22,15 @@
 | 2026-09-24 | hono `^4.13.2` → `^4.13.5`（解決 4.13.8）。GHSA-crvj-82cr-hjcx ほか moderate 3 件の解消 | Owner（tomoki013） | 実施済み。`pnpm audit --prod` 0 件 |
 | 2026-09-24 | dev 依存の脆弱性解消: vitest `^4.1.11`、lockfile 更新、`miniflare>sharp` / `miniflare>undici` の override | Owner（tomoki013） | 実施済み。`pnpm audit`（dev 含む）0 件 |
 | 2026-09-24 | GitHub Actions が課金設定で起動しないため、CI をローカル実行で代替 | Owner（tomoki013） | PR #1 にローカル CI 結果を記録 |
+
+## デプロイ順序（Phase 3 と 4 の関係）
+
+tomokichi-api の新しい binding（`entrypoint: "Intake"`）は、`Intake` を含む Core が本番に出ていないと動かない。Core の本番は今 tomokichi-studio から出ているので、順序は次のとおり:
+
+1. 本 Repository の PR #1 → #2 をマージ。
+2. **Phase 4**: 本 Repository から 3 Worker をデプロイ（`Intake` を含む Core が本番に出る。既存の `AdminCore` 経由の動作は不変）。
+3. tomokichi-studio の切替 PR（vendored SDK + `INQUIRY` binding、`ADMIN_CORE` binding の削除）をマージしてデプロイ。
+4. tomokichi-api から `AdminCore` 全体への binding が消えたことを確認（`wrangler deploy --dry-run` の bindings）。
 
 ## Phase 4 の手順（予定）
 

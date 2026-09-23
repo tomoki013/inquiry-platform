@@ -12,6 +12,7 @@ Tomokichi Studio・Remeet・Colorvia・Yohaku などはこの基盤を使う「P
 | `apps/mail-ingress` | 受信メールを Ticket に繋ぐ | `tomokichi-mail-ingress` |
 | `packages/core` | 境界そのもの: 型・zod・`AdminCoreApi`・エラー語彙・認可表・Branding スキーマ | — |
 | `packages/notification` | `./mail`（Resend / 未設定）と `./push`（Web Push、Web Crypto のみ） | — |
+| `packages/sdk` | Project が使う契約とクライアント（依存ゼロ）。`scripts/vendor-sdk.mjs` で Project に配る | — |
 
 Worker・D1・R2 の名前は tomokichi-studio から移したときのまま（[ADR](docs/architecture/overview.md#決定事項)）。
 
