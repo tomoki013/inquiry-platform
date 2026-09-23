@@ -79,6 +79,15 @@ export class Intake extends WorkerEntrypoint<AdminCoreEnv> implements IntakeApi 
     }
 
     try {
+      // A granted slug the platform has not registered (yet) files the
+      // contact as unassigned — what the support form has always done — but
+      // only where the binding accepts unassigned contacts at all.
+      const registered =
+        input.projectSlug !== undefined &&
+        (await new AppRepository(this.env.DB).findBySlug(input.projectSlug)) !== null;
+      if (input.projectSlug && !registered && !grant.allowUnassigned) return unknownProject;
+      const projectSlug = registered ? input.projectSlug : undefined;
+
       // The same key the support form has always used, so a retry that
       // straddles the switch to this entrypoint is still one ticket.
       const providerMessageId = `form-${input.idempotencyKey}`;
@@ -86,24 +95,16 @@ export class Intake extends WorkerEntrypoint<AdminCoreEnv> implements IntakeApi 
       if (seen) {
         const existing = await this.services.support.detail(seen.thread_id);
         if (!existing.ok) return existing;
-        if ((existing.value.appSlug ?? undefined) !== input.projectSlug) return taken;
+        if ((existing.value.appSlug ?? undefined) !== projectSlug) return taken;
         return {
           ok: true,
           value: { ...(await this.receipt("support", existing.value.id)), duplicate: true },
         };
       }
-      // A granted slug that is not registered would otherwise become an
-      // unassigned ticket. Refuse before anything is written.
-      if (
-        input.projectSlug &&
-        !(await new AppRepository(this.env.DB).findBySlug(input.projectSlug))
-      ) {
-        return unknownProject;
-      }
 
       const created = await this.services.support.createThread(
         {
-          appSlug: input.projectSlug,
+          appSlug: projectSlug,
           source: "web_form",
           requesterEmail: input.email,
           requesterName: input.name,

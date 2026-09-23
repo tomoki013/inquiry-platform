@@ -90,8 +90,25 @@ describe("Intake: contacts", () => {
 });
 
 describe("Intake: unregistered projects", () => {
-  it("refuses a granted but unregistered project without writing anything", async () => {
-    const { client } = bind({ ...studio, projects: ["remeet", "colorvia", "not-registered"] });
+  const granted = { ...studio, projects: ["remeet", "colorvia", "not-registered"] };
+
+  it("files a contact for a granted but unregistered project as unassigned", async () => {
+    const { client } = bind(granted);
+    const first = await client.createContact(contact({ projectSlug: "not-registered" }));
+    expect(first).toMatchObject({ ok: true, value: { duplicate: false } });
+    const row = await testEnv.DB.prepare("SELECT app_id FROM support_threads").first<{
+      app_id: string | null;
+    }>();
+    expect(row?.app_id).toBeNull();
+    // And a retry is still the same ticket, not a conflict with itself.
+    expect(await client.createContact(contact({ projectSlug: "not-registered" }))).toMatchObject({
+      ok: true,
+      value: { duplicate: true },
+    });
+  });
+
+  it("refuses it without writing anything where unassigned is not allowed", async () => {
+    const { client } = bind({ ...granted, allowUnassigned: false });
     const contactResult = await client.createContact(contact({ projectSlug: "not-registered" }));
     expect(contactResult).toMatchObject({ ok: false, error: { code: "NOT_FOUND" } });
     const reportResult = await client.createReport(report({ projectSlug: "not-registered" }));
