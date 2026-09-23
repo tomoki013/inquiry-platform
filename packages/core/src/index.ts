@@ -1,5 +1,6 @@
 export * from "./apps";
 export * from "./audit";
+export * from "./branding";
 export * from "./core";
 export * from "./dashboard";
 export * from "./errors";
@@ -8,7 +9,5 @@ export * from "./moderation";
 export * from "./notifications";
 export * from "./reply";
 export * from "./reports";
-export * from "./signature";
 export * from "./support";
-
 export * from "./tickets";

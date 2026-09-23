@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { plainTextToSafeHtml, SIGNATURE_LOGO_URL } from "./html";
+import { plainTextToSafeHtml } from "./html";
 import { UnconfiguredMailProvider } from "./index";
 import { ResendMailProvider } from "./resend";
 
 const mail = {
   to: "someone@example.com",
-  from: "Tomokichi Studio Support <support@tmkch.io>",
-  replyTo: "support@tmkch.io",
+  from: "Example Support <support@example.com>",
+  replyTo: "support@example.com",
   subject: "Re: アプリで共有できません",
   text: "ご連絡ありがとうございます。",
   idempotencyKey: "idem-1234567890",
@@ -78,7 +78,7 @@ describe("ResendMailProvider", () => {
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;
     expect(body.text).toBe("ご連絡ありがとうございます。");
     expect(body.to).toEqual(["someone@example.com"]);
-    expect(body.reply_to).toBe("support@tmkch.io");
+    expect(body.reply_to).toBe("support@example.com");
   });
 
   /** Without these a reply starts a second conversation in the customer's
@@ -180,19 +180,38 @@ it("keeps an accepted send successful when Message-ID lookup fails", async () =>
   expect(await provider.sendSupportReply(mail)).toEqual({ ok: true, transportId: "accepted" });
 });
 
+const logo = { url: "https://example.com/assets/mail-logo.png", alt: "Example" };
+
 it("escapes the signature and renders it separately without duplicating it", () => {
-  const signature = "Studio <img src=x>\n髙木友喜 / Tomoki Takagi";
-  const html = plainTextToSafeHtml(`本文\n\n${signature}`, signature);
+  const signature = "Example <img src=x>\nSupport team";
+  const html = plainTextToSafeHtml(`本文\n\n${signature}`, signature, logo);
   expect(html).toContain('role="presentation"');
-  // The studio logo is the only image; the operator's `<img` stays escaped.
+  // The configured logo is the only image; the operator's `<img` stays escaped.
   expect(html.match(/<img/g)).toHaveLength(1);
-  expect(html).toContain(`<img src="${SIGNATURE_LOGO_URL}"`);
+  expect(html).toContain(`<img src="${logo.url}"`);
   expect(html).toContain("&lt;img src=x&gt;");
-  expect(html.match(/Tomoki Takagi/g)).toHaveLength(1);
+  expect(html.match(/Support team/g)).toHaveLength(1);
+});
+
+it("renders the signature without any image when the deployment has no logo", () => {
+  const signature = "Example\nSupport team";
+  const html = plainTextToSafeHtml(`本文\n\n${signature}`, signature);
+  expect(html).toContain('class="mail-brand"');
+  expect(html).not.toContain("<img");
+});
+
+it("escapes the configured logo like any other attribute", () => {
+  const signature = "Example\nSupport team";
+  const html = plainTextToSafeHtml(`本文\n\n${signature}`, signature, {
+    url: 'https://example.com/a.png" onerror="x',
+    alt: "<b>",
+  });
+  expect(html).toContain('src="https://example.com/a.png&quot; onerror=&quot;x"');
+  expect(html).toContain('alt="&lt;b&gt;"');
 });
 
 it("renders one dark-mode aware mail document with escaped body and signature", () => {
-  const signature = "Tomokichi Studio\n髙木友喜 / Tomoki Takagi";
+  const signature = "Example\nSupport team";
   const html = plainTextToSafeHtml(`<script>unsafe</script>\n\n${signature}`, signature);
   expect(html.match(/<!doctype html>/g)).toHaveLength(1);
   expect(html).toContain('name="color-scheme" content="light dark"');

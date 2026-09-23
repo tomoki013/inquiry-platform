@@ -8,7 +8,7 @@ import {
 import { parseInboundEmail } from "./parse";
 
 /**
- * `support@tmkch.io`, and anything else Email Routing points here.
+ * The deployment's support address (`SUPPORT_EMAIL`), and anything else Email Routing points here.
  *
  * The Worker has two jobs and they fail independently on purpose:
  *

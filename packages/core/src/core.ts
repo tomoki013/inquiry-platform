@@ -7,6 +7,7 @@ import type {
   UpdateAppInput,
 } from "./apps";
 import type { AuditActorType, AuditEntry, ListAuditInput } from "./audit";
+import type { ConsoleProfile } from "./branding";
 import type { DashboardSummary } from "./dashboard";
 import type { Result } from "./errors";
 import type { ModerationProposal } from "./moderation";
@@ -218,6 +219,8 @@ export interface AdminCoreApi {
   ): Promise<Result<null>>;
 
   // ---- Cross-cutting ----------------------------------------------------
+  /** Names and addresses the console shows. Not a Result: it cannot fail. */
+  consoleProfile(): Promise<ConsoleProfile>;
   listActivity(input: ListAuditInput): Promise<Result<AuditEntry[]>>;
   getDashboard(): Promise<Result<DashboardSummary>>;
 }

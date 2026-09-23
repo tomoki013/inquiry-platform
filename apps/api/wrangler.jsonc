@@ -4,9 +4,13 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-07-23",
 
+  // The Worker name is the one tomokichi-studio deployed before this
+  // repository existed, kept so every Service Binding and the D1 / R2 below stay
+  // where they are. Renaming is a separate, later change.
+  //
   // Never on the internet. No route, no custom domain, and `workers.dev` off:
-  // the only ways in are the Service Bindings declared by Admin Web, the mail
-  // Worker and `tomokichi-api`. That is what lets this Worker hold the D1 and
+  // the only ways in are the Service Bindings declared by the admin console,
+  // the mail Worker and `tomokichi-api`. That is what lets this Worker hold the D1 and
   // R2 bindings while Admin Web holds neither.
   "workers_dev": false,
   "triggers": { "crons": ["*/5 * * * *"] },
@@ -30,7 +34,19 @@
     // means push is unavailable and the settings screen says so. Generate a
     // pair with `pnpm --filter @inquiry-platform/api run vapid:generate`.
     "VAPID_PUBLIC_KEY": "BH_x4ecKrNnv73trqmRzVywqkJWYyVIRySWdiK8XP8GQYF1UlSFcO5jXYoZeWIPasjEcCaULEdS58hmLWmWbES0",
-    "VAPID_SUBJECT": "mailto:support@tmkch.io"
+    "VAPID_SUBJECT": "mailto:support@tmkch.io",
+    // Everything this deployment calls itself. Code reads it through
+    // `parseBranding` (packages/core/src/branding.ts) and never names it.
+    "BRANDING": {
+      "consoleName": "Tomokichi Studio",
+      "consoleShortName": "Tomokichi",
+      "defaultSignature": "Tomokichi Studio\n髙木友喜 / Tomoki Takagi\n────────────────────────\nhttps://tmkch.io\nsupport@tmkch.io  ·  080-6648-1475",
+      "legacySignatures": [
+        "────────────────────────\nTomokichi Studio\n髙木 友喜\n\nWeb: https://tmkch.io\nEmail: support@tmkch.io\nTEL: 080-6648-1475\n────────────────────────"
+      ],
+      "mailLogo": { "url": "https://tmkch.io/assets/mail-logo.png", "alt": "Tomokichi Studio" },
+      "defaultProjectId": "studio"
+    }
   },
 
   "services": [

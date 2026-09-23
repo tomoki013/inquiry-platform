@@ -40,7 +40,7 @@ async function receive(
   const encode = (s: string) => btoa(String.fromCharCode(...new TextEncoder().encode(s)));
   const raw = [
     `From: Tester <${from}>`,
-    "To: support@tmkch.io",
+    "To: support@example.com",
     `Subject: =?UTF-8?B?${encode(subject)}?=`,
     `Message-ID: <${crypto.randomUUID()}@example.com>`,
     "In-Reply-To: <unavailable-provider-id@example.com>",
@@ -54,7 +54,7 @@ async function receive(
   const bytes = new TextEncoder().encode(raw);
   const results: Array<Result<IngestInboundEmailResult>> = [];
   const env = {
-    SUPPORT_EMAIL: "support@tmkch.io",
+    SUPPORT_EMAIL: "support@example.com",
     MAX_STORED_BYTES: "5242880",
     ADMIN_CORE: {
       ingestInboundEmail: async (input: unknown) => {
@@ -70,7 +70,7 @@ async function receive(
   await ingress.email(
     {
       from,
-      to: "support@tmkch.io",
+      to: "support@example.com",
       raw: new Blob([bytes]).stream(),
       rawSize: bytes.byteLength,
       headers: new Headers(),

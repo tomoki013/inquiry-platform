@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * Registered Studio apps.
+ * Registered apps — the projects this platform serves.
  *
  * A closed list of statuses rather than free text: the Dashboard groups by it
  * and the Apps list colours by it, and "TestFlight" spelled three ways is three

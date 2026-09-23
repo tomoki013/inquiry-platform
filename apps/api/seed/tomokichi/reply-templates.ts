@@ -253,5 +253,15 @@ export const notSeededCategories: ReplyTemplateCategory[] = [
   "other",
 ];
 
-/** Shared signature, appended only when sending. */
-export { DEFAULT_MAIL_SIGNATURE as seedSignature } from "../../../packages/core/src/signature.ts";
+/**
+ * The deployment-wide signature, appended only when sending. Kept identical to
+ * `BRANDING.defaultSignature` in `apps/api/wrangler.jsonc`, which is the
+ * fallback when this row does not exist.
+ */
+export const seedSignature = [
+  "Tomokichi Studio",
+  "髙木友喜 / Tomoki Takagi",
+  "────────────────────────",
+  "https://tmkch.io",
+  "support@tmkch.io  ·  080-6648-1475",
+].join("\n");

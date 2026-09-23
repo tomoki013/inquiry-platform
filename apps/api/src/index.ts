@@ -7,6 +7,7 @@ import type {
   AppMailSettings,
   AppSummary,
   AuditEntry,
+  ConsoleProfile,
   CreateReportResult,
   DashboardSummary,
   IngestInboundEmailResult,
@@ -23,10 +24,12 @@ import type {
 } from "@inquiry-platform/core";
 import {
   ATTACHMENT_FILENAME_HEADER,
+  consoleAppName,
   listAuditInputSchema,
   MAX_ATTACHMENT_BYTES,
   newId,
   ok,
+  parseBranding,
 } from "@inquiry-platform/core";
 import type { MailProvider } from "@inquiry-platform/notification/mail";
 import { ResendMailProvider, UnconfiguredMailProvider } from "@inquiry-platform/notification/mail";
@@ -51,11 +54,11 @@ import { TicketService } from "./domain/ticket-service";
 import type { AdminCoreEnv } from "./env";
 
 /**
- * Tomokichi Studio Admin Core.
+ * The platform API: every ticket, report, reply and audit row.
  *
  * Not on the internet. `workers_dev` is off and there is no route, so the only
- * ways to reach this Worker are the Service Bindings declared by Admin Web, the
- * mail Worker and `tomokichi-api`. That is what lets the D1 and R2 bindings
+ * ways to reach this Worker are the Service Bindings declared by the admin
+ * console, the mail Worker and the projects' own public APIs. That is what lets the D1 and R2 bindings
  * live here and nowhere else: a bug in an internet-facing route handler cannot
  * reach a database it was never given.
  *
@@ -289,6 +292,17 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
 
   // ---- Cross-cutting ----------------------------------------------------
 
+  async consoleProfile(): Promise<ConsoleProfile> {
+    const { branding } = this.services;
+    return {
+      consoleName: branding.consoleName,
+      consoleShortName: branding.consoleShortName,
+      replyFromAddress: this.env.SUPPORT_EMAIL,
+      defaultSignature: branding.defaultSignature,
+      defaultProjectId: branding.defaultProjectId,
+    };
+  }
+
   async listActivity(input: unknown): Promise<Result<AuditEntry[]>> {
     const parsed = listAuditInputSchema.safeParse(input ?? {});
     if (!parsed.success) return validationFailure(parsed.error);
@@ -432,7 +446,7 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
     }
 
     if (url.pathname === "/internal/health") {
-      return json({ ok: true, service: "tomokichi-admin-core" }, 200);
+      return json({ ok: true, service: "inquiry-platform-api" }, 200);
     }
     return json({ error: "NOT_FOUND" }, 404);
   }
@@ -445,6 +459,7 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
  * waits.
  */
 function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknown>) => void) {
+  const branding = parseBranding(env.BRANDING);
   const apps = new AppRepository(env.DB);
   const reports = new ReportRepository(env.DB);
   const support = new SupportRepository(env.DB);
@@ -454,7 +469,7 @@ function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknown>) => 
   // One decision, made once: with no key, every send refuses and every other
   // part of the support screen still works.
   const mail: MailProvider = env.MAIL_API_KEY
-    ? new ResendMailProvider(env.MAIL_API_KEY)
+    ? new ResendMailProvider(env.MAIL_API_KEY, undefined, branding.mailLogo)
     : new UnconfiguredMailProvider();
 
   const vapid = lazyVapid(env);
@@ -474,6 +489,8 @@ function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknown>) => 
       notifyEmail: env.NOTIFICATION_EMAIL,
       from: `${env.SUPPORT_FROM_NAME} <${env.NOREPLY_EMAIL}>`,
       adminOrigin: env.ADMIN_ORIGIN,
+      consoleName: branding.consoleName,
+      pushTitle: consoleAppName(branding).shortName,
     },
   );
   const notify = (ref: TicketCreatedRef) => schedule(notifications.ticketCreated(ref));
@@ -492,10 +509,13 @@ function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknown>) => 
       supportEmail: env.SUPPORT_EMAIL,
       fromName: env.SUPPORT_FROM_NAME,
       defaultSupportUrl: env.DEFAULT_SUPPORT_URL,
+      defaultSignature: branding.defaultSignature,
+      legacySignatures: branding.legacySignatures,
     },
   );
 
   return {
+    branding,
     apps: new AppService(env.DB, apps, audit),
     reports: new ReportService(
       env.DB,

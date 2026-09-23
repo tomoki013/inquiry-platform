@@ -148,7 +148,7 @@ export class SupportService {
     }
   }
 
-  /** The `tmkch.io/support` form, and anything else that starts a conversation
+  /** A project's web support form, and anything else that starts a conversation
    * without an email round trip. */
   async createThread(raw: unknown, actor: ActorRef): Promise<Result<SupportThreadDetail>> {
     const parsed = createSupportThreadInputSchema.safeParse(raw);

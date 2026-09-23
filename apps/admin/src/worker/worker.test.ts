@@ -65,7 +65,15 @@ async function token(options: {
     .sign(privateKey);
 }
 
+const profile = {
+  consoleName: "Example Console",
+  consoleShortName: "Example",
+  replyFromAddress: "support@example.com",
+  defaultSignature: "Example Support",
+};
+
 const coreStub = {
+  consoleProfile: () => Promise.resolve(profile),
   mailProviderConfigured: () => Promise.resolve(true),
   getDashboard: () =>
     Promise.resolve({ ok: true, value: { openReports: 1, apps: [], recentActivity: [] } }),
@@ -76,11 +84,21 @@ function env(overrides: Partial<AdminWebEnv> = {}): AdminWebEnv {
   return {
     ADMIN_CORE: coreStub,
     ASSETS: {
-      fetch: () => Promise.resolve(new Response("<html>app</html>")),
+      fetch: (request: Request) =>
+        Promise.resolve(
+          new URL(request.url).pathname === "/manifest.webmanifest"
+            ? new Response(JSON.stringify({ name: "Admin", short_name: "Admin", start_url: "/" }), {
+                headers: { "Content-Type": "application/manifest+json" },
+              })
+            : new Response(
+                '<html><head><title>Admin</title><meta name="apple-mobile-web-app-title" content="Admin"></head><body>app</body></html>',
+                { headers: { "Content-Type": "text/html; charset=utf-8" } },
+              ),
+        ),
     } as unknown as Fetcher,
     ACCESS_TEAM_DOMAIN: "",
     ACCESS_AUD: "",
-    ADMIN_ORIGIN: "https://admin.tmkch.io",
+    ADMIN_ORIGIN: "https://admin.example.com",
     ENVIRONMENT: "production",
     ...overrides,
   };
@@ -92,7 +110,7 @@ const ctx = {
 } as unknown as ExecutionContext;
 
 function get(path: string, headers: Record<string, string> = {}): Request {
-  return new Request(`https://admin.tmkch.io${path}`, { headers });
+  return new Request(`https://admin.example.com${path}`, { headers });
 }
 
 describe("Cloudflare Access", () => {
@@ -209,7 +227,7 @@ describe("mutation guard", () => {
   const local = () => env({ ENVIRONMENT: "local", DEV_ADMIN_EMAIL: "dev@example.com" });
 
   const post = (headers: Record<string, string>) =>
-    new Request("https://admin.tmkch.io/api/tickets/r1/ack", {
+    new Request("https://admin.example.com/api/tickets/r1/ack", {
       method: "POST",
       headers,
       body: JSON.stringify({ to: "reviewing" }),
@@ -333,9 +351,9 @@ describe("Ticket API confidentiality", () => {
     expect(response.status).toBe(401);
   });
   it.each(["ack", "notes", "relations", "merge"])("rejects unauthenticated %s", async (action) => {
-    const request = new Request(`https://admin.tmkch.io/api/tickets/t1/${action}`, {
+    const request = new Request(`https://admin.example.com/api/tickets/t1/${action}`, {
       method: "POST",
-      headers: { Origin: "https://admin.tmkch.io", "Content-Type": "application/json" },
+      headers: { Origin: "https://admin.example.com", "Content-Type": "application/json" },
       body: JSON.stringify({ body: "internal" }),
     });
     expect(
@@ -402,6 +420,32 @@ describe("PWA and push", () => {
     },
   );
 
+  it("names the manifest after the deployment, and says nothing else about it", async () => {
+    const response = await createApp().fetch(get("/manifest.webmanifest"), gated(), ctx);
+    const manifest = (await response.json()) as Record<string, unknown>;
+    expect(manifest).toMatchObject({
+      name: "Example Console Admin",
+      short_name: "Example Admin",
+      start_url: "/",
+    });
+    // Served before sign-in: the reply address and signature stay behind the gate.
+    expect(JSON.stringify(manifest)).not.toContain("support@example.com");
+    expect(JSON.stringify(manifest)).not.toContain("Example Support");
+  });
+
+  it("names the HTML shell after the deployment", async () => {
+    const response = await createApp().fetch(get("/tickets"), local(), ctx);
+    const html = await response.text();
+    expect(html).toContain("<title>Example Console Admin</title>");
+    expect(html).toContain('content="Example Admin"');
+  });
+
+  it("returns the console profile with the session", async () => {
+    const response = await createApp().fetch(get("/api/session"), local(), ctx);
+    const body = (await response.json()) as { data: { profile: unknown } };
+    expect(body.data.profile).toEqual(profile);
+  });
+
   it("keeps the service worker out of the asset cache", async () => {
     const response = await createApp().fetch(get("/sw.js"), local(), ctx);
     expect(response.headers.get("Cache-Control")).toBe("no-cache");
@@ -410,7 +454,7 @@ describe("PWA and push", () => {
   it("registers a subscription under the signed-in operator, with the request's user agent", async () => {
     const registerPushSubscription = vi.fn().mockResolvedValue({ ok: true, value: { id: "d1" } });
     const response = await createApp().fetch(
-      new Request("https://admin.tmkch.io/api/notifications/push/subscriptions", {
+      new Request("https://admin.example.com/api/notifications/push/subscriptions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -440,7 +484,7 @@ describe("PWA and push", () => {
   it("refuses a cross-site subscription registration before Admin Core hears of it", async () => {
     const registerPushSubscription = vi.fn();
     const response = await createApp().fetch(
-      new Request("https://admin.tmkch.io/api/notifications/push/subscriptions", {
+      new Request("https://admin.example.com/api/notifications/push/subscriptions", {
         method: "POST",
         headers: { "Content-Type": "application/json", Origin: "https://evil.example.com" },
         body: JSON.stringify({ endpoint: "https://push.example/x", keys: {} }),
@@ -455,9 +499,9 @@ describe("PWA and push", () => {
   it("refuses unauthenticated push and settings calls", async () => {
     for (const request of [
       get("/api/notifications"),
-      new Request("https://admin.tmkch.io/api/notifications/push/subscriptions/d1", {
+      new Request("https://admin.example.com/api/notifications/push/subscriptions/d1", {
         method: "DELETE",
-        headers: { Origin: "https://admin.tmkch.io" },
+        headers: { Origin: "https://admin.example.com" },
       }),
     ]) {
       const response = await createApp().fetch(request, gated(), ctx);
@@ -468,7 +512,7 @@ describe("PWA and push", () => {
   it("removes a device by id under the operator's identity", async () => {
     const revokePushSubscription = vi.fn().mockResolvedValue({ ok: true, value: null });
     const response = await createApp().fetch(
-      new Request("https://admin.tmkch.io/api/notifications/push/subscriptions/d1", {
+      new Request("https://admin.example.com/api/notifications/push/subscriptions/d1", {
         method: "DELETE",
         headers: { Origin: "http://localhost:4330" },
       }),

@@ -5,7 +5,7 @@ import { Link } from "react-router";
 import { DataState, Page, StatusPill, Timestamp } from "../components/primitives";
 import { api } from "../lib/api";
 
-/** Every app the Studio runs, and how much each is currently asking of you. */
+/** Every registered app, and how much each is currently asking of you. */
 export function Apps() {
   const [includeArchived, setIncludeArchived] = useState(false);
   const apps = useQuery({
@@ -16,7 +16,7 @@ export function Apps() {
   return (
     <Page
       title="アプリ"
-      description="Tomokichi Studio のアプリ"
+      description="問い合わせ・通報を受け付けるアプリ"
       actions={
         <label className="flex items-center gap-2 text-xs text-ink-soft">
           <input

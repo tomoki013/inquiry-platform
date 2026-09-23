@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * Content reports, from any Studio app.
+ * Content reports, from any registered app.
  *
  * The vocabulary here is deliberately wider than Remeet's: `reasonCode` and
  * `contentType` are validated as slugs rather than against Remeet's own enums,

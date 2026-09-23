@@ -14,7 +14,8 @@
  */
 
 const APP_ORIGIN = self.location.origin;
-const DEFAULT_TITLE = "Tomokichi Admin";
+/** Used only when a payload predates `title`. */
+const DEFAULT_TITLE = "Admin";
 
 self.addEventListener("install", () => {
   // Take over on the next navigation rather than waiting for every tab to
@@ -53,14 +54,15 @@ self.addEventListener("fetch", (event) => {
 
 const OFFLINE_PAGE = `<!doctype html>
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tomokichi Admin</title>
+<title>Admin</title>
 <style>body{margin:0;min-height:100vh;display:grid;place-items:center;font:15px/1.6 ui-sans-serif,system-ui,sans-serif;color:#2c2f38;background:#fcfcfd}main{max-width:26rem;padding:2rem;text-align:center}h1{font-size:1rem;font-weight:500;margin:0 0 .5rem}p{margin:0;color:#6b7080}button{margin-top:1.25rem;padding:.5rem 1rem;border:1px solid #e3e4e8;border-radius:.375rem;background:#fff;color:inherit;font:inherit}</style>
 </head><body><main><h1>オフラインです</h1><p>管理画面はネットワーク接続が必要です。問い合わせや通報の内容はこの端末に保存されません。</p><button type="button" onclick="location.reload()">再読み込み</button></main></body></html>`;
 
 /**
  * A push arrives.
  *
- * The payload is a ticket number, a category and a path — see
+ * The payload is a ticket number, a category, the console's title and a
+ * path — see
  * `PushPayload` in `@inquiry-platform/core`. What is shown is built from
  * those and from fixed strings; there is no field in the payload that could
  * carry a message, and if one appeared it would not be rendered.
@@ -75,6 +77,7 @@ self.addEventListener("push", (event) => {
   const category = payload.category === "report" ? "report" : "inquiry";
   const ticketNumber = typeof payload.ticketNumber === "string" ? payload.ticketNumber : "";
   const app = typeof payload.app === "string" ? payload.app : "";
+  const title = typeof payload.title === "string" && payload.title ? payload.title : DEFAULT_TITLE;
   const url =
     safePath(payload.url) ||
     (ticketNumber ? `/tickets/${encodeURIComponent(ticketNumber)}` : "/tickets");
@@ -83,7 +86,7 @@ self.addEventListener("push", (event) => {
   const detail = [app, ticketNumber ? `#${ticketNumber}` : ""].filter(Boolean).join(" • ");
 
   event.waitUntil(
-    self.registration.showNotification(DEFAULT_TITLE, {
+    self.registration.showNotification(title, {
       body: detail ? `${body}\n${detail}` : body,
       // One notification per ticket: a retry replaces rather than stacks.
       tag: ticketNumber ? `ticket:${ticketNumber}` : undefined,

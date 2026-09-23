@@ -5,10 +5,11 @@ import type {
   SupportDraft,
   SupportThreadDetail,
 } from "@inquiry-platform/core";
-import { DEFAULT_MAIL_SIGNATURE, replySubjectFor } from "@inquiry-platform/core";
+import { replySubjectFor } from "@inquiry-platform/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
+import { useSession } from "../lib/session";
 import { Dialog } from "./Dialog";
 import { Button, inputClass } from "./primitives";
 
@@ -85,13 +86,15 @@ export function ReplyComposer({
     queryFn: () => api.get<AppMailSettings[]>("/api/support/mail-settings"),
     enabled: Boolean(thread.requesterEmail),
   });
+  const profile = useSession().data?.profile;
   const signature =
     settings.data?.find((s) => s.appId === thread.appId)?.signatureText?.trim() ||
     settings.data?.find((s) => !s.appId)?.signatureText?.trim() ||
-    DEFAULT_MAIL_SIGNATURE;
+    profile?.defaultSignature.trim() ||
+    "";
 
   const templates = useQuery({
-    queryKey: ["reply-templates", thread.appId ?? "studio"],
+    queryKey: ["reply-templates", thread.appId ?? "default"],
     queryFn: () =>
       api.get<ReplyTemplate[]>(
         `/api/support/templates${thread.appId ? `?forAppId=${thread.appId}` : ""}`,
@@ -234,7 +237,7 @@ export function ReplyComposer({
         <>
           <dl className="mb-4 grid gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
             <Meta label="宛先">{thread.requesterEmail ?? "返信先なし"}</Meta>
-            <Meta label="差出人">support@tmkch.io</Meta>
+            <Meta label="差出人">{profile?.replyFromAddress ?? ""}</Meta>
             <Meta label="件名">{appliedTemplate?.subject ?? replySubjectFor(thread)}</Meta>
           </dl>
 

@@ -1,20 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router";
-import { api } from "../lib/api";
 import { useServiceWorkerUpdate } from "../lib/pwa";
-
-interface Session {
-  email?: string;
-  role: string;
-  mailConfigured: boolean;
-}
+import { useSession } from "../lib/session";
 
 /**
  * The frame.
  *
  * Three groups, in the order somebody actually uses them: what needs attention,
- * what is being operated, and the Studio itself. Nothing here is a placeholder
+ * what is being operated, and the console itself. Nothing here is a placeholder
  * link to a 404 — every entry goes to a screen that exists.
  */
 export function Layout() {
@@ -23,11 +16,7 @@ export function Layout() {
   useEffect(() => {
     if (location.pathname) setMenuOpen(false);
   }, [location.pathname]);
-  const session = useQuery({
-    queryKey: ["session"],
-    queryFn: () => api.get<Session>("/api/session"),
-    staleTime: 5 * 60 * 1000,
-  });
+  const session = useSession();
   const update = useServiceWorkerUpdate();
 
   return (
@@ -43,7 +32,7 @@ export function Layout() {
       <nav aria-label="メインナビゲーション" className="admin-nav">
         <div className="admin-nav-header">
           <p className="text-sm font-medium tracking-tight text-ink">
-            Tomokichi Studio <span className="text-ink-soft">Admin</span>
+            {session.data?.profile.consoleName ?? ""} <span className="text-ink-soft">Admin</span>
           </p>
           <button
             type="button"

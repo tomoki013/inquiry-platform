@@ -20,7 +20,7 @@ export interface TicketNotificationEvent {
   /** `TK-000123` — what the notification shows and the link resolves. */
   ticketNumber: string;
   category: TicketNotificationCategory;
-  /** The app's display name, or the Studio's, for the notification line. */
+  /** The app's display name, or the console's, for the notification line. */
   app: string;
   createdAt: string;
 }
@@ -36,6 +36,8 @@ export interface PushPayload {
   ticketNumber: string;
   category: TicketNotificationCategory;
   app: string;
+  /** The notification's title: the console's short name. Not ticket data. */
+  title: string;
   /** Path on the admin origin. No query string, ever. */
   url: string;
 }

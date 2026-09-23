@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import { ActivityList } from "../components/ActivityList";
 import { Card, DataState, Page, StatusPill } from "../components/primitives";
 import { api } from "../lib/api";
+import { useSession } from "../lib/session";
 
 /**
  * The front page.
@@ -13,13 +14,17 @@ import { api } from "../lib/api";
  * and a page of charts nobody acts on is a page nobody reads.
  */
 export function Dashboard() {
+  const session = useSession();
   const dashboard = useQuery({
     queryKey: ["dashboard"],
     queryFn: () => api.get<DashboardSummary>("/api/dashboard"),
   });
 
   return (
-    <Page title="ダッシュボード" description="Tomokichi Studio の運営状況">
+    <Page
+      title="ダッシュボード"
+      description={session.data ? `${session.data.profile.consoleName} の運営状況` : "運営状況"}
+    >
       <DataState
         loading={dashboard.isLoading}
         error={dashboard.error}

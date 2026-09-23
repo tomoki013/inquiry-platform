@@ -1,8 +1,8 @@
-import { plainTextToSafeHtml } from "./html";
+import { type MailLogo, plainTextToSafeHtml } from "./html";
 import type { BaseMail, MailProvider, MailResult, SupportReplyMail } from "./index";
 
 /**
- * Resend, which is what the Studio already sends support notifications with.
+ * Resend.
  *
  * Deliberately a thin adapter and not a shared package with `apps/api`: that
  * Worker's `sendSupportEmail` throws, has its own bindings and is covered by
@@ -26,6 +26,8 @@ export class ResendMailProvider implements MailProvider {
      * reply, in production.
      */
     private readonly fetcher: typeof fetch = (input, init) => fetch(input, init),
+    /** The deployment's signature picture, if it has one. */
+    private readonly logo?: MailLogo,
   ) {}
 
   sendTransactional(mail: BaseMail): Promise<MailResult> {
@@ -66,7 +68,7 @@ export class ResendMailProvider implements MailProvider {
           reply_to: mail.replyTo,
           subject: mail.subject,
           text: mail.text,
-          html: plainTextToSafeHtml(mail.text, mail.signatureText),
+          html: plainTextToSafeHtml(mail.text, mail.signatureText, this.logo),
           ...(headers && Object.keys(headers).length > 0 ? { headers } : {}),
         }),
       });

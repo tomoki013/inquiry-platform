@@ -17,6 +17,7 @@ import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-r
 import { Dialog } from "../components/Dialog";
 import { Button, DataState, Field, inputClass, Timestamp } from "../components/primitives";
 import { api } from "../lib/api";
+import { useSession } from "../lib/session";
 
 export const useTicketMasters = () =>
   useQuery({
@@ -424,8 +425,9 @@ function CreateTicket({
   initialType?: TicketType;
 }) {
   const [type, setType] = useState<TicketType>(initialType ?? "INQUIRY"),
+    defaultProjectId = useSession().data?.profile.defaultProjectId,
     [service, setService] = useState(
-      masters.services.find((s) => s.id === "studio")?.id ?? masters.services[0]?.id ?? "",
+      masters.services.find((s) => s.id === defaultProjectId)?.id ?? masters.services[0]?.id ?? "",
     ),
     [subject, setSubject] = useState(""),
     [summary, setSummary] = useState(""),

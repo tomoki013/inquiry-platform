@@ -83,10 +83,10 @@ describe("ticket notifications carry a reference, never content", () => {
     expect(h.mail.sent).toHaveLength(1);
     const mail = h.mail.sent[0] as NonNullable<(typeof h.mail.sent)[0]>;
     expect(mail.to).toBe("operator@example.com");
-    expect(mail.from).toBe("Tomokichi Studio Support <notification@tmkch.io>");
-    expect(mail.subject).toBe("[Tomokichi Studio] 新しいお問い合わせがあります");
+    expect(mail.from).toBe("Example Support <notification@example.com>");
+    expect(mail.subject).toBe("[Example Console] 新しいお問い合わせがあります");
     expect(mail.text).toContain(`Ticket ID: #${ticketNumber}`);
-    expect(mail.text).toContain(`https://admin.tmkch.io/tickets/${ticketNumber}`);
+    expect(mail.text).toContain(`https://admin.example.com/tickets/${ticketNumber}`);
     expect(mail.text).toContain("対象アプリ: remeet");
     expect(mail.replyTo).toBeUndefined();
     for (const secret of secrets) expect(mail.text).not.toContain(secret);
@@ -99,6 +99,7 @@ describe("ticket notifications carry a reference, never content", () => {
       ticketNumber,
       category: "inquiry",
       app: "remeet",
+      title: "Example Admin",
       url: `/tickets/${ticketNumber}`,
     });
     expect(String(payload.url)).not.toContain("?");
@@ -133,7 +134,7 @@ describe("ticket notifications carry a reference, never content", () => {
     // the one addressed to the operator.
     const alert = h.mail.sent.find((mail) => mail.to === "operator@example.com");
     expect(alert).toBeDefined();
-    expect(alert?.subject).toBe("[Tomokichi Studio] 新しい通報があります");
+    expect(alert?.subject).toBe("[Example Console] 新しい通報があります");
     expect(alert?.text).toContain("種別: 通報");
     for (const secret of [
       "harassment",
@@ -157,7 +158,7 @@ describe("ticket notifications carry a reference, never content", () => {
       (await h.support.ingestInboundEmail(
         {
           from: "someone@example.com",
-          to: "support@tmkch.io",
+          to: "support@example.com",
           subject: "質問",
           bodyText: "本文",
           messageId: "<m1@example.com>",

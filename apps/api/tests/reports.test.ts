@@ -1,6 +1,14 @@
 import type { CreateReportResult, ReportDetail } from "@inquiry-platform/core";
 import { beforeEach, describe, expect, it } from "vitest";
-import { admin, appActor, expectOk, type Harness, harness, seedApp } from "./harness";
+import {
+  admin,
+  appActor,
+  expectOk,
+  type Harness,
+  harness,
+  seedApp,
+  TEST_BRANDING,
+} from "./harness";
 
 let h: Harness;
 
@@ -214,7 +222,7 @@ describe("report email", () => {
     expect(h.mail.sent[0]?.subject).toBe(
       `[remeet] 通報の受付・対応について [通報ID:${input.externalReportId}]`,
     );
-    expect(h.mail.sent[0]?.text).toContain("髙木友喜 / Tomoki Takagi");
+    expect(h.mail.sent[0]?.text).toContain(TEST_BRANDING.defaultSignature);
     expect(h.mail.sent[0]?.text).not.toContain("報告された本文");
     // The way back from a mis-tap is this mail, and the mail says so: the
     // app's 表示に戻す and deleting the content are not withdrawals.

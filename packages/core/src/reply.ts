@@ -132,7 +132,7 @@ export interface ReplyTemplate {
   key: string;
   name: string;
   category: ReplyTemplateCategory;
-  /** `undefined` means the template belongs to the Studio, not one app. */
+  /** `undefined` means the template is shared by every app. */
   appId?: string;
   appSlug?: string;
   /** Offered as the reply's subject, and used only when the thread has none of
@@ -171,7 +171,7 @@ export type CreateReplyTemplateInput = z.infer<typeof createReplyTemplateInputSc
 export const updateReplyTemplateInputSchema = z.object({
   name: z.string().trim().min(1).max(160).optional(),
   category: z.enum(replyTemplateCategories).optional(),
-  /** `null` moves the template back to the Studio-wide scope. */
+  /** `null` moves the template back to the shared scope. */
   appId: z.string().min(1).nullable().optional(),
   /** `null` clears it, which puts the default back. */
   subject: z.string().trim().max(SUBJECT_LIMIT).nullable().optional(),
@@ -184,7 +184,7 @@ export type UpdateReplyTemplateInput = z.infer<typeof updateReplyTemplateInputSc
 
 export const listReplyTemplatesInputSchema = z
   .object({
-    /** Narrows to this app's templates plus the Studio-wide ones — what the
+    /** Narrows to this app's templates plus the shared ones — what the
      * composer shows while a thread is open. */
     forAppId: z.string().min(1).optional(),
     includeInactive: z.boolean().default(false),
@@ -245,7 +245,7 @@ export type SendSupportReplyInput = z.infer<typeof sendSupportReplyInputSchema>;
 // ---- Signatures ---------------------------------------------------------
 
 export interface AppMailSettings {
-  /** `undefined` is the Studio-wide default, used by any app with none of its
+  /** `undefined` is the deployment-wide default, used by any app with none of its
    * own and by threads not linked to an app. */
   appId?: string;
   signatureText: string;

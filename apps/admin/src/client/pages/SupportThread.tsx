@@ -17,12 +17,14 @@ import {
   supportSourceLabels,
   supportStatusLabels,
 } from "../lib/labels";
+import { useSession } from "../lib/session";
 
-const DIRECTION_LABEL = {
-  inbound: "お客様",
-  outbound: "Tomokichi Studio",
-  internal_note: "運営メモ",
-} as const;
+/** `outbound` is whatever this deployment calls itself. */
+function directionLabel(direction: SupportMessage["direction"], consoleName: string): string {
+  if (direction === "inbound") return "お客様";
+  if (direction === "internal_note") return "運営メモ";
+  return consoleName || "運営";
+}
 
 /** One conversation: the messages, who it is about, and the composer. */
 export function SupportThread() {
@@ -34,10 +36,7 @@ export function SupportThread() {
     queryFn: () => api.get<Thread>(`/api/support/threads/${id}`),
   });
   const apps = useQuery({ queryKey: ["apps"], queryFn: () => api.get<AppSummary[]>("/api/apps") });
-  const session = useQuery({
-    queryKey: ["session"],
-    queryFn: () => api.get<{ mailConfigured: boolean }>("/api/session"),
-  });
+  const session = useSession();
 
   const update = (updated: Thread) => {
     client.setQueryData(["support-thread", id], updated);
@@ -169,7 +168,7 @@ function ThreadHeader({ thread }: { thread: Thread }) {
           )}
         </Row>
         {/* Which address it was sent to. Worth showing because there is more
-            than one — the live `support@tmkch.io` and whatever else Email
+            than one — the live support address and whatever else Email
             Routing points at the ingress Worker. */}
         {first?.recipient ? <Row label="宛先">{first.recipient}</Row> : null}
         <Row label="受信">
@@ -194,12 +193,13 @@ function ThreadHeader({ thread }: { thread: Thread }) {
 /**
  * One message, addressed.
  *
- * The sender and recipient are shown rather than only "お客様" / "Tomokichi
- * Studio", because a thread can involve more than one address on either side
+ * The sender and recipient are shown rather than only "お客様" / the console
+ * name, because a thread can involve more than one address on either side
  * and knowing which one a reply actually went to is the difference between
  * "they never answered" and "we answered the wrong address".
  */
 function Message({ thread, message }: { thread: Thread; message: SupportMessage }) {
+  const consoleName = useSession().data?.profile.consoleName ?? "";
   const note = message.direction === "internal_note";
   const sender =
     message.sender ?? (message.direction === "inbound" ? (thread.requesterEmail ?? "") : "");
@@ -217,7 +217,9 @@ function Message({ thread, message }: { thread: Thread; message: SupportMessage 
       }`}
     >
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-line-soft pb-2">
-        <span className="text-sm font-medium text-ink">{DIRECTION_LABEL[message.direction]}</span>
+        <span className="text-sm font-medium text-ink">
+          {directionLabel(message.direction, consoleName)}
+        </span>
         <span className="text-xs text-ink-faint">
           <Timestamp value={message.createdAt} />
         </span>

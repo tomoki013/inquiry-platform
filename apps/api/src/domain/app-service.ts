@@ -12,7 +12,7 @@ import type { AuditRepository } from "../db/audit";
 import { internalFailure, notFound, validationFailure } from "./failures";
 
 /**
- * The Studio's registry of its own apps.
+ * The registry of the apps (projects) this platform serves.
  *
  * Nothing here changes how an app behaves — there is no flag an operator can
  * flip that reaches a phone. That is a deliberate limit: a管理画面 that can

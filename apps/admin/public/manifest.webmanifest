@@ -1,7 +1,7 @@
 {
-  "name": "Tomokichi Studio Admin",
-  "short_name": "Tomokichi Admin",
-  "description": "Tomokichi Studio の問い合わせ・通報・運用を扱う管理画面",
+  "name": "Admin",
+  "short_name": "Admin",
+  "description": "問い合わせ・通報・運用を扱う管理画面",
   "id": "/",
   "start_url": "/",
   "scope": "/",

@@ -6,7 +6,7 @@ let h: Harness;
 
 const inbound = (overrides: Record<string, unknown> = {}) => ({
   from: "someone@example.com",
-  to: "support@tmkch.io",
+  to: "support@example.com",
   subject: "アプリで共有できません",
   bodyText: "共有ボタンを押しても何も起きません。",
   messageId: "<first@example.com>",

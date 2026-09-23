@@ -86,5 +86,5 @@ export class UnconfiguredMailProvider implements MailProvider {
   }
 }
 
-export { plainTextToSafeHtml } from "./html";
+export { type MailLogo, plainTextToSafeHtml } from "./html";
 export { ResendMailProvider } from "./resend";

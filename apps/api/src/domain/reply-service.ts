@@ -10,7 +10,6 @@ import type {
 import {
   applyTemplateInputSchema,
   createReplyTemplateInputSchema,
-  DEFAULT_MAIL_SIGNATURE,
   fail,
   listReplyTemplatesInputSchema,
   newId,
@@ -37,6 +36,11 @@ export interface ReplyAddresses {
   supportEmail: string;
   fromName: string;
   defaultSupportUrl: string;
+  /** The deployment's fallback signature, used when no `app_mail_settings`
+   * row applies. Empty means none. */
+  defaultSignature: string;
+  /** Older signatures to strip from drafts; see `Branding.legacySignatures`. */
+  legacySignatures: readonly string[];
 }
 
 /**
@@ -270,7 +274,7 @@ export class ReplyService {
           actor,
           action: "mail_settings.updated",
           targetType: parsed.data.appId ? "app" : "system",
-          targetId: parsed.data.appId ?? "studio",
+          targetId: parsed.data.appId ?? "default",
           metadata: { length: parsed.data.signatureText.length },
         }),
       ]);
@@ -283,18 +287,12 @@ export class ReplyService {
   private async withoutSignature(threadId: string, text: string): Promise<string> {
     const thread = await this.support.findThread(threadId);
     const configured = await this.templates.signature(thread?.app_id ?? undefined);
-    const legacy = [
-      "────────────────────────",
-      "Tomokichi Studio",
-      "髙木 友喜",
-      "",
-      "Web: https://tmkch.io",
-      "Email: support@tmkch.io",
-      "TEL: 080-6648-1475",
-      "────────────────────────",
-    ].join("\n");
     let body = text;
-    for (const signature of [configured, DEFAULT_MAIL_SIGNATURE, legacy]) {
+    for (const signature of [
+      configured,
+      this.addresses.defaultSignature,
+      ...this.addresses.legacySignatures,
+    ]) {
       if (!signature?.trim()) continue;
       const ending = `\n\n${signature.trim()}`;
       while (body.trimEnd().endsWith(ending)) body = body.trimEnd().slice(0, -ending.length);
@@ -414,7 +412,7 @@ export class ReplyService {
 
       const signature =
         (await this.templates.signature(thread.app_id ?? undefined))?.trim() ||
-        DEFAULT_MAIL_SIGNATURE;
+        this.addresses.defaultSignature.trim();
       const body = await this.withoutSignature(input.threadId, input.bodyText);
       if (!body.trim()) return fail("VALIDATION_ERROR", "返信本文を入力してください。");
       const linkedReport = await this.db

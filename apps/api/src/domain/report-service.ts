@@ -32,7 +32,7 @@ import type { ReplyService } from "./reply-service";
 import { reportMailSubject } from "./report-threading";
 
 /**
- * Moderation, as far as the Studio is concerned.
+ * Moderation, as far as the platform is concerned.
  *
  * The status machine is enforced here rather than in the UI: the browser
  * disables the buttons that would be illegal, and this refuses them anyway,

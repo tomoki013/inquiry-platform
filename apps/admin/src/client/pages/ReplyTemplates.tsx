@@ -100,7 +100,7 @@ export function ReplyTemplates() {
                     <p className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-ink-faint">
                       <span className="font-mono">{template.key}</span>
                       <span>{replyTemplateCategoryLabels[template.category]}</span>
-                      <span>{template.appSlug ?? "studio 共通"}</span>
+                      <span>{template.appSlug ?? "共通"}</span>
                       <span>順序 {template.sortOrder}</span>
                     </p>
                   </div>
@@ -171,7 +171,7 @@ function TemplateForm({
             value={value.appId ?? ""}
             onChange={(event) => onChange({ ...value, appId: event.target.value || undefined })}
           >
-            <option value="">studio 共通</option>
+            <option value="">共通</option>
             {apps.map((app) => (
               <option key={app.id} value={app.id}>
                 {app.name}

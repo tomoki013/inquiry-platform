@@ -53,7 +53,7 @@ Two packages instead of four, with the same boundaries.
 ```bash
 pnpm install
 pnpm --filter @inquiry-platform/api migrate:local
-pnpm --filter @inquiry-platform/api seed > /tmp/seed.sql
+pnpm --filter @inquiry-platform/api seed tomokichi > /tmp/seed.sql
 pnpm --filter @inquiry-platform/api exec wrangler d1 execute tomokichi-admin --local --file /tmp/seed.sql
 ```
 
@@ -154,7 +154,7 @@ cannot be created before the Worker it points at exists.
 
    ```bash
    pnpm deploy:admin-core
-   pnpm admin:seed > /tmp/seed.sql
+   pnpm seed tomokichi > /tmp/seed.sql
    pnpm --filter @inquiry-platform/api exec wrangler d1 execute tomokichi-admin --remote --file /tmp/seed.sql
    ```
 

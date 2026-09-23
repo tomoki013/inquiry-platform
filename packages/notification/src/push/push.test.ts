@@ -81,7 +81,7 @@ describe("encryptPayload", () => {
 describe("VAPID", () => {
   it("signs an ES256 token over the push service origin that the public key verifies", async () => {
     const keys = await generateVapidKeys();
-    const signer = await importVapid({ ...keys, subject: "mailto:support@tmkch.io" });
+    const signer = await importVapid({ ...keys, subject: "mailto:support@example.com" });
     const header = await signer.authorization(
       "https://fcm.googleapis.com/fcm/send/abc",
       new Date("2026-09-21T00:00:00Z"),
@@ -101,7 +101,7 @@ describe("VAPID", () => {
       unknown
     >;
     expect(claims.aud).toBe("https://fcm.googleapis.com");
-    expect(claims.sub).toBe("mailto:support@tmkch.io");
+    expect(claims.sub).toBe("mailto:support@example.com");
     expect(claims.exp).toBe(Math.floor(Date.parse("2026-09-21T12:00:00Z") / 1000));
 
     const publicKey = await crypto.subtle.importKey(
@@ -123,7 +123,9 @@ describe("VAPID", () => {
 
   it("refuses a subject that is not mailto: or https:", async () => {
     const keys = await generateVapidKeys();
-    await expect(importVapid({ ...keys, subject: "support@tmkch.io" })).rejects.toThrow(/mailto/);
+    await expect(importVapid({ ...keys, subject: "support@example.com" })).rejects.toThrow(
+      /mailto/,
+    );
   });
 });
 
@@ -135,7 +137,7 @@ describe("sendWebPush", () => {
   };
 
   async function signer() {
-    return importVapid({ ...(await generateVapidKeys()), subject: "mailto:support@tmkch.io" });
+    return importVapid({ ...(await generateVapidKeys()), subject: "mailto:support@example.com" });
   }
 
   it("posts an aes128gcm body with the VAPID header and a TTL", async () => {

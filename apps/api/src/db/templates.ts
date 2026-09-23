@@ -67,7 +67,7 @@ export class TemplateRepository {
 
   /**
    * What the composer offers while a thread is open: this app's templates and
-   * the Studio-wide ones, app-specific first because the more specific answer is
+   * the shared ones, app-specific first because the more specific answer is
    * usually the right one. Inactive templates are absent unless asked for.
    */
   async list(input: ListReplyTemplatesInput): Promise<ReplyTemplate[]> {

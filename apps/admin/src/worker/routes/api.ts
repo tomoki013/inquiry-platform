@@ -99,6 +99,9 @@ export function registerApiRoutes(app: AdminApi): void {
         // Drives the composer: with no provider the send button is disabled and
         // says why, and everything else on the screen still works.
         mailConfigured: await c.env.ADMIN_CORE.mailProviderConfigured(),
+        // What the console calls itself and whom it replies as. From the
+        // deployment's branding, via Core.
+        profile: await c.env.ADMIN_CORE.consoleProfile(),
       },
     });
   });

@@ -59,8 +59,12 @@ export interface NotificationConfig {
   notifyEmail?: string;
   /** `Name <address>` the alert is sent from. */
   from: string;
-  /** `https://admin.tmkch.io` — for the link in the mail. */
+  /** The admin console's origin — for the link in the mail. */
   adminOrigin: string;
+  /** The deployment's console name, which prefixes the subject. */
+  consoleName: string;
+  /** Title of a push notification — the installed console's short name. */
+  pushTitle: string;
 }
 
 export interface PushTransport {
@@ -89,7 +93,7 @@ const categoryNoun: Record<TicketNotificationCategory, string> = {
  */
 export function renderTicketNotificationMail(
   event: TicketNotificationEvent,
-  config: Pick<NotificationConfig, "from" | "adminOrigin"> & { to: string },
+  config: Pick<NotificationConfig, "from" | "adminOrigin" | "consoleName"> & { to: string },
 ): BaseMail {
   const noun = categoryNoun[event.category];
   const received = new Date(event.createdAt).toLocaleString("ja-JP", {
@@ -104,7 +108,7 @@ export function renderTicketNotificationMail(
   return {
     to: config.to,
     from: config.from,
-    subject: `[Tomokichi Studio] 新しい${noun}があります`,
+    subject: `[${config.consoleName}] 新しい${noun}があります`,
     text: [
       `新しい${noun}を受信しました。`,
       "",
@@ -122,12 +126,13 @@ export function renderTicketNotificationMail(
   };
 }
 
-export function renderPushPayload(event: TicketNotificationEvent): PushPayload {
+export function renderPushPayload(event: TicketNotificationEvent, title: string): PushPayload {
   return {
     type: "support.ticket.created",
     ticketNumber: event.ticketNumber,
     category: event.category,
     app: event.app,
+    title,
     url: ticketPath(event.ticketNumber),
   };
 }
@@ -214,6 +219,7 @@ export class NotificationService {
           to: this.config.notifyEmail,
           from: this.config.from,
           adminOrigin: this.config.adminOrigin,
+          consoleName: this.config.consoleName,
         }),
       );
       if (!result.ok) {
@@ -239,7 +245,7 @@ export class NotificationService {
       internalFailure("notification.push_lookup", error);
       return counts;
     }
-    const payload = JSON.stringify(renderPushPayload(event));
+    const payload = JSON.stringify(renderPushPayload(event, this.config.pushTitle));
     const at = nowIso();
     await Promise.all(
       targets.map(async (row) => {

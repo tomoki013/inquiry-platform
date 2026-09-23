@@ -1,6 +1,6 @@
 import type { RemeetModerationApi } from "@inquiry-platform/core";
 /**
- * Everything Admin Core is given.
+ * Everything the platform API Worker is given.
  *
  * Only this Worker has `DB` and `PRIVATE_FILES`. Admin Web deliberately has
  * neither: if the internet-facing Worker cannot reach the database, a bug in a
@@ -21,7 +21,7 @@ export interface AdminCoreEnv {
    * disabled and everything else still works. */
   MAIL_API_KEY?: string;
 
-  /** `https://admin.tmkch.io`. Where a notification's link points. */
+  /** The admin console's origin. Where a notification's link points. */
   ADMIN_ORIGIN: string;
   /**
    * The operator's own address, for the "a ticket arrived" mail. A Secret,
@@ -46,4 +46,10 @@ export interface AdminCoreEnv {
    * outside this database.
    */
   HASH_PEPPER?: string;
+  /**
+   * What this deployment calls itself — console name, fallback signature,
+   * mail logo. A JSON object in `vars`, read by `parseBranding`, which falls
+   * back to neutral defaults. See `packages/core/src/branding.ts`.
+   */
+  BRANDING?: unknown;
 }

@@ -1,6 +1,8 @@
 /// <reference types="vite/client" />
+
 import { env } from "cloudflare:test";
 import type { RemeetModerationApi } from "@inquiry-platform/core";
+import { parseBranding } from "@inquiry-platform/core";
 import type {
   MailProvider,
   MailResult,
@@ -245,8 +247,10 @@ export async function harness(
     push,
     {
       notifyEmail: options.notifyEmail,
-      from: "Tomokichi Studio Support <notification@tmkch.io>",
-      adminOrigin: "https://admin.tmkch.io",
+      from: "Example Support <notification@example.com>",
+      adminOrigin: "https://admin.example.com",
+      consoleName: TEST_BRANDING.consoleName,
+      pushTitle: "Example Admin",
     },
   );
   const pending: Promise<unknown>[] = [];
@@ -264,9 +268,11 @@ export async function harness(
     auditRepo,
     mail,
     {
-      supportEmail: "support@tmkch.io",
-      fromName: "Tomokichi Studio Support",
-      defaultSupportUrl: "https://tmkch.io/support",
+      supportEmail: "support@example.com",
+      fromName: "Example Support",
+      defaultSupportUrl: "https://example.com/support",
+      defaultSignature: TEST_BRANDING.defaultSignature,
+      legacySignatures: TEST_BRANDING.legacySignatures,
     },
   );
 
@@ -298,6 +304,14 @@ export async function harness(
 }
 
 export const admin = { type: "admin", id: "test-admin" } as const;
+
+/** A deployment that is not anybody in particular, so a test that passes
+ * cannot be passing because of one operator's name. */
+export const TEST_BRANDING = parseBranding({
+  consoleName: "Example Console",
+  defaultSignature: "Example Support\n────\nhttps://example.com",
+  legacySignatures: ["────\nExample (old)\n────"],
+});
 export const appActor = { type: "app", id: "test-app" } as const;
 
 export function expectOk<T>(result: { ok: boolean } & Record<string, unknown>): T {

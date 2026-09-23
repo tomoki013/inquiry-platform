@@ -5,9 +5,16 @@ import type {
   SupportDraft,
   SupportThreadDetail,
 } from "@inquiry-platform/core";
-import { DEFAULT_MAIL_SIGNATURE } from "@inquiry-platform/core";
 import { beforeEach, describe, expect, it } from "vitest";
-import { admin, expectOk, FakeMailProvider, type Harness, harness, seedApp } from "./harness";
+import {
+  admin,
+  expectOk,
+  FakeMailProvider,
+  type Harness,
+  harness,
+  seedApp,
+  TEST_BRANDING,
+} from "./harness";
 
 let h: Harness;
 let threadId: string;
@@ -20,7 +27,7 @@ async function openThread(overrides: Record<string, unknown> = {}): Promise<stri
     (await h.support.ingestInboundEmail(
       {
         from: "someone@example.com",
-        to: "support@tmkch.io",
+        to: "support@example.com",
         subject: "アプリで共有できません",
         bodyText: "共有できません。",
         messageId: "<first@example.com>",
@@ -196,7 +203,7 @@ describe("templates", () => {
     await h.reply.updateTemplate(template.id, { body: "書き換えた本文" }, admin);
 
     const thread = expectOk<SupportThreadDetail>((await h.support.detail(threadId)) as never);
-    expect(thread.messages.at(-1)?.bodyText).toBe(`元の本文\n\n${DEFAULT_MAIL_SIGNATURE}`);
+    expect(thread.messages.at(-1)?.bodyText).toBe(`元の本文\n\n${TEST_BRANDING.defaultSignature}`);
   });
 });
 
@@ -213,8 +220,8 @@ describe("sendSupportReply", () => {
     expect(h.mail.sendCount).toBe(1);
     const mail = h.mail.sent[0];
     expect(mail?.to).toBe("someone@example.com");
-    expect(mail?.from).toBe("Tomokichi Studio Support <support@tmkch.io>");
-    expect(mail?.replyTo).toBe("support@tmkch.io");
+    expect(mail?.from).toBe("Example Support <support@example.com>");
+    expect(mail?.replyTo).toBe("support@example.com");
     expect(mail?.subject).toBe("Re: アプリで共有できません");
   });
 
@@ -326,7 +333,7 @@ describe("sendSupportReply", () => {
     );
 
     expect(updated.messages.at(-1)?.direction).toBe("outbound");
-    expect(updated.messages.at(-1)?.bodyText).toBe(`送信本文\n\n${DEFAULT_MAIL_SIGNATURE}`);
+    expect(updated.messages.at(-1)?.bodyText).toBe(`送信本文\n\n${TEST_BRANDING.defaultSignature}`);
     expect(updated.unreadCount).toBe(0);
 
     const draft = expectOk<SupportDraft | null>((await h.reply.getDraft(threadId)) as never);
@@ -476,15 +483,21 @@ describe("automatic signatures and conversation continuity", () => {
       admin,
     );
     expect(sent.ok).toBe(true);
-    expect(h.mail.sent[0]?.text).toBe(`本文\n\n${DEFAULT_MAIL_SIGNATURE}`);
+    expect(h.mail.sent[0]?.text).toBe(`本文\n\n${TEST_BRANDING.defaultSignature}`);
   });
   it("removes an existing automatic signature from drafts and sends it only once", async () => {
-    const original = `書きかけ\n\n${DEFAULT_MAIL_SIGNATURE}`;
+    const original = `書きかけ\n\n${TEST_BRANDING.defaultSignature}`;
     await h.reply.saveDraft({ threadId, bodyText: original });
     const draft = await h.reply.getDraft(threadId);
     expect(draft.ok && draft.value?.bodyText).toBe("書きかけ");
     await h.reply.send({ threadId, bodyText: original, idempotencyKey: KEY }, admin);
     expect(h.mail.sent[0]?.text).toBe(original);
+  });
+  it("strips a deployment's legacy signature from a draft before signing it", async () => {
+    const legacy = TEST_BRANDING.legacySignatures[0] as string;
+    await h.reply.saveDraft({ threadId, bodyText: `書きかけ\n\n${legacy}` });
+    const draft = await h.reply.getDraft(threadId);
+    expect(draft.ok && draft.value?.bodyText).toBe("書きかけ");
   });
   it("reopens a resolved conversation when the customer replies", async () => {
     await h.reply.send({ threadId, bodyText: "本文", idempotencyKey: KEY }, admin);

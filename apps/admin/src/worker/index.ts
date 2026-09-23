@@ -1,5 +1,6 @@
 import type { AdminIdentity } from "@inquiry-platform/core";
 import { Hono } from "hono";
+import { brandHtml, brandManifest } from "./branding";
 import type { AdminWebEnv } from "./env";
 import { failure } from "./http";
 import { resolveIdentity } from "./identity";
@@ -7,7 +8,7 @@ import { type AdminApi, registerApiRoutes } from "./routes/api";
 import { requireSafeMutation, securityHeaders } from "./security";
 
 /**
- * `admin.tmkch.io` — the only part of Admin that is on the internet.
+ * The admin console — the only part of the platform that is on the internet.
  *
  * It serves the built React app and answers `/api/*`, and it holds exactly one
  * binding: Admin Core. No D1, no R2. Everything it can do, it does by asking.
@@ -56,10 +57,18 @@ export function createApp() {
 
   registerApiRoutes(app as AdminApi);
 
+  app.get("/manifest.webmanifest", async (c) =>
+    brandManifest(await c.env.ASSETS.fetch(c.req.raw), await c.env.ADMIN_CORE.consoleProfile()),
+  );
+
   // Anything that is not the API is the single-page app. `not_found_handling`
   // in wrangler.jsonc turns an unknown path into index.html, so the client
   // router owns routing and a deep link works on a cold load.
-  app.all("*", (c) => c.env.ASSETS.fetch(c.req.raw));
+  app.all("*", async (c) => {
+    const asset = await c.env.ASSETS.fetch(c.req.raw);
+    if (!asset.headers.get("Content-Type")?.includes("text/html")) return asset;
+    return brandHtml(asset, await c.env.ADMIN_CORE.consoleProfile());
+  });
 
   return app;
 }
