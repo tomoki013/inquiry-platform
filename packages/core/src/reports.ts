@@ -193,6 +193,9 @@ export interface ReportDetail extends ReportSummary {
   resolvedAt?: string;
   resolutionCode?: string;
   resolutionNote?: string;
+  /** The app acts on reports through a signed decision (a registered
+   * moderation adapter): a status label alone cannot close this report. */
+  signedModeration: boolean;
   events: ReportEvent[];
   attachments: ReportAttachmentMeta[];
 }

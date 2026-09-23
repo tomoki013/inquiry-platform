@@ -1,4 +1,3 @@
-import type { RemeetModerationApi } from "@inquiry-platform/core";
 /**
  * Everything the platform API Worker is given.
  *
@@ -8,7 +7,12 @@ import type { RemeetModerationApi } from "@inquiry-platform/core";
  */
 export interface AdminCoreEnv {
   DB: D1Database;
-  REMEET_MODERATION?: RemeetModerationApi;
+  /**
+   * Projects that act on reports through a moderation adapter: project slug →
+   * the name of the Service Binding implementing it. The binding itself is
+   * declared in `services` under that name. See `domain/moderation.ts`.
+   */
+  SIGNED_MODERATION?: Record<string, string>;
   PRIVATE_FILES: R2Bucket;
 
   SUPPORT_EMAIL: string;

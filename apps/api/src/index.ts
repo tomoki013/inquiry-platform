@@ -45,6 +45,7 @@ import { AppService } from "./domain/app-service";
 import { DashboardService } from "./domain/dashboard-service";
 import { internalFailure, validationFailure } from "./domain/failures";
 import { sha256Hex } from "./domain/identity";
+import { ModerationRegistry } from "./domain/moderation";
 import { NotificationService, type TicketCreatedRef } from "./domain/notification-service";
 import { ReplyService } from "./domain/reply-service";
 import { expireReportEvidence } from "./domain/report-retention";
@@ -103,7 +104,7 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
     }
   }
   private get tickets() {
-    return new TicketService(this.env.DB);
+    return new TicketService(this.env.DB, this.services.moderation);
   }
   listTickets(input: unknown) {
     return this.tickets.list(input);
@@ -460,6 +461,7 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
  */
 function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknown>) => void) {
   const branding = parseBranding(env.BRANDING);
+  const moderation = ModerationRegistry.fromEnv(env.SIGNED_MODERATION, env);
   const apps = new AppRepository(env.DB);
   const reports = new ReportRepository(env.DB);
   const support = new SupportRepository(env.DB);
@@ -516,6 +518,7 @@ function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknown>) => 
 
   return {
     branding,
+    moderation,
     apps: new AppService(env.DB, apps, audit),
     reports: new ReportService(
       env.DB,
@@ -525,7 +528,7 @@ function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknown>) => 
       env.HASH_PEPPER,
       support,
       replyService,
-      env.REMEET_MODERATION,
+      moderation,
       notify,
     ),
     support: supportService,

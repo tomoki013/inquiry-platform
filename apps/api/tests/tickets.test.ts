@@ -13,7 +13,7 @@ function value<T>(r: Result<T>): T {
 async function setup() {
   const h = await harness();
   const app = await seedApp(h);
-  const tickets = new TicketService(h.db);
+  const tickets = new TicketService(h.db, h.moderation);
   const ticket = value(
     await tickets.create(
       { service_id: app, type: "INQUIRY", subject: "質問", requester_email: "person@example.com" },
@@ -146,7 +146,7 @@ describe("Ticket operations", () => {
   it("counts a successful automatic receipt as first response and preserves it after a manual reply", async () => {
     const h = await harness(),
       app = await seedApp(h),
-      tickets = new TicketService(h.db);
+      tickets = new TicketService(h.db, h.moderation);
     const report = value(
       await h.reports.create(
         {
@@ -283,7 +283,7 @@ describe("Ticket operations", () => {
     );
     value(await h.support.setStatus({ threadId: a.id, status: "spam" }, admin));
     for (const statement of splitMigration(migration)) await h.db.prepare(statement).run();
-    const tickets = new TicketService(h.db);
+    const tickets = new TicketService(h.db, h.moderation);
     let t = value(await tickets.detail(a.id)).ticket;
     expect(t).toMatchObject({ status: "CLOSED", resolution: "SPAM", service_id: app });
     t = value(
@@ -364,7 +364,7 @@ it("routes replies after a merge to the target while retaining the source histor
 it("requires signed moderation instead of closing a report with a label", async () => {
   const h = await harness();
   await seedApp(h);
-  const tickets = new TicketService(h.db);
+  const tickets = new TicketService(h.db, h.moderation);
   const report = value(
     await h.reports.create(
       {
@@ -390,6 +390,36 @@ it("requires signed moderation instead of closing a report with a label", async 
       )
     ).ok,
   ).toBe(false);
+});
+
+it("lets a project without a moderation adapter close a report with a label", async () => {
+  const h = await harness();
+  await seedApp(h, "colorvia");
+  const tickets = new TicketService(h.db, h.moderation);
+  const report = value(
+    await h.reports.create(
+      {
+        appSlug: "colorvia",
+        externalReportId: "label-closable",
+        contentType: "spot",
+        reasonCode: "spam",
+      },
+      appActor,
+    ),
+  );
+  const t = value(
+    await tickets.detail(value(await tickets.source("report", report.reportId)).id),
+  ).ticket;
+  const detail = value(await h.reports.detail(report.reportId));
+  expect(detail.signedModeration).toBe(false);
+  expect(
+    (
+      await tickets.change(
+        { id: t.id, revision: t.revision, status: "RESOLVED", resolution: "NO_ACTION_REQUIRED" },
+        admin,
+      )
+    ).ok,
+  ).toBe(true);
 });
 
 it("maps every legacy support status without changing the source records", async () => {
@@ -422,7 +452,9 @@ it("maps every legacy support status without changing the source records", async
       .bind(oldStatus, thread.id)
       .run();
     for (const statement of splitMigration(migration)) await h.db.prepare(statement).run();
-    expect(value(await new TicketService(h.db).detail(thread.id)).ticket).toMatchObject({
+    expect(
+      value(await new TicketService(h.db, h.moderation).detail(thread.id)).ticket,
+    ).toMatchObject({
       status,
       resolution,
     });
@@ -498,7 +530,7 @@ it("refuses merges across requesters and terminal edits before reopening", async
 it("leaves failed/no-address receipts unanswered, then records the successful retry", async () => {
   const h = await harness();
   await seedApp(h);
-  const tickets = new TicketService(h.db);
+  const tickets = new TicketService(h.db, h.moderation);
   const input = {
     appSlug: "remeet",
     externalReportId: "failed-receipt",
@@ -528,7 +560,7 @@ it("leaves failed/no-address receipts unanswered, then records the successful re
 it("backfills an earlier receipt safely even when a manual response was already recorded", async () => {
   const h = await harness();
   await seedApp(h);
-  const tickets = new TicketService(h.db);
+  const tickets = new TicketService(h.db, h.moderation);
   const report = value(
     await h.reports.create(
       {

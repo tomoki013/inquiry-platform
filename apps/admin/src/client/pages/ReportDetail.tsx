@@ -166,7 +166,7 @@ export function ReportDetail() {
               )}
             </Section>
 
-            {data.appSlug === "remeet" ? (
+            {data.signedModeration ? (
               <ContentActions key={data.id} report={data} onChanged={onChanged} />
             ) : null}
             <ReportConversation threadId={data.supportThreadId} />
@@ -176,7 +176,7 @@ export function ReportDetail() {
                 {allowedReportTransitions[data.status]
                   .filter(
                     (to) =>
-                      data.appSlug !== "remeet" ||
+                      !data.signedModeration ||
                       (to !== "actioned" && (to !== "closed" || data.status === "actioned")),
                   )
                   .map((to) => (
@@ -355,10 +355,10 @@ export function ContentActions({
           });
         } catch {
           throw new Error(
-            "Mac の署名サービスに接続できません。pnpm --filter @tomokichi/api moderation serve を起動し、ブラウザのローカルネットワーク接続を許可してください。",
+            "この端末の署名サービス（127.0.0.1:47831）に接続できません。署名サービスを起動し、ブラウザのローカルネットワーク接続を許可してください。",
           );
         }
-        if (!response.ok) throw new Error("署名できませんでした。Mac の署名鍵を確認してください。");
+        if (!response.ok) throw new Error("署名できませんでした。署名鍵を確認してください。");
         const { envelope } = (await response.json()) as { envelope: string };
         signed = { id: proposal.id, envelope };
         setPending(signed);

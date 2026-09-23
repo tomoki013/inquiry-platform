@@ -46,7 +46,10 @@
       ],
       "mailLogo": { "url": "https://tmkch.io/assets/mail-logo.png", "alt": "Tomokichi Studio" },
       "defaultProjectId": "studio"
-    }
+    },
+    // Projects whose reported content is acted on by a signed decision through
+    // their own adapter: project slug → Service Binding name (below).
+    "SIGNED_MODERATION": { "remeet": "REMEET_MODERATION" }
   },
 
   "services": [

@@ -41,7 +41,7 @@ describe("audit trail across every Ticket mutation", () => {
   it("records the acting operator for each change, and nothing for reads or refused changes", async () => {
     const h = await harness();
     const app = await seedApp(h);
-    const tickets = new TicketService(h.db);
+    const tickets = new TicketService(h.db, h.moderation);
     const db = h.db as unknown as D1Database;
 
     let before = await actorRows(db, second.id);
@@ -210,7 +210,7 @@ describe("audit trail across every Ticket mutation", () => {
    */
   it.fails("keeps the previous and new value when master data is edited", async () => {
     const h = await harness();
-    const tickets = new TicketService(h.db);
+    const tickets = new TicketService(h.db, h.moderation);
     value(
       await tickets.saveMaster(
         { kind: "group", id: "renamed-group", name: "Before", is_active: true },

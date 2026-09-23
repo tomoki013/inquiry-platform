@@ -30,6 +30,7 @@ import {
 import { z } from "zod";
 import { SupportRepository } from "../db/support";
 import { internalFailure, notFound, validationFailure } from "./failures";
+import { ModerationRegistry } from "./moderation";
 
 // SQL computes SLA before filtering/pagination, so no tickets disappear between pages.
 function clockExpression(column: string, minutes: string, threshold: number) {
@@ -63,7 +64,10 @@ const clockBindings = (at: string) => Array(6).fill(at) as string[];
 
 /** Operations only. No mail provider: notes cannot send mail. */
 export class TicketService {
-  constructor(private readonly db: D1Database) {}
+  constructor(
+    private readonly db: D1Database,
+    private readonly moderation: ModerationRegistry = ModerationRegistry.none,
+  ) {}
   private event(
     ticketId: string,
     eventType: string,
@@ -351,7 +355,11 @@ export class TicketService {
           )
           .bind(row.report_id)
           .first<{ status: string; slug: string }>();
-        if (report?.slug === "remeet" && ["open", "reviewing"].includes(report.status))
+        if (
+          report &&
+          this.moderation.requiresSignedDecision(report.slug) &&
+          ["open", "reviewing"].includes(report.status)
+        )
           return fail(
             "CONFLICT",
             "通報のコンテンツ操作から削除または対応なしを確定してください。非表示解除には署名付きの対応が必要です。",

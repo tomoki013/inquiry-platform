@@ -267,7 +267,7 @@ export class ReportRepository {
     };
   }
 
-  async detail(id: string): Promise<ReportDetail | null> {
+  async detail(id: string): Promise<Omit<ReportDetail, "signedModeration"> | null> {
     const row = await this.findRow(id);
     if (!row) return null;
 

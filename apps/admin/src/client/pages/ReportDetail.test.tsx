@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 import { ReportDetail } from "./ReportDetail";
 
-function setup(fail = false) {
+function setup(fail = false, overrides: Record<string, unknown> = {}) {
   const writes: Record<string, unknown>[] = [];
   const report = {
     id: "r1",
@@ -21,6 +21,7 @@ function setup(fail = false) {
     resolutionNote: "以前のメモ",
     attachments: [],
     events: [],
+    ...overrides,
   };
   vi.stubGlobal("fetch", async (_: unknown, init?: RequestInit) => {
     if (init?.method === "POST") {
@@ -89,4 +90,16 @@ it("shows save errors without clearing the operator's input", async () => {
   await user.click(screen.getByRole("button", { name: "記録する" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("保存に失敗しました");
   expect(screen.getByLabelText("対応メモ")).toHaveValue("以前のメモ");
+});
+
+it("offers label-only status changes when the app has no signed moderation", async () => {
+  setup(false, { signedModeration: false });
+  expect(await screen.findByRole("button", { name: "クローズにする" })).toBeInTheDocument();
+});
+
+it("withholds label-only closing when the app acts through signed moderation", async () => {
+  setup(false, { signedModeration: true });
+  await screen.findByLabelText("対応コード");
+  expect(screen.getByRole("button", { name: "確認中にする" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "クローズにする" })).not.toBeInTheDocument();
 });

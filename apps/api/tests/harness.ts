@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 import { env } from "cloudflare:test";
-import type { RemeetModerationApi } from "@inquiry-platform/core";
+import type { ModerationAdapter } from "@inquiry-platform/core";
 import { parseBranding } from "@inquiry-platform/core";
 import type {
   MailProvider,
@@ -20,6 +20,7 @@ import { SupportRepository } from "../src/db/support";
 import { TemplateRepository } from "../src/db/templates";
 import { AppService } from "../src/domain/app-service";
 import { DashboardService } from "../src/domain/dashboard-service";
+import { ModerationRegistry } from "../src/domain/moderation";
 import { NotificationService, type PushTransport } from "../src/domain/notification-service";
 import { ReplyService } from "../src/domain/reply-service";
 import { ReportService } from "../src/domain/report-service";
@@ -206,6 +207,9 @@ export class FakePushTransport implements PushTransport {
 }
 
 export interface Harness {
+  /** Pass to `new TicketService(h.db, h.moderation)` so Tickets obey the same
+   * signed-moderation rule the report service does. */
+  moderation: ModerationRegistry;
   reports: ReportService;
   support: SupportService;
   reply: ReplyService;
@@ -224,7 +228,7 @@ export interface Harness {
 export async function harness(
   options: {
     mail?: FakeMailProvider;
-    moderation?: RemeetModerationApi;
+    moderation?: ModerationAdapter;
     push?: FakePushTransport;
     /** Unset means "no mail channel", like an environment without the Secret. */
     notifyEmail?: string;
@@ -238,6 +242,8 @@ export async function harness(
   const templateRepo = new TemplateRepository(db);
   const auditRepo = new AuditRepository(db);
   const mail = options.mail ?? new FakeMailProvider();
+  // Remeet, as in production: listed, with or without a reachable adapter.
+  const moderation = new ModerationRegistry(new Map([["remeet", options.moderation]]));
   const push = options.push ?? new FakePushTransport();
   const notifications = new NotificationService(
     db,
@@ -278,6 +284,7 @@ export async function harness(
 
   return {
     db,
+    moderation,
     mail,
     push,
     notifications,
@@ -294,7 +301,7 @@ export async function harness(
       "test-pepper",
       supportRepo,
       replyService,
-      options.moderation,
+      moderation,
       notify,
     ),
     support: supportService,

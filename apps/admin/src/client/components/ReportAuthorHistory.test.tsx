@@ -16,6 +16,7 @@ const report: ReportDetail = {
   priority: "normal",
   createdAt: "2026-09-19T00:00:00Z",
   updatedAt: "2026-09-19T00:00:00Z",
+  signedModeration: true,
   events: [],
   attachments: [],
 };

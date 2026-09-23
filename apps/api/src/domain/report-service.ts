@@ -16,7 +16,6 @@ import {
   newId,
   nowIso,
   ok,
-  type RemeetModerationApi,
   reportDecisionSchema,
   updateReportResolutionInputSchema,
 } from "@inquiry-platform/core";
@@ -27,6 +26,7 @@ import type { ReportRepository } from "../db/reports";
 import type { SupportRepository } from "../db/support";
 import { internalFailure, notFound, validationFailure } from "./failures";
 import { pseudonymise } from "./identity";
+import { ModerationRegistry } from "./moderation";
 import type { NotificationHook } from "./notification-service";
 import type { ReplyService } from "./reply-service";
 import { reportMailSubject } from "./report-threading";
@@ -48,7 +48,7 @@ export class ReportService {
     private readonly hashPepper: string | undefined,
     private readonly support: SupportRepository,
     private readonly reply: ReplyService,
-    private readonly moderation?: RemeetModerationApi,
+    private readonly moderation: ModerationRegistry = ModerationRegistry.none,
     /** See `SupportService`: an id and a kind, after the batch committed. */
     private readonly notify?: NotificationHook,
   ) {}
@@ -156,7 +156,8 @@ export class ReportService {
     try {
       const row = await this.reports.findRow(parsed.data.reportId);
       if (!row) return notFound("通報");
-      if (!this.moderation || row.app_slug !== "remeet" || !row.content_external_id) {
+      const adapter = this.moderation.adapterFor(row.app_slug);
+      if (!adapter || !row.content_external_id) {
         return fail("CONFLICT", "このアプリのコンテンツ操作は設定されていません。");
       }
       const ticket = await this.db
@@ -171,7 +172,7 @@ export class ReportService {
           : !["open", "reviewing"].includes(row.status)
       )
         return fail("CONFLICT", "Ticketを再開してから操作してください。");
-      const proposal = await this.moderation.prepare({
+      const proposal = await adapter.prepare({
         reportId: row.external_report_id,
         contentId: row.content_external_id,
         contentType: row.content_type,
@@ -207,10 +208,11 @@ export class ReportService {
         .first<{ decision: "delete" | "dismiss"; completed_at: string | null }>();
       if (!operation) return notFound("操作");
       if (operation.completed_at) return this.detail(input.reportId);
-      if (!this.moderation) return fail("CONFLICT", "コンテンツ操作は設定されていません。");
       const row = await this.reports.findRow(input.reportId);
       if (!row) return notFound("通報");
-      const published = await this.moderation.complete(input.operationId, input.envelope);
+      const adapter = this.moderation.adapterFor(row.app_slug);
+      if (!adapter) return fail("CONFLICT", "コンテンツ操作は設定されていません。");
+      const published = await adapter.complete(input.operationId, input.envelope);
       const status = operation.decision === "delete" ? "actioned" : "closed";
       const code = operation.decision === "delete" ? "content_deleted" : "no_action";
       const note =
@@ -304,7 +306,11 @@ export class ReportService {
   async detail(reportId: string): Promise<Result<ReportDetail>> {
     try {
       const found = await this.reports.detail(reportId);
-      return found ? ok(found) : notFound("通報");
+      if (!found) return notFound("通報");
+      return ok({
+        ...found,
+        signedModeration: this.moderation.requiresSignedDecision(found.appSlug),
+      });
     } catch (error) {
       return internalFailure("report.detail", error);
     }
@@ -337,7 +343,7 @@ export class ReportService {
       }
 
       if (
-        row.app_slug === "remeet" &&
+        this.moderation.requiresSignedDecision(row.app_slug) &&
         ((input.to === "closed" && from !== "actioned") || input.to === "actioned")
       ) {
         return fail(
