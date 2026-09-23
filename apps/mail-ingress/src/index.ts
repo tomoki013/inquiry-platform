@@ -1,14 +1,14 @@
-import type { AdminCoreStub } from "@tomokichi/admin-contracts";
+import type { AdminCoreStub } from "@inquiry-platform/core";
 import {
   ATTACHMENT_FILENAME_HEADER,
   INTERNAL_ORIGIN,
   INTERNAL_PATHS,
   MAX_ATTACHMENT_BYTES,
-} from "@tomokichi/admin-contracts";
+} from "@inquiry-platform/core";
 import { parseInboundEmail } from "./parse";
 
 /**
- * `support@tmkch.io`, and anything else Email Routing points here.
+ * The deployment's support address (`SUPPORT_EMAIL`), and anything else Email Routing points here.
  *
  * The Worker has two jobs and they fail independently on purpose:
  *

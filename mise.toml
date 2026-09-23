@@ -3,9 +3,5 @@ node = "24"
 pnpm = "11.11.0"
 
 [tasks.dev]
-description = "Start all app sites and the API"
+description = "Start the API, admin and mail ingress Workers"
 run = "pnpm dev"
-
-[tasks.create-app-site]
-description = "Scaffold a new app brand site"
-run = "pnpm create:app-site"

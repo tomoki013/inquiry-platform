@@ -5,3 +5,11 @@ allowBuilds:
   esbuild: true
   sharp: true
   workerd: true
+# miniflare 4 (via @cloudflare/vitest-pool-workers 0.18 and wrangler) pins
+# sharp 0.34.5 and undici 7.28.0, both with published advisories, and no
+# stable miniflare 4 release moves past them. Test/local runtime only; never
+# bundled into a Worker. Remove once pool-workers and wrangler depend on a
+# miniflare that already ships these versions.
+overrides:
+  "miniflare>sharp": "^0.35.4"
+  "miniflare>undici": "^7.29.0"

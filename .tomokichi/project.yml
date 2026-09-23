@@ -1,0 +1,35 @@
+version: 1
+project:
+  name: inquiry-platform
+  type: api
+  owner: tomokichi
+  platforms: [api, web]
+repository:
+  default_branch: main
+mcp:
+  allowed:
+    - tomokichi-dev-rules-mcp
+checks:
+  required:
+    - lint
+    - test
+    - build
+    - secret-scan
+    - dependency-scan
+    - diff
+  commands:
+    lint: pnpm run lint
+    test: pnpm run test
+    build: pnpm run build
+security:
+  level: application
+testing:
+  level: application
+maturity: production
+production:
+  enabled: true
+deployment:
+  type: cloudflare
+  environments:
+    - preview
+    - production

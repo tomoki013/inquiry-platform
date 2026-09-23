@@ -1,5 +1,5 @@
 {
-  "name": "@tomokichi/mail-ingress",
+  "name": "@inquiry-platform/mail-ingress",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,13 +13,13 @@
     "cf-typegen": "wrangler types --env-interface CloudflareBindings --strict-vars=false"
   },
   "dependencies": {
-    "@tomokichi/admin-contracts": "workspace:*",
+    "@inquiry-platform/core": "workspace:*",
     "postal-mime": "^2.4.5"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.18.7",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10",
+    "vitest": "^4.1.11",
     "wrangler": "^4.113.0"
   }
 }
