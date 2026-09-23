@@ -93,7 +93,7 @@ API と Admin Core には既存の相互連携があるため、API の新しい
 利用者の許可を得て 00:26 JST に既存の通報会話からテストメールを 1 通送信。00:27 の「テスト返信」が、元の通報の「通報者からの返信」に自動追加されたことを本番画面で確認。手動統合は行っていない。受付 ID と日英併記の署名も送信時に自動挿入された。
 
 
-The Operations Ticket UI now wraps this signed moderation flow. See [Operations Tickets](operations-tickets.md) for lifecycle, internal notes, migration and administration.
+The Operations Ticket UI now wraps this signed moderation flow. See [Operations Tickets](tickets.md) for lifecycle, internal notes, migration and administration.
 
 ### 投稿者ごとの通報履歴
 

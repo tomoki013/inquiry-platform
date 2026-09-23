@@ -1,11 +1,14 @@
-# Tomokichi Studio Admin
+# Platform API (`apps/api`) and the Tomokichi deployment
 
-`admin.tmkch.io` — one place to work through what people report and what they
-ask, for every app the Studio runs.
+The Worker that holds every ticket, report, reply and audit row. The rest of
+this file is also the record of how the Tomokichi deployment (`admin.tmkch.io`)
+was provisioned; the Worker, D1 and R2 names below are that deployment's and
+were kept unchanged when the platform left tomokichi-studio (see
+[docs/operations/cutover.md](../../docs/operations/cutover.md)).
 
 ## Why three Workers
 
-Ticket lifecycle, priority/resolution rules, SLA settings, migration results and operations: [Operations Tickets](../../docs/operations-tickets.md).
+Ticket lifecycle, priority/resolution rules, SLA settings, migration results and operations: [Operations Tickets](../../docs/operations/tickets.md).
 
 
 ```
@@ -138,7 +141,7 @@ cannot be created before the Worker it points at exists.
    pnpm --filter @inquiry-platform/api migrate:remote
    openssl rand -hex 32 | pnpm --filter @inquiry-platform/api exec wrangler secret put HASH_PEPPER
    pnpm --filter @inquiry-platform/api exec wrangler secret put MAIL_API_KEY   # optional
-   # New-ticket notifications (docs/support-notifications.md). Both optional:
+   # New-ticket notifications (docs/operations/notifications.md). Both optional:
    # without them the ticket still exists and the screen still works.
    pnpm --filter @inquiry-platform/api exec wrangler secret put NOTIFICATION_EMAIL
    pnpm --filter @inquiry-platform/api run vapid:generate   # public → wrangler.jsonc, private ↓

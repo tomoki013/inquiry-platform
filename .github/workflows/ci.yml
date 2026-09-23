@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Checks only. There is deliberately no deploy workflow here yet: until the
+# cutover in docs/operations/cutover.md, tomokichi-studio is the only
+# repository that deploys these Workers.
+jobs:
+  check:
+    name: Lint, check, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.11.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec biome ci .
+      - run: pnpm check
+      - run: pnpm test
+      - run: pnpm build
