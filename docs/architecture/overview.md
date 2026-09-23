@@ -17,7 +17,7 @@ flowchart TB
     Ingress["apps/mail-ingress"]
   end
   Site --> ProjAPI
-  ProjAPI -- "Service Binding（createSupportThread / createReport / fetch）" --> Core
+  ProjAPI -- "Service Binding → Intake entrypoint\n（submitContact / submitReport / 証跡 PUT）" --> Core
   Email((Email Routing)) --> Ingress --> Core
   Admin -- "Service Binding（AdminCoreApi）" --> Core
   Core -- "SIGNED_MODERATION に登録された binding" --> Adapter
@@ -27,7 +27,8 @@ flowchart TB
 ```
 
 - Core（`apps/api`）は route も `workers.dev` も持たない。到達手段は Service Binding だけで、呼び出し側は `@inquiry-platform/core` の型しか知らない。
-- 公開の受付口（Turnstile・client key・rate limit）は現在 Project 側（tomokichi-api）にある。基盤側の汎用受付 API（`POST /v1/tickets` 等）は Phase 3 で追加する（[cutover](../operations/cutover.md)）。
+- Core には入口が 2 つある。`AdminCore`（基盤自身: 管理コンソールと mail-ingress）と `Intake`（Project 用: 受付だけ）。Project は `Intake` にだけ bind する（§7）。
+- インターネットに面した受付口（Turnstile・client key・rate limit）は Project 側（tomokichi-api）にある。基盤は公開 HTTP を持たないので、独自ドメインは要らない。Service Binding が使えない相手（別アカウントの Worker、iOS から直接など）が出たときに、`Intake` の前に公開 Worker を足す。
 - 基盤が知るのは「誰が・どの対象を・何の理由で」まで。対象が何であるか、どう消すかは Project が知る（Moderation adapter）。
 
 ## 2. Project
@@ -65,7 +66,7 @@ flowchart TB
 
 Report の拡張項目は指示書の語彙と次の対応: `targetType`=`contentType`、`targetId`=`contentExternalId`、`targetOwnerId`=`authorRefHash`（HMAC 仮名。生 ID は保存しない）、`reason`=`reasonCode`、`description`=`detail`、`evidence`=R2 の添付。
 
-内部メモは `ticket_messages.visibility = 'INTERNAL'`。公開面から取得する経路は存在しない。ただし Project 側 Worker の binding は現在 `AdminCore` 全体に届くので、Phase 3 で受付専用の entrypoint に絞る（[security](../security/overview.md#既知の未対応)）。
+内部メモは `ticket_messages.visibility = 'INTERNAL'`。公開面から取得する経路は存在せず、Project 用の `Intake` には読み取りメソッドが無い。
 
 ## 4. Branding
 
@@ -97,6 +98,23 @@ Report の拡張項目は指示書の語彙と次の対応: `targetType`=`conten
 role は `ADMIN_ROLES`（Access subject → role）、なければ `DEFAULT_ADMIN_ROLE`、なければ `viewer`。Tomokichi 環境は `DEFAULT_ADMIN_ROLE=admin`（1 人運用）。
 
 Core 自身は呼び出し元を Service Binding で信頼する（Core に到達できる Worker は宣言済みの 3 つだけ）。
+
+## 7. Intake と SDK
+
+Project が使う唯一の入口。`apps/api/src/intake.ts`（`Intake` entrypoint）と `packages/sdk`。
+
+```ts
+const inquiry = createInquiryClient(env.INQUIRY);
+await inquiry.createContact({ projectSlug, idempotencyKey, subject, message, email, channel: "web_form" });
+const r = await inquiry.createReport({ projectSlug, externalReportId, targetType, targetId, targetOwnerId, reason, description });
+if (r.ok) await inquiry.attachReportEvidence(r.value.reportId, { bytes, contentType });
+```
+
+- **どの Project に書けるかは binding が決める。** Project 側 `wrangler.jsonc` の Service Binding に `props: { caller, projects, allowUnassigned }` を書く。`props` が無い・不正なら全拒否。許可外の `projectSlug` は `FORBIDDEN`。
+- 冪等キー（`externalReportId`、`idempotencyKey`）が他 Project のものと衝突した場合は `CONFLICT` を返し、相手の ID も番号も返さない。証跡も他 Project の通報には「存在しない」と同じ 404。
+- 返すのは受付番号と簡易 status（`OPEN` 等）だけ。本文は返さない。
+- 読み取り・メモ・状態変更は `Intake` に存在しない。
+- SDK は依存ゼロ。本 Repository は private なので、Project へは `scripts/vendor-sdk.mjs` でコピーする（コピー元コミットを `VENDORED.md` に記録、`--check` で差分検出）。
 
 ## 決定事項
 

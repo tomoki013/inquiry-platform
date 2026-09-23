@@ -24,35 +24,21 @@ import type {
 } from "@inquiry-platform/core";
 import {
   ATTACHMENT_FILENAME_HEADER,
-  consoleAppName,
   listAuditInputSchema,
-  MAX_ATTACHMENT_BYTES,
   newId,
   ok,
-  parseBranding,
 } from "@inquiry-platform/core";
-import type { MailProvider } from "@inquiry-platform/notification/mail";
-import { ResendMailProvider, UnconfiguredMailProvider } from "@inquiry-platform/notification/mail";
-import { importVapid, sendWebPush, type VapidSigner } from "@inquiry-platform/notification/push";
-import { AppRepository } from "./db/apps";
-import { AuditRepository } from "./db/audit";
 import { dispositionFor, FileStore } from "./db/files";
-import { NotificationRepository } from "./db/notifications";
 import { ReportRepository } from "./db/reports";
 import { SupportRepository } from "./db/support";
-import { TemplateRepository } from "./db/templates";
-import { AppService } from "./domain/app-service";
-import { DashboardService } from "./domain/dashboard-service";
 import { internalFailure, validationFailure } from "./domain/failures";
 import { sha256Hex } from "./domain/identity";
-import { ModerationRegistry } from "./domain/moderation";
-import { NotificationService, type TicketCreatedRef } from "./domain/notification-service";
-import { ReplyService } from "./domain/reply-service";
 import { expireReportEvidence } from "./domain/report-retention";
-import { ReportService } from "./domain/report-service";
-import { SupportService } from "./domain/support-service";
 import { TicketService } from "./domain/ticket-service";
 import type { AdminCoreEnv } from "./env";
+import { putReportEvidence } from "./evidence";
+import { json, readBounded } from "./http";
+import { buildServices } from "./services";
 
 /**
  * The platform API: every ticket, report, reply and audit row.
@@ -342,41 +328,11 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
 
     const reportUpload = /^\/internal\/reports\/([^/]+)\/attachments$/.exec(url.pathname);
     if (reportUpload && request.method === "PUT") {
-      const reportId = decodeURIComponent(reportUpload[1] as string);
-      if (!(await reports.findRow(reportId))) return json({ error: "NOT_FOUND" }, 404);
-      const body = await readBounded(request);
-      if (!body) return json({ error: "TOO_LARGE" }, 413);
-
-      const suppliedDate = request.headers.get("X-Evidence-Created-At");
-      const created = suppliedDate ? Date.parse(suppliedDate) : Date.now();
-      if (!Number.isFinite(created) || created > Date.now())
-        return json({ error: "INVALID_DATE" }, 400);
-      if (Date.now() >= created + 30 * 86400_000) return json({ error: "EXPIRED" }, 410);
-      const attachmentId = await sha256Hex(
-        new TextEncoder().encode(`${reportId}:${await sha256Hex(body)}`),
+      return await putReportEvidence(
+        this.env,
+        decodeURIComponent(reportUpload[1] as string),
+        request,
       );
-      const existing = await reports.findAttachment(reportId, attachmentId);
-      if (existing)
-        return json({ attachmentId, sha256: existing.sha256, byteSize: existing.byte_size }, 200);
-      const key = FileStore.reportKey(reportId, attachmentId);
-      const contentType = request.headers.get("Content-Type") ?? "application/octet-stream";
-      const filename = request.headers.get(ATTACHMENT_FILENAME_HEADER) ?? undefined;
-      const stored = await files.put(key, body, contentType);
-
-      await this.env.DB.batch([
-        reports.attachmentStatement({
-          id: attachmentId,
-          reportId,
-          r2Key: key,
-          contentType,
-          originalFilename: filename,
-          byteSize: stored.byteSize,
-          sha256: stored.sha256,
-          createdAt: new Date(created).toISOString(),
-        }),
-        reports.eventStatement({ reportId, eventType: "attachment_added" }),
-      ]);
-      return json({ attachmentId, sha256: stored.sha256, byteSize: stored.byteSize }, 201);
     }
 
     const reportDownload = /^\/internal\/reports\/([^/]+)\/attachments\/([^/]+)$/.exec(
@@ -453,126 +409,6 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
   }
 }
 
-/**
- * @param schedule Runs notification work outside the caller's result —
- * `ctx.waitUntil` in the Worker. The ticket is committed before this is
- * called, so nothing here can fail it; it only decides whether the caller
- * waits.
- */
-function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknown>) => void) {
-  const branding = parseBranding(env.BRANDING);
-  const moderation = ModerationRegistry.fromEnv(env.SIGNED_MODERATION, env);
-  const apps = new AppRepository(env.DB);
-  const reports = new ReportRepository(env.DB);
-  const support = new SupportRepository(env.DB);
-  const templates = new TemplateRepository(env.DB);
-  const audit = new AuditRepository(env.DB);
-
-  // One decision, made once: with no key, every send refuses and every other
-  // part of the support screen still works.
-  const mail: MailProvider = env.MAIL_API_KEY
-    ? new ResendMailProvider(env.MAIL_API_KEY, undefined, branding.mailLogo)
-    : new UnconfiguredMailProvider();
-
-  const vapid = lazyVapid(env);
-  const notifications = new NotificationService(
-    env.DB,
-    new NotificationRepository(env.DB),
-    audit,
-    mail,
-    {
-      vapid,
-      send: (target, payload) =>
-        vapid
-          ? sendWebPush(target, payload, vapid)
-          : Promise.resolve({ ok: false, gone: false, reason: "payload" }),
-    },
-    {
-      notifyEmail: env.NOTIFICATION_EMAIL,
-      from: `${env.SUPPORT_FROM_NAME} <${env.NOREPLY_EMAIL}>`,
-      adminOrigin: env.ADMIN_ORIGIN,
-      consoleName: branding.consoleName,
-      pushTitle: consoleAppName(branding).shortName,
-    },
-  );
-  const notify = (ref: TicketCreatedRef) => schedule(notifications.ticketCreated(ref));
-
-  const supportService = new SupportService(env.DB, support, apps, audit, notify);
-
-  const replyService = new ReplyService(
-    env.DB,
-    support,
-    supportService,
-    templates,
-    apps,
-    audit,
-    mail,
-    {
-      supportEmail: env.SUPPORT_EMAIL,
-      fromName: env.SUPPORT_FROM_NAME,
-      defaultSupportUrl: env.DEFAULT_SUPPORT_URL,
-      defaultSignature: branding.defaultSignature,
-      legacySignatures: branding.legacySignatures,
-    },
-  );
-
-  return {
-    branding,
-    moderation,
-    apps: new AppService(env.DB, apps, audit),
-    reports: new ReportService(
-      env.DB,
-      reports,
-      apps,
-      audit,
-      env.HASH_PEPPER,
-      support,
-      replyService,
-      moderation,
-      notify,
-    ),
-    support: supportService,
-    reply: replyService,
-    dashboard: new DashboardService(reports, support, apps, audit),
-    audit,
-    notifications,
-  };
-}
-
-/**
- * The VAPID signer, imported on first use.
- *
- * `importVapid` is asynchronous and `buildServices` is not; the public key is
- * known synchronously either way, which is all the settings screen needs
- * before anybody presses anything. A malformed private key surfaces as a
- * failed first send in the log, not as a Worker that will not start.
- */
-function lazyVapid(env: AdminCoreEnv): VapidSigner | undefined {
-  if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY) return undefined;
-  const config = {
-    publicKey: env.VAPID_PUBLIC_KEY,
-    privateKey: env.VAPID_PRIVATE_KEY,
-    subject: env.VAPID_SUBJECT ?? `mailto:${env.SUPPORT_EMAIL}`,
-  };
-  let signer: Promise<VapidSigner> | undefined;
-  return {
-    publicKey: config.publicKey,
-    authorization(endpoint, now) {
-      signer ??= importVapid(config);
-      return signer.then((ready) => ready.authorization(endpoint, now));
-    },
-  };
-}
-
-/** Reads the body only if it is small enough, so an oversized upload cannot be
- * buffered into memory before being rejected. */
-async function readBounded(request: Request): Promise<Uint8Array | null> {
-  const declared = Number(request.headers.get("Content-Length") ?? "0");
-  if (declared > MAX_ATTACHMENT_BYTES) return null;
-  const bytes = new Uint8Array(await request.arrayBuffer());
-  return bytes.byteLength > MAX_ATTACHMENT_BYTES ? null : bytes;
-}
-
 async function stream(
   files: FileStore,
   key: string,
@@ -594,11 +430,5 @@ async function stream(
   });
 }
 
-function json(body: unknown, status: number): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
+export { Intake } from "./intake";
 export { AdminCore, sha256Hex };

@@ -7,4 +7,5 @@ Tomokichi Development Rules に従う（`.tomokichi/project.yml`、`tomokichi-de
 3. **認可は Worker で。** 新しい `/api/*` route は `permissionFor`（`packages/core/src/authorization.ts`）で分類される。設定系の書き込みを足すときは `CONFIGURATION_PATHS` に加える。UI で隠すだけにしない。
 4. **通知に本文を載せない。** メール・Push に載せてよいのは Ticket 番号・種別・アプリ名・リンクだけ（[docs/operations/notifications.md](docs/operations/notifications.md)）。
 5. **D1 migration は forward-only。** 本番への適用は Owner 承認を得てから。
-6. **デプロイ元の切替中。** [docs/operations/cutover.md](docs/operations/cutover.md) の Phase を確認し、tomokichi-studio と同じ Worker を二重にデプロイしない。
+6. **Project の入口は `Intake` だけ。** Project 向けの機能は `apps/api/src/intake.ts` と `packages/sdk` に足し、Project に `AdminCore` を bind させない。SDK の型を変えたら `scripts/vendor-sdk.mjs` で各 Project に配り直す。
+7. **デプロイ元の切替中。** [docs/operations/cutover.md](docs/operations/cutover.md) の Phase を確認し、tomokichi-studio と同じ Worker を二重にデプロイしない。

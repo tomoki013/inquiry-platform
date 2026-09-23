@@ -1,3 +1,18 @@
+// The project-facing contract and vocabulary, re-exported so the platform
+// speaks of them by the same names.
+export type {
+  ContactReceipt,
+  ContactSubmission,
+  EvidenceReceipt,
+  IntakeApi,
+  IntakeBinding,
+  IntakeProps,
+  PublicTicketStatus,
+  PublicTicketType,
+  ReportReceipt,
+  ReportSubmission,
+} from "@inquiry-platform/sdk";
+export { toPublicStatus, toPublicType } from "@inquiry-platform/sdk";
 export * from "./apps";
 export * from "./audit";
 export * from "./authorization";
@@ -6,6 +21,7 @@ export * from "./core";
 export * from "./dashboard";
 export * from "./errors";
 export * from "./ids";
+export * from "./intake";
 export * from "./moderation";
 export * from "./notifications";
 export * from "./reply";
