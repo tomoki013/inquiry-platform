@@ -1,4 +1,4 @@
-import type { AdminCoreStub } from "@tomokichi/admin-contracts";
+import type { AdminCoreStub } from "@inquiry-platform/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import worker, { type MailIngressEnv } from "./index";
 

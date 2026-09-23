@@ -17,9 +17,9 @@
     "lint": "biome lint .",
     "test": "turbo run test",
     "test:watch": "turbo run test:watch",
-    "migrate:local": "pnpm --filter @tomokichi/admin-core run migrate:local",
-    "migrate:remote": "pnpm --filter @tomokichi/admin-core run migrate:remote",
-    "seed": "pnpm --filter @tomokichi/admin-core run seed"
+    "migrate:local": "pnpm --filter @inquiry-platform/api run migrate:local",
+    "migrate:remote": "pnpm --filter @inquiry-platform/api run migrate:remote",
+    "seed": "pnpm --filter @inquiry-platform/api run seed"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.5",

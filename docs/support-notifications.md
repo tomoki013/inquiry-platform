@@ -1,6 +1,6 @@
 # Support 通知・PWA — Notification Only
 
-最終更新: 2026-09-21。実装: `apps/admin-core/src/domain/notification-service.ts`、`packages/admin-push`、`apps/admin-web/public/sw.js`。
+最終更新: 2026-09-21。実装: `apps/api/src/domain/notification-service.ts`、`packages/notification`、`apps/admin/public/sw.js`。
 
 ## 1. 責務分離
 
@@ -12,7 +12,7 @@ Web Push               = 同上をリアルタイムに
 AI                     = 明示的に許可された場合のみ（未実装。`aiProcessingAllowed` を足す余地だけ確保）
 ```
 
-この分離は **DTO で固定** している。`TicketNotificationEvent`（`packages/admin-contracts/src/notifications.ts`）は `ticketId / ticketNumber / category / app / createdAt` しか持たず、本文・件名・氏名・メールアドレスのフィールドが存在しない。`renderTicketNotificationMail()` と `renderPushPayload()` はこの型の純関数なので、本文が漏れるにはまず型を変える必要がある。
+この分離は **DTO で固定** している。`TicketNotificationEvent`（`packages/core/src/notifications.ts`）は `ticketId / ticketNumber / category / app / createdAt` しか持たず、本文・件名・氏名・メールアドレスのフィールドが存在しない。`renderTicketNotificationMail()` と `renderPushPayload()` はこの型の純関数なので、本文が漏れるにはまず型を変える必要がある。
 
 ## 2. フロー
 
@@ -50,8 +50,8 @@ Remeet → api /remeet/v1/reports
 
 | 要素 | 場所 |
 |---|---|
-| manifest | `apps/admin-web/public/manifest.webmanifest`（`standalone`、`id: "/"`、`crossorigin="use-credentials"` で参照） |
-| Service Worker | `apps/admin-web/public/sw.js`。**Cache Storage を一切使わない**。navigation 失敗時だけインライン HTML の「オフラインです」 |
+| manifest | `apps/admin/public/manifest.webmanifest`（`standalone`、`id: "/"`、`crossorigin="use-credentials"` で参照） |
+| Service Worker | `apps/admin/public/sw.js`。**Cache Storage を一切使わない**。navigation 失敗時だけインライン HTML の「オフラインです」 |
 | アイコン | `public/icons/`（main サイトのロゴを流用） |
 | 登録 | `client/lib/pwa.ts` `registerServiceWorker()`（load 後、権限は要求しない） |
 | 更新 | `useServiceWorkerUpdate()` → 画面右下に「再読み込み」バナー → `SKIP_WAITING` → `controllerchange` で reload |
@@ -61,7 +61,7 @@ Worker は `/sw.js` に `Cache-Control: no-cache` と `Service-Worker-Allowed: /
 
 ## 6. Web Push
 
-- 実装: `packages/admin-push`。RFC 8291（aes128gcm, 1 record）+ RFC 8292（VAPID ES256）。**Web Crypto と fetch のみ**。Node の `web-push` は `crypto.createECDH` 等に依存し Workers で動かないので使わない。RFC 8291 Appendix A のテストベクタをバイト単位で照合するテストがある。
+- 実装: `packages/notification`。RFC 8291（aes128gcm, 1 record）+ RFC 8292（VAPID ES256）。**Web Crypto と fetch のみ**。Node の `web-push` は `crypto.createECDH` 等に依存し Workers で動かないので使わない。RFC 8291 Appendix A のテストベクタをバイト単位で照合するテストがある。
 - 送信は Core（`NotificationService.sendPush`）。購読ごとに暗号化し並列送信。`404/410` は即 `revoked_at`、それ以外の失敗はカウントのみ。
 - payload（復号後）:
 
@@ -99,7 +99,7 @@ Notification permission は「Push通知を有効にする」ボタンの中で�
 | admin-core | `NOTIFICATION_EMAIL` | **secret** | 運営の通知先。無ければメール通知なし |
 | admin-core | `MAIL_API_KEY` | secret（既存） | メール通知にも使う |
 
-生成: `pnpm --filter @tomokichi/admin-core run vapid:generate`。**鍵を変えると全端末の再登録が必要**。
+生成: `pnpm --filter @inquiry-platform/api run vapid:generate`。**鍵を変えると全端末の再登録が必要**。
 
 ## 10. Cloudflare 側の手動設定
 
@@ -114,6 +114,6 @@ Notification permission は「Push通知を有効にする」ボタンの中で�
 | 1 メールから本文・PII を削除 | 済（api から本文メール自体を削除し、Core が番号だけ送る） |
 | 2 Ticket URL と認証後 redirect | 済（Access + Worker 401。URL は番号のみ） |
 | 3 PWA | 済（manifest / sw / icons / standalone / 更新バナー / オフライン画面） |
-| 4 Web Push | 済（`admin-push`、Core 送信、sw 表示・タップ） |
+| 4 Web Push | 済（`packages/notification/src/push`、Core 送信、sw 表示・タップ） |
 | 5 通知設定・端末管理 | 済（`/settings/notifications`） |
 | 6 Badging・通知カテゴリ・AI 制御 | 未（`aiProcessingAllowed` は列未追加） |

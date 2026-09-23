@@ -1,10 +1,10 @@
-import type { AdminCoreStub } from "@tomokichi/admin-contracts";
+import type { AdminCoreStub } from "@inquiry-platform/core";
 import {
   ATTACHMENT_FILENAME_HEADER,
   INTERNAL_ORIGIN,
   INTERNAL_PATHS,
   MAX_ATTACHMENT_BYTES,
-} from "@tomokichi/admin-contracts";
+} from "@inquiry-platform/core";
 import { parseInboundEmail } from "./parse";
 
 /**
