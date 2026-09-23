@@ -19,7 +19,7 @@
   "dependencies": {
     "@inquiry-platform/core": "workspace:*",
     "@inquiry-platform/notification": "workspace:*",
-    "hono": "^4.13.2",
+    "hono": "^4.13.5",
     "zod": "^4.4.2"
   },
   "devDependencies": {

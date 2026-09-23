@@ -15,7 +15,7 @@
   "dependencies": {
     "@tanstack/react-query": "^5.90.5",
     "@inquiry-platform/core": "workspace:*",
-    "hono": "^4.13.2",
+    "hono": "^4.13.5",
     "jose": "^6.2.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

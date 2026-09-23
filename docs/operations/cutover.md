@@ -14,6 +14,13 @@
 
 **今のデプロイ元は tomokichi-studio だけ。** 本 Repository にはデプロイ workflow を置いていない。Phase 4 までは、tomokichi-studio 側の `apps/admin-core` / `admin-web` / `mail-ingress` / `packages/admin-*` への変更は凍結し、やむを得ず入れた変更は本 Repository にも移す。
 
+## 承認記録
+
+| 日付 | 操作 | 承認者 | 結果 |
+|---|---|---|---|
+| 2026-09-24 | Repository 作成（GitHub private、履歴付き）、Ticket モデル維持、Cloudflare 資源名維持 | Owner（tomoki013） | 実施済み（tomokichi-studio ADR-022） |
+| 2026-09-24 | hono `^4.13.2` → `^4.13.5`（解決 4.13.8）。GHSA-crvj-82cr-hjcx ほか moderate 3 件の解消 | Owner（tomoki013） | 実施済み。`pnpm audit --prod` 0 件 |
+
 ## Phase 4 の手順（予定）
 
 同じ Worker 名・同じ D1・同じ R2 にデプロイするので、データ移行は無い。Worker の Secret は Worker に残っているので再設定も不要。
