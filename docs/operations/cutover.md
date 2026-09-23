@@ -20,6 +20,8 @@
 |---|---|---|---|
 | 2026-09-24 | Repository 作成（GitHub private、履歴付き）、Ticket モデル維持、Cloudflare 資源名維持 | Owner（tomoki013） | 実施済み（tomokichi-studio ADR-022） |
 | 2026-09-24 | hono `^4.13.2` → `^4.13.5`（解決 4.13.8）。GHSA-crvj-82cr-hjcx ほか moderate 3 件の解消 | Owner（tomoki013） | 実施済み。`pnpm audit --prod` 0 件 |
+| 2026-09-24 | dev 依存の脆弱性解消: vitest `^4.1.11`、lockfile 更新、`miniflare>sharp` / `miniflare>undici` の override | Owner（tomoki013） | 実施済み。`pnpm audit`（dev 含む）0 件 |
+| 2026-09-24 | GitHub Actions が課金設定で起動しないため、CI をローカル実行で代替 | Owner（tomoki013） | PR #1 にローカル CI 結果を記録 |
 
 ## Phase 4 の手順（予定）
 
