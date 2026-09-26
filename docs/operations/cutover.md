@@ -10,9 +10,9 @@
 | 2 | 本 Repository へ抽出（履歴付き）、ブランド・アプリ固有分岐・認可の分離 | 完了（PR #1） |
 | 3 | Project 用 `Intake` entrypoint と SDK、tomokichi-api をそれ経由に | 完了（PR #3、tomokichi-studio#76。tomokichi-api `8e1e8dda` は `INQUIRY → Intake` のみ） |
 | 4 | 本 Repository からのデプロイへ切替 | 完了 2026-09-26（core `deda7f40`、admin `0f2e3d59`、ingress `2d90f150`。Owner が手元から実行） |
-| 5 | tomokichi-studio から旧コードを削除 | 未着手 |
+| 5 | tomokichi-studio から旧コードを削除 | 完了 2026-09-26（tomokichi-studio#80） |
 
-**3 Worker のデプロイ元は本 Repository だけ**（tomokichi-studio#77 で向こうの deploy job を削除済み）。GitHub Actions は課金設定で動かないため、デプロイは手元から `pnpm --filter @inquiry-platform/<app> run deploy`（api → admin → mail-ingress の順）。tomokichi-studio 側の旧コードは Phase 5 で削除するまで凍結。
+**3 Worker のデプロイ元は本 Repository だけ**（tomokichi-studio#77 で向こうの deploy job を削除済み）。GitHub Actions は課金設定で動かないため、デプロイは手元から `pnpm --filter @inquiry-platform/<app> run deploy`（api → admin → mail-ingress の順）。tomokichi-studio 側の旧コードは Phase 5 で削除済み（履歴は Git に残る）。
 
 ## 承認記録
 
