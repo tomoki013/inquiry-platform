@@ -1,18 +1,18 @@
 # Cutover — tomokichi-studio からの移行
 
-最終更新: 2026-09-24。
+最終更新: 2026-09-26。
 
 ## 現在の Phase
 
 | Phase | 内容 | 状態 |
 |---|---|---|
 | 1 | 依存箇所の棚卸し | 完了（tomokichi-studio `docs/inquiry-platform-extraction.md`） |
-| 2 | 本 Repository へ抽出（履歴付き）、ブランド・アプリ固有分岐・認可の分離 | PR #1（レビュー待ち） |
-| 3 | Project 用 `Intake` entrypoint と SDK、tomokichi-api をそれ経由に | 基盤側: PR #2。tomokichi-studio 側: 切替 PR（Core のデプロイ後にマージ） |
-| 4 | 本 Repository からのデプロイへ切替、旧管理画面との比較 | 未着手 |
+| 2 | 本 Repository へ抽出（履歴付き）、ブランド・アプリ固有分岐・認可の分離 | 完了（PR #1） |
+| 3 | Project 用 `Intake` entrypoint と SDK、tomokichi-api をそれ経由に | 完了（PR #3、tomokichi-studio#76。tomokichi-api `8e1e8dda` は `INQUIRY → Intake` のみ） |
+| 4 | 本 Repository からのデプロイへ切替 | 完了 2026-09-26（core `deda7f40`、admin `0f2e3d59`、ingress `2d90f150`。Owner が手元から実行） |
 | 5 | tomokichi-studio から旧コードを削除 | 未着手 |
 
-**今のデプロイ元は tomokichi-studio だけ。** 本 Repository にはデプロイ workflow を置いていない。Phase 4 までは、tomokichi-studio 側の `apps/admin-core` / `admin-web` / `mail-ingress` / `packages/admin-*` への変更は凍結し、やむを得ず入れた変更は本 Repository にも移す。
+**3 Worker のデプロイ元は本 Repository だけ**（tomokichi-studio#77 で向こうの deploy job を削除済み）。GitHub Actions は課金設定で動かないため、デプロイは手元から `pnpm --filter @inquiry-platform/<app> run deploy`（api → admin → mail-ingress の順）。tomokichi-studio 側の旧コードは Phase 5 で削除するまで凍結。
 
 ## 承認記録
 
@@ -22,6 +22,7 @@
 | 2026-09-24 | hono `^4.13.2` → `^4.13.5`（解決 4.13.8）。GHSA-crvj-82cr-hjcx ほか moderate 3 件の解消 | Owner（tomoki013） | 実施済み。`pnpm audit --prod` 0 件 |
 | 2026-09-24 | dev 依存の脆弱性解消: vitest `^4.1.11`、lockfile 更新、`miniflare>sharp` / `miniflare>undici` の override | Owner（tomoki013） | 実施済み。`pnpm audit`（dev 含む）0 件 |
 | 2026-09-24 | GitHub Actions が課金設定で起動しないため、CI をローカル実行で代替 | Owner（tomoki013） | PR #1 にローカル CI 結果を記録 |
+| 2026-09-26 | Phase 4 本番デプロイ（3 Worker）と tomokichi-studio#76 のマージ | Owner（tomoki013） | 実施済み。ロールバック先: core `ad7949d4`、admin `60e1ae85`、ingress `deffd4c9`（tomokichi-studio 最終版） |
 
 ## デプロイ順序（Phase 3 と 4 の関係）
 
