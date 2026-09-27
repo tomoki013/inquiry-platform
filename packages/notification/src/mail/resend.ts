@@ -7,7 +7,7 @@ import type { BaseMail, MailProvider, MailResult, SupportReplyMail } from "./ind
  * Deliberately a thin adapter and not a shared package with `apps/api`: that
  * Worker's `sendSupportEmail` throws, has its own bindings and is covered by
  * its own tests, and pulling it into a common module would mean editing a live
- * mail path to serve a new admin screen. The duplicated fetch is ten lines; the
+ * mail path to serve a new operator client. The duplicated fetch is ten lines; the
  * regression risk was the expensive part.
  */
 export class ResendMailProvider implements MailProvider {

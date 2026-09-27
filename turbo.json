@@ -4,6 +4,7 @@
   // One slot per persistent workspace `dev` (currently 3 Workers), plus headroom.
   // Turbo requires concurrency > number of concurrent persistent tasks.
   "concurrency": "8",
+  "globalPassThroughEnv": ["INIT_CWD"],
   "tasks": {
     "dev": {
       "cache": false,

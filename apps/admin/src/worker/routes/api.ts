@@ -1,8 +1,8 @@
 import type { AdminIdentity } from "@inquiry-platform/core";
-import { INTERNAL_ORIGIN, INTERNAL_PATHS } from "@inquiry-platform/core";
+import { INTERNAL_ORIGIN, INTERNAL_PATHS, platformApiDescriptor } from "@inquiry-platform/core";
 import type { Hono } from "hono";
 import type { AdminWebEnv } from "../env";
-import { failure, respond } from "../http";
+import { failure, requestId, respond } from "../http";
 import { actorFor } from "../identity";
 
 type Variables = { identity: AdminIdentity };
@@ -20,6 +20,12 @@ export type AdminApi = Hono<{ Bindings: AdminWebEnv; Variables: Variables }>;
  */
 export function registerApiRoutes(app: AdminApi): void {
   const actor = (c: { get: (k: "identity") => AdminIdentity }) => actorFor(c.get("identity"));
+
+  // Machine-readable discovery for every consumer. This is deliberately a
+  // contract descriptor, not a UI/session bootstrap response.
+  app.get("/api", (c) =>
+    c.json({ ok: true, data: platformApiDescriptor, requestId: requestId(c) }),
+  );
 
   app.get("/api/tickets", async (c) =>
     respond(c, await c.env.ADMIN_CORE.listTickets({ ...c.req.query() })),
@@ -84,7 +90,7 @@ export function registerApiRoutes(app: AdminApi): void {
     "/api/support/threads/:id/notes",
   ]) {
     app.post(path, (c) =>
-      failure(c, { code: "CONFLICT", message: "Ticket画面から操作してください。" }, 409),
+      failure(c, { code: "CONFLICT", message: "Ticket API の標準操作を使用してください。" }, 409),
     );
   }
 

@@ -1,9 +1,9 @@
 /**
- * Who may do what in the admin console.
+ * Who may do what in the platform API.
  *
  * One table, pure, and independent of how a person signed in: the admin
- * Worker turns an Access token into an {@link AdminRole} at its edge and asks
- * {@link can} before any route runs. The UI may hide a button with the same
+ * gateway turns an Access token into an {@link AdminRole} at its edge and asks
+ * {@link can} before any route runs. A client may hide a control with the same
  * function, but hiding is a courtesy — the Worker's answer is the rule.
  *
  * - `viewer` reads everything and manages only their own notification devices.

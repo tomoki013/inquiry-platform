@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createInquiryClient } from "./client";
+import { createPlatformApiClient } from "./platform";
 import type { IntakeBinding } from "./types";
 import {
   internalTicketStatuses,
@@ -70,11 +71,10 @@ describe("createInquiryClient", () => {
     const [url, init] = fetch.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://intake.internal/internal/reports/r%2F1/attachments");
     expect(init.method).toBe("PUT");
-    expect(init.headers).toMatchObject({
-      "Content-Type": "image/png",
-      "Content-Length": "3",
-      "X-Evidence-Created-At": "2026-09-24T00:00:00Z",
-    });
+    const evidenceHeaders = new Headers(init.headers);
+    expect(evidenceHeaders.get("Content-Type")).toBe("image/png");
+    expect(evidenceHeaders.get("Content-Length")).toBe("3");
+    expect(evidenceHeaders.get("X-Evidence-Created-At")).toBe("2026-09-24T00:00:00Z");
 
     expect(await client.attachReportEvidence("r", evidence)).toMatchObject({
       ok: false,
@@ -84,5 +84,29 @@ describe("createInquiryClient", () => {
       ok: false,
       error: { code: "VALIDATION_ERROR" },
     });
+  });
+});
+
+describe("createPlatformApiClient", () => {
+  it("uses the common descriptor route and bearer authentication", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      Response.json({
+        ok: true,
+        data: { version: "v1" },
+        requestId: "r1",
+      }),
+    );
+    const client = createPlatformApiClient({
+      origin: "https://api.example.com/",
+      token: "access-token",
+      fetch,
+    });
+
+    await expect(client.describe()).resolves.toMatchObject({ ok: true, data: { version: "v1" } });
+    const [url, init] = fetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.example.com/api");
+    const headers = new Headers(init.headers);
+    expect(headers.get("Accept")).toBe("application/json");
+    expect(headers.get("Authorization")).toBe("Bearer access-token");
   });
 });

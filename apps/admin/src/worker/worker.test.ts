@@ -83,19 +83,6 @@ const coreStub = {
 function env(overrides: Partial<AdminWebEnv> = {}): AdminWebEnv {
   return {
     ADMIN_CORE: coreStub,
-    ASSETS: {
-      fetch: (request: Request) =>
-        Promise.resolve(
-          new URL(request.url).pathname === "/manifest.webmanifest"
-            ? new Response(JSON.stringify({ name: "Admin", short_name: "Admin", start_url: "/" }), {
-                headers: { "Content-Type": "application/manifest+json" },
-              })
-            : new Response(
-                '<html><head><title>Admin</title><meta name="apple-mobile-web-app-title" content="Admin"></head><body>app</body></html>',
-                { headers: { "Content-Type": "text/html; charset=utf-8" } },
-              ),
-        ),
-    } as unknown as Fetcher,
     ACCESS_TEAM_DOMAIN: "",
     ACCESS_AUD: "",
     ADMIN_ORIGIN: "https://admin.example.com",
@@ -209,7 +196,7 @@ describe("Cloudflare Access", () => {
     expect(response.status).toBe(401);
   });
 
-  it("also refuses the client bundle, not only the API", async () => {
+  it("refuses the root because there is no UI surface", async () => {
     const response = await createApp().fetch(get("/"), env(), ctx);
     expect(response.status).toBe(401);
   });
@@ -273,6 +260,22 @@ describe("mutation guard", () => {
     expect(response.status).toBe(200);
   });
 
+  it("allows a bearer-authenticated API client without a browser Origin", async () => {
+    serveJwks();
+    const domain = newDomain();
+    const jwt = await token({ domain });
+    const response = await createApp().fetch(
+      post({ Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" }),
+      env({
+        ACCESS_TEAM_DOMAIN: domain,
+        ACCESS_AUD: AUD,
+        DEFAULT_ADMIN_ROLE: "operator",
+      }),
+      ctx,
+    );
+    expect(response.status).toBe(200);
+  });
+
   it("does not gate reads", async () => {
     const response = await createApp().fetch(get("/api/dashboard"), local(), ctx);
     expect(response.status).toBe(200);
@@ -290,11 +293,8 @@ describe("security headers", () => {
       ),
     ]) {
       const csp = response.headers.get("Content-Security-Policy") ?? "";
-      expect(csp).toContain("default-src 'self'");
+      expect(csp).toContain("default-src 'none'");
       expect(csp).toContain("frame-ancestors 'none'");
-      // No inline script, ever.
-      expect(csp).toContain("script-src 'self'");
-      expect(csp).not.toContain("script-src 'self' 'unsafe-inline'");
       expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
       expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
       expect(response.headers.get("X-Frame-Options")).toBe("DENY");
@@ -388,68 +388,33 @@ describe("Ticket RPC boundary", () => {
   });
 });
 
-/**
- * The PWA surface and the push routes.
- *
- * What is pinned: the manifest and icons are served bare (a browser fetches an
- * install icon without cookies), and *nothing else* is — the service worker,
- * the bundle and a ticket deep link all still meet the gate, so a
- * notification tap while signed out goes to Access's login and comes back to
- * the same path. And a push subscription can only be registered, or removed,
- * by a same-origin JSON request from a signed-in operator, under that
- * operator's own identity.
- */
-describe("PWA and push", () => {
+describe("API-only gateway and push", () => {
   const local = (overrides: Partial<AdminWebEnv> = {}) =>
     env({ ENVIRONMENT: "local", DEV_ADMIN_EMAIL: "dev@example.com", ...overrides });
-  const gated = () => env({ ACCESS_TEAM_DOMAIN: newDomain(), ACCESS_AUD: AUD });
 
-  it.each(["/manifest.webmanifest", "/icons/icon-192.png"])(
-    "serves %s without a token",
-    async (path) => {
-      const response = await createApp().fetch(get(path), gated(), ctx);
-      expect(response.status).toBe(200);
-      expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
-    },
-  );
-
-  it.each(["/sw.js", "/tickets/TK-000123", "/settings/notifications", "/icons", "/iconsx"])(
-    "still gates %s",
-    async (path) => {
-      const response = await createApp().fetch(get(path), gated(), ctx);
-      expect(response.status).toBe(401);
-    },
-  );
-
-  it("names the manifest after the deployment, and says nothing else about it", async () => {
-    const response = await createApp().fetch(get("/manifest.webmanifest"), gated(), ctx);
-    const manifest = (await response.json()) as Record<string, unknown>;
-    expect(manifest).toMatchObject({
-      name: "Example Console Admin",
-      short_name: "Example Admin",
-      start_url: "/",
-    });
-    // Served before sign-in: the reply address and signature stay behind the gate.
-    expect(JSON.stringify(manifest)).not.toContain("support@example.com");
-    expect(JSON.stringify(manifest)).not.toContain("Example Support");
+  it("does not expose a UI or HTML fallback", async () => {
+    const response = await createApp().fetch(get("/tickets"), local(), ctx);
+    expect(response.status).toBe(404);
+    expect(response.headers.get("Content-Type")).toContain("application/json");
   });
 
-  it("names the HTML shell after the deployment", async () => {
-    const response = await createApp().fetch(get("/tickets"), local(), ctx);
-    const html = await response.text();
-    expect(html).toContain("<title>Example Console Admin</title>");
-    expect(html).toContain('content="Example Admin"');
+  it("exposes the canonical API descriptor", async () => {
+    const response = await createApp().fetch(get("/api"), local(), ctx);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      data: {
+        version: "v1",
+        implementationPolicy: "platform-owned",
+        extensionPolicy: "outside-standard-surface",
+      },
+    });
   });
 
   it("returns the console profile with the session", async () => {
     const response = await createApp().fetch(get("/api/session"), local(), ctx);
     const body = (await response.json()) as { data: { profile: unknown } };
     expect(body.data.profile).toEqual(profile);
-  });
-
-  it("keeps the service worker out of the asset cache", async () => {
-    const response = await createApp().fetch(get("/sw.js"), local(), ctx);
-    expect(response.headers.get("Cache-Control")).toBe("no-cache");
   });
 
   it("registers a subscription under the signed-in operator, with the request's user agent", async () => {
@@ -505,7 +470,11 @@ describe("PWA and push", () => {
         headers: { Origin: "https://admin.example.com" },
       }),
     ]) {
-      const response = await createApp().fetch(request, gated(), ctx);
+      const response = await createApp().fetch(
+        request,
+        env({ ACCESS_TEAM_DOMAIN: newDomain(), ACCESS_AUD: AUD }),
+        ctx,
+      );
       expect(response.status).toBe(401);
     }
   });

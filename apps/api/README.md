@@ -1,4 +1,4 @@
-# Platform API (`apps/api`)
+# Platform Core (`apps/api`)
 
 The Worker that holds every ticket, report, reply and audit row. How to run
 it in your own account: [docs/operations/deployment.md](../../docs/operations/deployment.md).
@@ -10,9 +10,9 @@ Ticket lifecycle, priority/resolution rules, SLA settings and operations:
 ```
                     Cloudflare Access
                             │
-                   admin.example.com
+                   operator-owned client
                             │
-                     inquiry-admin            ← the only public one
+                     inquiry-api              ← API gateway
                             │  Service Binding
                      inquiry-core             ← no route, no workers.dev
                      ┌──────┴──────┐
@@ -23,7 +23,7 @@ a Project's Worker ──(Intake)──┐
 inquiry-mail-ingress ──────────┴─→ inquiry-core
 ```
 
-Core holds the D1 and R2 bindings; the admin console holds neither. A bug in
+Core holds the D1 and R2 bindings; the API gateway holds neither. A bug in
 an internet-facing route handler cannot reach a database it was never given,
 and the Projects that send reports never learn the schema — they call
 `@inquiry-platform/sdk` and nothing else.
@@ -37,9 +37,9 @@ Binding from inside the account.
 | --- | --- |
 | `packages/core` | Types, Zod schemas, the `AdminCoreApi` interface, the error vocabulary. The boundary itself. |
 | `packages/notification` | `MailProvider`, a Resend adapter, and an "unconfigured" one that refuses clearly; Web Push. |
-| `packages/sdk` | What a Project uses: the `Intake` contract and a client. No dependencies. |
+| `packages/sdk` | Project `Intake` and operator API contracts and clients. No runtime dependencies. |
 | `apps/api` | D1, R2, domain services, audit log. RPC plus a `fetch` for bytes. |
-| `apps/admin` | React + Hono. Access JWT verification, security headers, the API. |
+| `apps/admin` | API-only gateway. Access JWT verification, authorization, security headers, and `/api/*`. No UI or static assets. |
 | `apps/mail-ingress` | Support mailbox → parse → Core → forward. |
 
 The repositories are used only by Core and live in `apps/api/src/db`, and
@@ -59,13 +59,14 @@ Then, in three terminals:
 
 ```bash
 pnpm --filter @inquiry-platform/api dev            # :8788
-pnpm --filter @inquiry-platform/admin dev          # :4330, Vite
+pnpm --filter @inquiry-platform/admin dev          # :4330, API gateway
 pnpm --filter @inquiry-platform/mail-ingress dev   # :8789
 ```
 
 Set `ENVIRONMENT=local` and `DEV_ADMIN_EMAIL` in `apps/admin/.dev.vars` to
-sign in without Access. That combination is refused in production — see
-`worker/identity.ts`.
+call the gateway locally without Access. That combination is refused in
+production — see `worker/identity.ts`. The gateway has no browser application;
+use an API client or a consumer-owned local client.
 
 ## Checks
 
@@ -75,7 +76,7 @@ pnpm run ci
 
 ## Deletion policy
 
-There is no "delete" anywhere in this screen. Apps are archived, reports are
+There is no hard-delete API. Apps are archived, reports are
 closed, threads are resolved or marked spam, templates are deactivated. The one
 `DELETE` in the codebase removes an app link a person typed a moment ago.
 

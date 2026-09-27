@@ -59,7 +59,7 @@ import type { TicketDashboard, TicketDetail, TicketMasters, TicketPage } from ".
 /**
  * Who is acting, as far as the audit log is concerned.
  *
- * Not a Cloudflare Access JWT and not an email address: Admin Web converts the
+ * Not a Cloudflare Access JWT and not an email address: the API gateway converts the
  * one into the other at its edge (`worker/identity.ts`) so that nothing below
  * that line knows what the identity provider is. Swapping Cloudflare for Google
  * Workspace changes that one file.

@@ -1,5 +1,5 @@
 /**
- * Web Push for the admin screen, on nothing but Web Crypto and `fetch`.
+ * Web Push transport for operator clients, on nothing but Web Crypto and `fetch`.
  *
  * Why not `web-push` from npm: it is written against Node's `crypto` module
  * (`createECDH`, `hkdfSync`, `createSign`) and a Cloudflare Worker has none of

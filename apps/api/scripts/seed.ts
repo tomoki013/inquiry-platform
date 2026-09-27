@@ -23,7 +23,7 @@ import type { DeploymentSeed } from "../seed/types.ts";
  *   `--remote`, and it is obvious beforehand exactly what will run;
  * - every statement is an insert guarded by `WHERE NOT EXISTS`, so re-running
  *   the seed creates nothing twice and — the part that matters — **never
- *   overwrites a template an operator has edited in the admin screen.** The
+ *   overwrites a template an operator has edited through the Operator API.** The
  *   seed is where a template starts; D1 is where it lives afterwards.
  *
  *   pnpm --filter @inquiry-platform/api exec wrangler d1 execute DB \

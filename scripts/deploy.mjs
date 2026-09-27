@@ -4,7 +4,7 @@
 //   node scripts/deploy.mjs <deployment-dir> check
 //   node scripts/deploy.mjs <deployment-dir> migrate
 //   node scripts/deploy.mjs <deployment-dir> seed [--dry-run]
-//   node scripts/deploy.mjs <deployment-dir> deploy <api|admin|mail-ingress|all> [--dry-run]
+//   node scripts/deploy.mjs <deployment-dir> deploy <api|gateway|mail-ingress|all> [--dry-run]
 //
 // The `wrangler.jsonc` files in this repository are placeholders. A
 // deployment keeps its real ones — Worker names, D1 id, routes, addresses,
@@ -14,19 +14,17 @@
 //   <deployment-dir>/admin.jsonc         required
 //   <deployment-dir>/mail-ingress.jsonc  required
 //   <deployment-dir>/seed.ts             optional, a DeploymentSeed module
-//   <deployment-dir>/admin-assets/       optional, files laid over the admin
-//                                        console's built assets (icons, favicon)
 //
 // Each file is copied next to the placeholder it replaces, as
 // `apps/<app>/wrangler.deployment.jsonc` (git-ignored), and Wrangler is run
-// there with `--config`. Paths inside the files (`main`, `migrations_dir`,
-// `assets.directory`) are therefore relative to `apps/<app>/`, exactly as in
+// there with `--config`. Paths inside the files (`main`, `migrations_dir`) are
+// therefore relative to `apps/<app>/`, exactly as in
 // the placeholders. See docs/operations/deployment.md.
 //
 // `check` is `wrangler deploy --dry-run` for all three and touches nothing.
 // Everything else acts on the Cloudflare account Wrangler is logged in to.
 import { spawnSync } from "node:child_process";
-import { copyFileSync, cpSync, existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,7 +44,7 @@ function usage() {
       "  check                                   wrangler deploy --dry-run for every Worker",
       "  migrate                                 apply D1 migrations (remote)",
       "  seed [--dry-run]                        apply <deployment-dir>/seed.ts (remote)",
-      "  deploy <api|admin|mail-ingress|all> [--dry-run]",
+      "  deploy <api|gateway|mail-ingress|all> [--dry-run]",
     ].join("\n"),
   );
   process.exit(2);
@@ -78,16 +76,6 @@ function wrangler(app, argv) {
 }
 
 function deploy(app, onlyCheck) {
-  // The admin console's client is static assets the Worker serves. A
-  // deployment's own icons replace the neutral ones after the build.
-  if (app === "admin") {
-    run(join(root, "apps", app), "pnpm", ["run", "build"]);
-    const assets = join(deployment, "admin-assets");
-    if (existsSync(assets)) {
-      cpSync(assets, join(root, "apps/admin/dist"), { recursive: true });
-      console.log(`Laid ${assets} over apps/admin/dist`);
-    }
-  }
   wrangler(app, onlyCheck ? ["deploy", "--dry-run"] : ["deploy"]);
 }
 
@@ -121,7 +109,13 @@ switch (command) {
     break;
   }
   case "deploy": {
-    const apps = target === "all" ? APPS : APPS.includes(target) ? [target] : usage();
+    const normalizedTarget = target === "gateway" ? "admin" : target;
+    const apps =
+      normalizedTarget === "all"
+        ? APPS
+        : APPS.includes(normalizedTarget)
+          ? [normalizedTarget]
+          : usage();
     // api first: the other two bind to it, and a Service Binding cannot point
     // at a Worker that does not exist yet.
     for (const app of apps) deploy(app, dryRun);

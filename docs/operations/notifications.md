@@ -1,115 +1,61 @@
-# Support 通知・PWA — Notification Only
+# Support 通知
 
-最終更新: 2026-09-27。実装: `apps/api/src/domain/notification-service.ts`、`packages/notification`、`apps/admin/public/sw.js`。
+最終更新: 2026-09-27。通知は Core が所有し、利用者には同じ API と通知 payload だけを提供する。UI、PWA、Service Worker はこの repository には含めない。
 
-## 1. 責務分離
-
-```text
-Support DB (Core D1)  = 問い合わせ・通報の唯一の正本
-Admin console         = 内容を見る・対応する唯一の場所
-Email                  = 「新着がある」と知らせるだけ
-Web Push               = 同上をリアルタイムに
-AI                     = 明示的に許可された場合のみ（未実装。`aiProcessingAllowed` を足す余地だけ確保）
-```
-
-この分離は **DTO で固定** している。`TicketNotificationEvent`（`packages/core/src/notifications.ts`）は `ticketId / ticketNumber / category / app / createdAt` しか持たず、本文・件名・氏名・メールアドレスのフィールドが存在しない。`renderTicketNotificationMail()` と `renderPushPayload()` はこの型の純関数なので、本文が漏れるにはまず型を変える必要がある。
-
-## 2. フロー
+## 責務分離
 
 ```text
-User → Project のフォーム（Turnstile 等は Project 側）
-  → Project の Worker → Intake.submitContact                     ← ここで受付
-  → Core: D1 batch (thread + message + audit) → trigger → tickets(INQUIRY)
-  → Core: notify({ticketId, category}) を ctx.waitUntil で
-      ├─ Email  : NOTIFICATION_EMAIL 宛に番号 + リンク
-      └─ Push   : 有効な購読すべてに {type, ticketNumber, category, app, url}
-
-アプリの通報 → Project の Worker → Intake.submitReport
-  → Core.createReport → tickets(REPORT) → 同じ notify
+Support DB (Core D1) = 問い合わせ・通報の唯一の正本
+API gateway          = 認証・認可済みの標準 API
+Email / Web Push     = 新着の通知だけ
+利用者               = 任意の画面・CLI・自動化
 ```
 
-- **通知失敗 ≠ Ticket 作成失敗**。通知は batch 確定後に `ctx.waitUntil` で走り、`NotificationService.ticketCreated()` は投げない（`tests/notifications.test.ts` "notification failure is not ticket failure"）。
-- **冪等**: `idempotencyKey` / `externalReportId` が同じ再送は既存 Ticket を返す（通知も 1 回）。
-- 受信メールで新規スレッドができた場合は **Push のみ**（メール本体が `SUPPORT_FORWARD_EMAIL` へ転送されているため）。
+`TicketNotificationEvent`（`packages/core/src/notifications.ts`）は
+`ticketId / ticketNumber / category / app` だけを持つ。本文、件名、氏名、メールアドレス、時刻は通知 payload に入らない。`renderTicketNotificationMail()` と `renderPushPayload()` が唯一の変換点である。
 
-## 3. メール（Notification Only）
+## フロー
 
-件名 `[<BRANDING.consoleName>] 新しいお問い合わせがあります` / `新しい通報があります`。本文は 種別・対象アプリ・受付日時・`Ticket ID: #TK-000123`・`<ADMIN_ORIGIN>/tickets/TK-000123` のみ。`Reply-To` 無し。冪等キー `ticket-notify-<ticketId>`。
-
-## 4. 管理画面リンクと認証
-
-`/tickets/{ticketNumber}`。`TicketService.row()` は UUID でも `TK-` 番号でも引く。URL に番号以外は付けない（`safePath()` が `?` `#` を拒否）。
-
-未認証時は Cloudflare Access が管理コンソールのホスト名全体を止め、ログイン後に元 URL へ戻す。Worker 側も JWT を再検証して 401（`worker.test.ts` "still gates /tickets/TK-000123"）。例外は `/manifest.webmanifest` と `/icons/*` だけ（ブラウザが cookie 無しで取りに来るため。中身は名前と画像）。
-
-## 5. PWA
-
-| 要素 | 場所 |
-|---|---|
-| manifest | `apps/admin/public/manifest.webmanifest`（`standalone`、`id: "/"`、`crossorigin="use-credentials"` で参照） |
-| Service Worker | `apps/admin/public/sw.js`。**Cache Storage を一切使わない**。navigation 失敗時だけインライン HTML の「オフラインです」 |
-| アイコン | `public/icons/`（差し替える場合はデプロイ前に置き換える） |
-| 登録 | `client/lib/pwa.ts` `registerServiceWorker()`（load 後、権限は要求しない） |
-| 更新 | `useServiceWorkerUpdate()` → 画面右下に「再読み込み」バナー → `SKIP_WAITING` → `controllerchange` で reload |
-| iOS | Home Screen に追加後のみ Push 可。設定画面がその旨を案内 |
-
-Worker は `/sw.js` に `Cache-Control: no-cache` と `Service-Worker-Allowed: /` を付ける。
-
-## 6. Web Push
-
-- 実装: `packages/notification`。RFC 8291（aes128gcm, 1 record）+ RFC 8292（VAPID ES256）。**Web Crypto と fetch のみ**。Node の `web-push` は `crypto.createECDH` 等に依存し Workers で動かないので使わない。RFC 8291 Appendix A のテストベクタをバイト単位で照合するテストがある。
-- 送信は Core（`NotificationService.sendPush`）。購読ごとに暗号化し並列送信。`404/410` は即 `revoked_at`、それ以外の失敗はカウントのみ。
-- payload（復号後）:
-
-```json
-{ "type": "support.ticket.created", "ticketNumber": "TK-000123", "category": "inquiry", "app": "Example App", "url": "/tickets/TK-000123" }
+```text
+Project → Intake.submitContact / Intake.submitReport
+  → Core: D1 batch (ticket + message + audit)
+  → Core: notify({ ticketId, category })
+      ├─ Email : 番号 + 種別 + Project 名 + リンク
+      └─ Push  : { type, ticketNumber, category, app, title, url }
 ```
 
-- `sw.js` の表示は固定文言 + `app • #番号`。payload に未知フィールドがあっても描画しない。
-- タップ: 既存の管理画面ウィンドウを focus → `navigate`。無ければ `openWindow`。
-- `pushsubscriptionchange`: 新しい購読を同じ操作者で再登録（cookie が乗る）。
+通知失敗は Ticket 作成を失敗させない。通知は batch 確定後に `ctx.waitUntil` で実行する。`idempotencyKey` / `externalReportId` の再送は既存 Ticket を返し、通知も 1 回だけ送る。
 
-## 7. Push Subscription
+## API 契約
 
-`push_subscriptions(id, admin_user_id, endpoint UNIQUE, p256dh, auth, user_agent, device_name, created_at, last_used_at, revoked_at)`（migration `0009`）。
+通知設定と端末管理は API gateway の次の標準 path で行う。
 
-- `admin_user_id` は Access の `sub`。API は `ActorRef` から取り、body の値は使わない。
-- 他人の endpoint を登録しようとすると `CONFLICT`、他人の端末は list にも出ず revoke も `NOT_FOUND`（`tests/notifications.test.ts` "a subscription belongs to the operator who registered it"）。
-- `endpoint` / `p256dh` / `auth` はブラウザに返さない。`assertSafeAuditMetadata` が `endpoint`/`p256dh`/`auth` キーを拒否する。
-- 失効行は 30 日後に cron（Core `*/5`）で削除。
+- `GET /api/notifications`
+- `PUT /api/notifications/settings`
+- `POST /api/notifications/push/subscriptions`
+- `POST /api/notifications/push/unsubscribe`
+- `DELETE /api/notifications/push/subscriptions/:id`
 
-## 8. 通知設定
+全 path は Access JWT の再検証、role による認可、JSON 入力検証、`private, no-store` を gateway/Core で強制する。対象操作者は request body ではなく検証済み JWT の subject から決める。利用者はこれらの機能を Project 側で再実装しない。
 
-`/settings/notifications`（ナビ「通知設定」）。`admin_notification_settings(admin_user_id, inquiry_push, report_push, email_enabled)`。Push の種類は購読者ごと、メールは「設定行が無い or 誰かが ON」なら送る（運営 1 名の今は画面のトグルそのもの）。
+## セキュリティ
 
-Notification permission は「Push通知を有効にする」ボタンの中でだけ要求する（`NotificationSettings.test.tsx`）。
+- 通知には Ticket 番号・種別・Project 名・リンクだけを載せる。
+- `endpoint` / `p256dh` / `auth` は API response と監査 metadata に返さない。
+- 他人の購読は list に出ず、revoke も `NOT_FOUND` とする。
+- Web Push は RFC 8291 / RFC 8292 を `packages/notification` の Web Crypto 実装で行う。通知 URL はデプロイ設定の `OPERATOR_TICKET_URL_TEMPLATE` から生成し、利用者の UI の route を基盤が固定しない。
+- `404/410` の push endpoint は失効し、それ以外の送信失敗は Ticket 作成結果に影響させない。
 
-## 9. 環境変数
+## 設定
 
-| Worker | 名前 | 種別 | 意味 |
-|---|---|---|---|
-| core | `ADMIN_ORIGIN` | var | リンク先。例 `https://admin.example.com` |
-| core | `VAPID_PUBLIC_KEY` | var | 65 byte P-256 点、base64url。ブラウザの `applicationServerKey` |
-| core | `VAPID_SUBJECT` | var | 例 `mailto:support@example.com` |
-| core | `VAPID_PRIVATE_KEY` | **secret** | 32 byte scalar、base64url |
-| core | `NOTIFICATION_EMAIL` | **secret** | 運営の通知先。無ければメール通知なし |
-| core | `MAIL_API_KEY` | secret（既存） | メール通知にも使う |
+| Worker | 名前 | 種別 |
+|---|---|---|
+| Core | `VAPID_PUBLIC_KEY` | var |
+| Core | `VAPID_SUBJECT` | var |
+| Core | `VAPID_PRIVATE_KEY` | secret |
+| Core | `NOTIFICATION_EMAIL` | secret |
+| Core | `MAIL_API_KEY` | secret |
 
-生成: `pnpm --filter @inquiry-platform/api run vapid:generate`。**鍵を変えると全端末の再登録が必要**。
+`OPERATOR_TICKET_URL_TEMPLATE` は `https://operator.example.com/tickets/{ticketNumber}` のような URL template。利用者が作る運用クライアントの実際の route を指定し、`{ticketNumber}` だけを基盤が差し替える。
 
-## 10. Cloudflare 側の手動設定
-
-1. `wrangler secret put VAPID_PRIVATE_KEY` / `NOTIFICATION_EMAIL`、デプロイ設定の `VAPID_PUBLIC_KEY` を埋めて Core を deploy → 管理コンソールを deploy。
-2. Access: `<管理ホスト>/manifest.webmanifest` と `<管理ホスト>/icons/*` に **Bypass** ポリシーの Application を追加（無いとインストール画面のアイコンが Access のログイン HTML になる。ログインや通知タップの動作には影響しない）。
-3. `node scripts/deploy.mjs <deployment-dir> migrate`（`0009_notifications.sql`）。
-
-## 11. 実装フェーズとの対応
-
-| Phase | 状態 |
-|---|---|
-| 1 メールから本文・PII を削除 | 済（api から本文メール自体を削除し、Core が番号だけ送る） |
-| 2 Ticket URL と認証後 redirect | 済（Access + Worker 401。URL は番号のみ） |
-| 3 PWA | 済（manifest / sw / icons / standalone / 更新バナー / オフライン画面） |
-| 4 Web Push | 済（`packages/notification/src/push`、Core 送信、sw 表示・タップ） |
-| 5 通知設定・端末管理 | 済（`/settings/notifications`） |
-| 6 Badging・通知カテゴリ・AI 制御 | 未（`aiProcessingAllowed` は列未追加） |
+具体的な値はデプロイ側の設定に置く。API gateway は通知を送らず、Core の結果を認証済み利用者へ返すだけである。

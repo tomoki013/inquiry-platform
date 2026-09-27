@@ -169,7 +169,7 @@ CREATE TABLE IF NOT EXISTS support_reply_sends (
 -- ------------------------------------------------------ reply templates ----
 -- `app_id IS NULL` means deployment-wide. `key` is the stable handle the seed
 -- re-runs against, so seeding twice creates nothing twice and never overwrites
--- an edit made in the admin screen.
+-- an edit made through the Operator API.
 CREATE TABLE IF NOT EXISTS reply_templates (
     id                TEXT PRIMARY KEY,
     key               TEXT NOT NULL UNIQUE,

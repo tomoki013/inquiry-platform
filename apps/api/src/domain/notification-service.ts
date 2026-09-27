@@ -59,12 +59,8 @@ export interface NotificationConfig {
   notifyEmail?: string;
   /** `Name <address>` the alert is sent from. */
   from: string;
-  /** The admin console's origin — for the link in the mail. */
-  adminOrigin: string;
-  /** The deployment's console name, which prefixes the subject. */
-  consoleName: string;
-  /** Title of a push notification — the installed console's short name. */
-  pushTitle: string;
+  /** URL template owned by the deployment's operator client. */
+  ticketUrlTemplate: string;
 }
 
 export interface PushTransport {
@@ -74,9 +70,9 @@ export interface PushTransport {
 
 const PURGE_AFTER_DAYS = 30;
 
-/** The path a notification points at. Ticket number only; no query string. */
-export function ticketPath(ticketNumber: string): string {
-  return `/tickets/${encodeURIComponent(ticketNumber)}`;
+/** The configured operator-client link. No ticket content is added. */
+export function ticketUrl(template: string, ticketNumber: string): string {
+  return template.replaceAll("{ticketNumber}", encodeURIComponent(ticketNumber));
 }
 
 const categoryNoun: Record<TicketNotificationCategory, string> = {
@@ -93,47 +89,36 @@ const categoryNoun: Record<TicketNotificationCategory, string> = {
  */
 export function renderTicketNotificationMail(
   event: TicketNotificationEvent,
-  config: Pick<NotificationConfig, "from" | "adminOrigin" | "consoleName"> & { to: string },
+  config: Pick<NotificationConfig, "from" | "ticketUrlTemplate"> & { to: string },
 ): BaseMail {
   const noun = categoryNoun[event.category];
-  const received = new Date(event.createdAt).toLocaleString("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-  const link = `${config.adminOrigin}${ticketPath(event.ticketNumber)}`;
+  const link = ticketUrl(config.ticketUrlTemplate, event.ticketNumber);
   return {
     to: config.to,
     from: config.from,
-    subject: `[${config.consoleName}] 新しい${noun}があります`,
+    subject: `${noun} #${event.ticketNumber}`,
     text: [
-      `新しい${noun}を受信しました。`,
-      "",
       `種別: ${noun}`,
       `対象アプリ: ${event.app}`,
-      `受付日時: ${received}`,
       `Ticket ID: #${event.ticketNumber}`,
-      "",
-      "管理画面で確認",
-      link,
-      "",
-      "このメールは通知のみです。内容は管理画面でご確認ください。",
+      `リンク: ${link}`,
     ].join("\n"),
     idempotencyKey: `ticket-notify-${event.ticketId}`,
   };
 }
 
-export function renderPushPayload(event: TicketNotificationEvent, title: string): PushPayload {
+export function renderPushPayload(
+  event: TicketNotificationEvent,
+  ticketUrlTemplate: string,
+): PushPayload {
+  const noun = categoryNoun[event.category];
   return {
     type: "support.ticket.created",
     ticketNumber: event.ticketNumber,
     category: event.category,
     app: event.app,
-    title,
-    url: ticketPath(event.ticketNumber),
+    title: `${noun} #${event.ticketNumber}`,
+    url: ticketUrl(ticketUrlTemplate, event.ticketNumber),
   };
 }
 
@@ -194,11 +179,11 @@ export class NotificationService {
   private async eventFor(ref: TicketCreatedRef): Promise<TicketNotificationEvent | null> {
     const row = await this.db
       .prepare(
-        `SELECT t.ticket_number, t.created_at, s.name AS app FROM tickets t
+        `SELECT t.ticket_number, s.name AS app FROM tickets t
          JOIN services s ON s.id = t.service_id WHERE t.id = ?`,
       )
       .bind(ref.ticketId)
-      .first<{ ticket_number: string; created_at: string; app: string }>();
+      .first<{ ticket_number: string; app: string }>();
     if (!row) return null;
     return {
       type: "support.ticket.created",
@@ -206,7 +191,6 @@ export class NotificationService {
       ticketNumber: row.ticket_number,
       category: ref.category,
       app: row.app,
-      createdAt: row.created_at,
     };
   }
 
@@ -218,8 +202,7 @@ export class NotificationService {
         renderTicketNotificationMail(event, {
           to: this.config.notifyEmail,
           from: this.config.from,
-          adminOrigin: this.config.adminOrigin,
-          consoleName: this.config.consoleName,
+          ticketUrlTemplate: this.config.ticketUrlTemplate,
         }),
       );
       if (!result.ok) {
@@ -245,7 +228,7 @@ export class NotificationService {
       internalFailure("notification.push_lookup", error);
       return counts;
     }
-    const payload = JSON.stringify(renderPushPayload(event, this.config.pushTitle));
+    const payload = JSON.stringify(renderPushPayload(event, this.config.ticketUrlTemplate));
     const at = nowIso();
     await Promise.all(
       targets.map(async (row) => {

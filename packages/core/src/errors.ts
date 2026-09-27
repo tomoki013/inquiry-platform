@@ -5,7 +5,7 @@
  * class arrives at the caller as a bare `Error` with a message and nothing
  * else. So Admin Core does not throw across the boundary at all: every RPC
  * method returns a {@link Result}, and a failure is data with a code the caller
- * can branch on. The HTTP layer in Admin Web is the only place that turns a
+ * can branch on. The API gateway is the canonical HTTP adapter that turns a
  * code back into a status.
  */
 export const adminErrorCodes = [
@@ -45,7 +45,7 @@ export function fail<T = never>(
   return { ok: false, error: fields ? { code, message, fields } : { code, message } };
 }
 
-/** HTTP status for a code. Kept here so Admin Web and any future caller agree. */
+/** HTTP status for a code. Kept here so every HTTP caller agrees. */
 export const statusForErrorCode: Record<AdminErrorCode, number> = {
   VALIDATION_ERROR: 400,
   UNAUTHORIZED: 401,

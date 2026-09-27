@@ -1,7 +1,7 @@
 /**
  * Everything the platform API Worker is given.
  *
- * Only this Worker has `DB` and `PRIVATE_FILES`. Admin Web deliberately has
+ * Only this Worker has `DB` and `PRIVATE_FILES`. The API gateway deliberately has
  * neither: if the internet-facing Worker cannot reach the database, a bug in a
  * route handler cannot reach it either.
  */
@@ -25,8 +25,16 @@ export interface AdminCoreEnv {
    * disabled and everything else still works. */
   MAIL_API_KEY?: string;
 
-  /** The admin console's origin. Where a notification's link points. */
+  /**
+   * Legacy operator-client origin. Used only as a fallback when
+   * `OPERATOR_TICKET_URL_TEMPLATE` is not configured.
+   */
   ADMIN_ORIGIN: string;
+  /**
+   * Absolute URL template owned by the deployment's operator client. The
+   * literal `{ticketNumber}` is replaced with the encoded Ticket number.
+   */
+  OPERATOR_TICKET_URL_TEMPLATE?: string;
   /**
    * The operator's own address, for the "a ticket arrived" mail. A Secret,
    * like `SUPPORT_FORWARD_EMAIL` on the mail Worker. Unset means no mail
@@ -37,7 +45,7 @@ export interface AdminCoreEnv {
    * VAPID, for Web Push. The public key is what browsers subscribe with and
    * is not secret; the private key is. Both base64url, generated with
    * `pnpm --filter @inquiry-platform/api run vapid:generate`. Unset means push
-   * is unavailable and the settings screen says so.
+   * is unavailable and the API reports that channel as unavailable.
    */
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_KEY?: string;

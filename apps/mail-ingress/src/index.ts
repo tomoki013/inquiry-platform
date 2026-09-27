@@ -13,7 +13,7 @@ import { parseInboundEmail } from "./parse";
  * The Worker has two jobs and they fail independently on purpose:
  *
  *   1. forward the message to the address that was already receiving it;
- *   2. record it in Admin, so it can be answered from the admin screen.
+ *   2. record it in Core, so it can be answered through the Operator API.
  *
  * **In that order.** Before this Worker existed, support mail went straight to
  * a personal inbox with nothing in the way; now every support mail goes through
@@ -173,7 +173,7 @@ async function forward(message: InboundMessage, env: MailIngressEnv): Promise<vo
  *
  * No subject, no body, no sender address, no attachment name. What a log line
  * here can answer is "did a message arrive, was it stored, was it forwarded" —
- * everything else is in the admin screen, behind Access.
+ * everything else is in the operator client, behind Access.
  */
 function log(event: string, fields: Record<string, string | number | boolean>): void {
   console.log(JSON.stringify({ worker: "mail-ingress", event, ...fields }));

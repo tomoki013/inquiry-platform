@@ -45,7 +45,7 @@ export class FileStore {
  *
  * Anything not on this list is sent as `application/octet-stream` with
  * `Content-Disposition: attachment`, so a `.svg` or an `.html` a stranger
- * emailed us cannot execute script in the admin origin by being previewed.
+ * emailed us cannot execute script in an operator client by being previewed.
  */
 const INLINE_SAFE_TYPES = new Set([
   "image/jpeg",

@@ -11,9 +11,9 @@
   // `wrangler deploy --config <that file>`. See docs/operations/deployment.md.
   //
   // Never on the internet. No route, no custom domain, and `workers.dev` off:
-  // the only ways in are the Service Bindings declared by the admin console,
+  // the only ways in are the Service Bindings declared by the API gateway,
   // the mail Worker and each Project's `Intake` binding. That is what lets this
-  // Worker hold the D1 and R2 bindings while the admin console holds neither.
+  // Worker holds the D1 and R2 bindings while the API gateway holds neither.
   "workers_dev": false,
   "triggers": { "crons": ["*/5 * * * *"] },
 
@@ -29,11 +29,13 @@
     "NOREPLY_EMAIL": "notification@example.com",
     "REPORT_EMAIL": "report@example.com",
     "DEFAULT_SUPPORT_URL": "https://example.com/support",
-    // Where a notification's "open in admin" link points.
-    "ADMIN_ORIGIN": "https://admin.example.com",
-    // Web Push. The public key is handed to every browser that subscribes, so
+    // URL template owned by the deployment's operator client. The client may
+    // use any route; only the Ticket number placeholder is standardized.
+    "ADMIN_ORIGIN": "https://operator.example.com",
+    "OPERATOR_TICKET_URL_TEMPLATE": "https://operator.example.com/tickets/{ticketNumber}",
+    // Web Push. The public key is handed to every client that subscribes, so
     // it is a var; the private half is the Secret `VAPID_PRIVATE_KEY`. Empty
-    // means push is unavailable and the settings screen says so. Generate a
+    // means push is unavailable. Generate a
     // pair with `pnpm --filter @inquiry-platform/api run vapid:generate`.
     "VAPID_PUBLIC_KEY": "",
     "VAPID_SUBJECT": "mailto:support@example.com",
@@ -63,7 +65,7 @@
   "r2_buckets": [
     {
       // Private. Report evidence and support attachments. No public URL is ever
-      // generated; bytes are read back through the admin console behind Access.
+      // generated; bytes are read back through the operator API behind Access.
       "binding": "PRIVATE_FILES",
       "bucket_name": "inquiry-platform-files"
     }

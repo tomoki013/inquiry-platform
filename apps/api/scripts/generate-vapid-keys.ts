@@ -4,10 +4,10 @@
  *   VAPID_PUBLIC_KEY  → `vars` in wrangler.jsonc (not secret; browsers get it)
  *   VAPID_PRIVATE_KEY → `wrangler secret put VAPID_PRIVATE_KEY`
  *
- * Rotating the pair invalidates every existing subscription: browsers hold
- * the public key they subscribed with and the push services refuse a token
- * signed by anything else. Every device then has to be registered again from
- * the settings screen.
+ * Rotating the pair invalidates every existing subscription: clients hold the
+ * public key they subscribed with and the push services refuse a token signed
+ * by anything else. Every device then has to be registered again by an
+ * operator client.
  *
  * Self-contained on Node's Web Crypto rather than importing
  * `@inquiry-platform/notification/push`, because `node --experimental-strip-types` wants

@@ -12,7 +12,7 @@ flowchart TB
     Adapter["Moderation adapter\n（Project が実装）"]
   end
   subgraph Platform["inquiry-platform"]
-    Admin["apps/admin\nAccess JWT → 認可 → /api/*"]
+    Admin["apps/admin\nAPI-only gateway\nAccess JWT → 認可 → /api/*"]
     Core["apps/api\nTicket / Report / Support / Reply\nNotification / Audit"]
     Ingress["apps/mail-ingress"]
   end
@@ -27,13 +27,13 @@ flowchart TB
 ```
 
 - Core（`apps/api`）は route も `workers.dev` も持たない。到達手段は Service Binding だけで、呼び出し側は `@inquiry-platform/core` の型しか知らない。
-- Core には入口が 2 つある。`AdminCore`（基盤自身: 管理コンソールと mail-ingress）と `Intake`（Project 用: 受付だけ）。Project は `Intake` にだけ bind する（§7）。
+- Core には入口が 2 つある。`AdminCore`（基盤自身: API gateway と mail-ingress）と `Intake`（Project 用: 受付だけ）。Project は `Intake` にだけ bind する（§7）。
 - インターネットに面した受付口（Turnstile・client key・rate limit）は Project 側の Worker にある。基盤は公開 HTTP を持たないので、独自ドメインは要らない。Service Binding が使えない相手（別アカウントの Worker、iOS から直接など）が出たときに、`Intake` の前に公開 Worker を足す。
 - 基盤が知るのは「誰が・どの対象を・何の理由で」まで。対象が何であるか、どう消すかは Project が知る（Moderation adapter）。
 
 ## 2. Project
 
-- **Project の正は `apps` 表**（slug、名前、リンク、メール署名）。管理画面の「アプリ」は Project のこと。
+- **Project の正は `apps` 表**（slug、名前、リンク、メール署名）。API の `apps` resource は Project のこと。
 - `services` 表は Ticket 分類用の写しで、`apps` への INSERT トリガで同期される（`0006_ticket_core.sql`）。Project を持たない問い合わせは `platform_settings.default_service_id` の service に入る。未設定なら組み込みの `unassigned`。どの service にするかはデプロイ側の seed（`defaultServiceId`）で決める（`0010_default_service_setting.sql`）。
 - Tenant は導入しない。外部提供を始めるときに `Tenant → Project` へ拡張する。
 
@@ -72,8 +72,8 @@ Report の拡張項目は指示書の語彙と次の対応: `targetType`=`conten
 
 表示名・フォールバック署名・旧署名・メールロゴ・既定 Project はデプロイ設定の `BRANDING`（Core の構造化 var）だけに置く。`parseBranding`（`packages/core/src/branding.ts`）が検証し、不正・未設定なら中立な既定値（"Inquiry Platform"、署名なし、ロゴなし）になる。
 
-- Core: 通知メール件名、返信のフォールバック署名、HTML メールのロゴ、Push のタイトル。
-- 管理コンソール: `consoleProfile()` を `/api/session` で受け取り表示。PWA manifest と HTML の `<title>` は Worker が配信時に書き換える（ビルド成果物は "Admin" のみ）。
+- Core: 返信のフォールバック署名、HTML メールのロゴ、API の表示メタデータ。
+- API gateway: `consoleProfile()` などは JSON API として返す。HTML、PWA manifest、静的 asset は提供しない。画面、CLI、自動化は利用側が必要なら実装する。
 - Project ごとの署名は従来どおり `app_mail_settings`。
 
 ## 5. Moderation adapter
@@ -87,7 +87,7 @@ Report の拡張項目は指示書の語彙と次の対応: `targetType`=`conten
 
 ## 6. 認可
 
-`packages/core/src/authorization.ts` に権限表を置き、管理 Worker が全 `/api/*` に適用する（UI の表示制御は補助）。
+`packages/core/src/authorization.ts` に権限表を置き、API gateway が全 `/api/*` に適用する。クライアント側の表示制御は存在しても補助にすぎず、共通機能の認可を実装してはならない。
 
 | role | 権限 |
 |---|---|
@@ -116,7 +116,9 @@ if (r.ok) await inquiry.attachReportEvidence(r.value.reportId, { bytes, contentT
 - 読み取り・メモ・状態変更は `Intake` に存在しない。
 - SDK は依存ゼロ。Project は release tag を指定した git 依存で取り込む（[packages/sdk/README.md](../../packages/sdk/README.md)）。
 
+標準機能は API gateway/Core が唯一の実装である。利用者は `GET /api` の descriptor と SDK を使い、標準 path を Project 側で再実装しない。追加機能は標準 path と衝突しない独自 namespace / Worker に分離する。UI が標準機能を隠すことはできても、サーバー側の認証・認可・検証・状態遷移を置き換えることはできない。
+
 ## 決定事項
 
-- 3 Worker 分割（Core は非公開、管理コンソールは D1 / R2 を持たない）、Access JWT の Worker 側再検証、監査ログを変更と同一 batch に書く、署名付き削除、通報者・投稿者 ID の HMAC 仮名化、旧表 + トリガによる Ticket モデルへの移行、番号だけの通知、依存なしの Web Push。
+- 3 Worker 分割（Core は非公開、API gateway は D1 / R2 を持たない）、Access JWT の Worker 側再検証、監査ログを変更と同一 batch に書く、署名付き削除、通報者・投稿者 ID の HMAC 仮名化、旧表 + トリガによる Ticket モデルへの移行、番号だけの通知、依存なしの Web Push。
 - 運営者固有の値はコードにも参照設定にも置かず、デプロイ設定（`BRANDING`、`SIGNED_MODERATION`、Worker 名・資源名）と seed で与える。

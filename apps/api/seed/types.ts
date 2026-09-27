@@ -11,7 +11,7 @@ import type { CreateAppInput, ReplyTemplateCategory } from "@inquiry-platform/co
  *
  * Every field is optional, and every statement generated from it is a guarded
  * insert: re-running the seed creates nothing twice and never overwrites what
- * an operator has since edited in the admin console.
+ * an operator has since edited through the Operator API.
  */
 export interface DeploymentSeed {
   apps?: AppSeed[];
