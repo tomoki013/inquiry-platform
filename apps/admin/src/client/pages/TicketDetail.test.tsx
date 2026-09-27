@@ -16,8 +16,8 @@ const ticket: Ticket = {
   impact: "MEDIUM",
   urgency: "MEDIUM",
   priority_override: null,
-  service_id: "studio",
-  service_name: "tmkch.io",
+  service_id: "general",
+  service_name: "General",
   component_id: null,
   category_id: null,
   assignment_group_id: null,
@@ -44,7 +44,7 @@ const ticket: Ticket = {
   thread_id: null,
 };
 const masters: TicketMasters = {
-  services: [{ id: "studio", name: "tmkch.io", is_active: 1 }],
+  services: [{ id: "general", name: "General", is_active: 1 }],
   components: [],
   categories: [],
   groups: [],

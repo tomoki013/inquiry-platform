@@ -63,7 +63,7 @@ export interface ReportSubmission {
   targetType: string;
   targetId?: string;
   targetOwnerId?: string;
-  /** The container the target lives in, if any (a Remeet reunion, say). */
+  /** The container the target lives in, if any (a group or a conversation, say). */
   contextId?: string;
   /** A slug: `harassment`, `spam`, `inappropriate_content`. */
   reason: string;

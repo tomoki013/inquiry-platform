@@ -12,7 +12,7 @@ beforeEach(async () => {
   await seedApp(h);
   const report = await h.reports.create(
     {
-      appSlug: "remeet",
+      appSlug: "orbit",
       externalReportId: reportId,
       contentType: "wish",
       contentExternalId: "22222222-2222-4222-8222-222222222222",
@@ -95,7 +95,7 @@ it("routes an encoded Japanese subject with report ID through the real email par
   expect(result.newThread).toBe(false);
 });
 it("routes an older HTML-only quoted receipt through the real email parser", async () => {
-  const subject = "[Remeet] 通報の受付・対応について";
+  const subject = "[Orbit] 通報の受付・対応について";
   await h.db
     .prepare("UPDATE support_threads SET subject=? WHERE id=?")
     .bind(subject, threadId)

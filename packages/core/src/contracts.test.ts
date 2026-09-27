@@ -44,8 +44,8 @@ describe("replySubject", () => {
 
 describe("template variables", () => {
   it("fills what it knows", () => {
-    const rendered = renderTemplate("{{appName}} のサポートです", { appName: "Remeet" });
-    expect(rendered).toBe("Remeet のサポートです");
+    const rendered = renderTemplate("{{appName}} のサポートです", { appName: "Orbit" });
+    expect(rendered).toBe("Orbit のサポートです");
   });
 
   it("leaves an unknown name standing so the send can refuse it", () => {
@@ -61,12 +61,12 @@ describe("template variables", () => {
 
 describe("appUrlSchema", () => {
   it("takes https", () => {
-    expect(appUrlSchema().safeParse("https://tmkch.io").success).toBe(true);
+    expect(appUrlSchema().safeParse("https://example.com").success).toBe(true);
   });
 
   it("refuses plain http, credentials, and other schemes", () => {
-    expect(appUrlSchema().safeParse("http://tmkch.io").success).toBe(false);
-    expect(appUrlSchema().safeParse("https://user:pass@tmkch.io").success).toBe(false);
+    expect(appUrlSchema().safeParse("http://example.com").success).toBe(false);
+    expect(appUrlSchema().safeParse("https://user:pass@example.com").success).toBe(false);
     expect(appUrlSchema().safeParse("javascript:alert(1)").success).toBe(false);
   });
 
@@ -81,7 +81,7 @@ describe("appUrlSchema", () => {
 describe("assertSafeAuditMetadata", () => {
   it("takes ids, codes and counts", () => {
     expect(() =>
-      assertSafeAuditMetadata({ appSlug: "remeet", count: 3, threaded: true }),
+      assertSafeAuditMetadata({ appSlug: "orbit", count: 3, threaded: true }),
     ).not.toThrow();
   });
 
@@ -101,7 +101,7 @@ describe("assertSafeAuditMetadata", () => {
 describe("input schemas", () => {
   it("bounds a report snapshot", () => {
     const parsed = createReportInputSchema.safeParse({
-      appSlug: "remeet",
+      appSlug: "orbit",
       externalReportId: "abc",
       contentType: "wish",
       reasonCode: "spam",

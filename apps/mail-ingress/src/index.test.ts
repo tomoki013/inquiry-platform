@@ -51,7 +51,7 @@ class FakeMessage {
 
 const RAW = [
   "From: Someone <someone@example.com>",
-  "To: support@tmkch.io",
+  "To: support@example.com",
   "Subject: アプリで共有できません",
   "Message-ID: <first@example.com>",
   "Content-Type: text/plain; charset=utf-8",
@@ -67,7 +67,7 @@ function makeEnv(overrides: Partial<MailIngressEnv> = {}) {
   const fetchStub = vi.fn().mockResolvedValue(new Response(null, { status: 201 }));
   const env: MailIngressEnv = {
     ADMIN_CORE: { ingestInboundEmail: ingest, fetch: fetchStub } as unknown as AdminCoreStub,
-    SUPPORT_EMAIL: "support@tmkch.io",
+    SUPPORT_EMAIL: "support@example.com",
     MAX_STORED_BYTES: "5242880",
     SUPPORT_FORWARD_EMAIL: "operator@example.com",
     ...overrides,
@@ -82,7 +82,7 @@ const ctx = {
 let message: FakeMessage;
 
 beforeEach(() => {
-  message = new FakeMessage("someone@example.com", "support@tmkch.io", RAW);
+  message = new FakeMessage("someone@example.com", "support@example.com", RAW);
 });
 
 describe("email()", () => {
@@ -179,7 +179,7 @@ describe("email()", () => {
 
   it("skips a message with no usable sender", async () => {
     const { env, ingest } = makeEnv();
-    const headerless = new FakeMessage("", "support@tmkch.io", "not an email");
+    const headerless = new FakeMessage("", "support@example.com", "not an email");
     await worker.email(headerless as never, env, ctx);
 
     expect(ingest).not.toHaveBeenCalled();

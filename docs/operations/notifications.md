@@ -1,12 +1,12 @@
 # Support 通知・PWA — Notification Only
 
-最終更新: 2026-09-21。実装: `apps/api/src/domain/notification-service.ts`、`packages/notification`、`apps/admin/public/sw.js`。
+最終更新: 2026-09-27。実装: `apps/api/src/domain/notification-service.ts`、`packages/notification`、`apps/admin/public/sw.js`。
 
 ## 1. 責務分離
 
 ```text
 Support DB (Core D1)  = 問い合わせ・通報の唯一の正本
-Admin (admin.tmkch.io) = 内容を見る・対応する唯一の場所
+Admin console         = 内容を見る・対応する唯一の場所
 Email                  = 「新着がある」と知らせるだけ
 Web Push               = 同上をリアルタイムに
 AI                     = 明示的に許可された場合のみ（未実装。`aiProcessingAllowed` を足す余地だけ確保）
@@ -17,34 +17,30 @@ AI                     = 明示的に許可された場合のみ（未実装。`
 ## 2. フロー
 
 ```text
-User → /support (Turnstile) or app (client key)
-  → api /api/v1/support
-      Validate → recordSupportMessage() → Core.createSupportThread   ← ここで受付。失敗は 502
+User → Project のフォーム（Turnstile 等は Project 側）
+  → Project の Worker → Intake.submitContact                     ← ここで受付
   → Core: D1 batch (thread + message + audit) → trigger → tickets(INQUIRY)
   → Core: notify({ticketId, category}) を ctx.waitUntil で
       ├─ Email  : NOTIFICATION_EMAIL 宛に番号 + リンク
       └─ Push   : 有効な購読すべてに {type, ticketNumber, category, app, url}
 
-Remeet → api /remeet/v1/reports
-  → R2 outbox に書けたら 201（Core 不達でも受付。cron */5 で再送）
+アプリの通報 → Project の Worker → Intake.submitReport
   → Core.createReport → tickets(REPORT) → 同じ notify
 ```
 
 - **通知失敗 ≠ Ticket 作成失敗**。通知は batch 確定後に `ctx.waitUntil` で走り、`NotificationService.ticketCreated()` は投げない（`tests/notifications.test.ts` "notification failure is not ticket failure"）。
-- **冪等**: フォームの `requestId` は `provider_message_id = form-<requestId>` として保存され、同じ requestId の再送は既存 Ticket を返す（通知も 1 回）。
+- **冪等**: `idempotencyKey` / `externalReportId` が同じ再送は既存 Ticket を返す（通知も 1 回）。
 - 受信メールで新規スレッドができた場合は **Push のみ**（メール本体が `SUPPORT_FORWARD_EMAIL` へ転送されているため）。
 
 ## 3. メール（Notification Only）
 
-件名 `[Tomokichi Studio] 新しいお問い合わせがあります` / `新しい通報があります`。本文は 種別・対象アプリ・受付日時・`Ticket ID: #TK-000123`・`https://admin.tmkch.io/tickets/TK-000123` のみ。`Reply-To` 無し。冪等キー `ticket-notify-<ticketId>`。
-
-`apps/api` から本文入りメールを送っていた `support/template.ts`・`reports.ts#notifyOperator` は削除。`apps/api` の `RESEND_API_KEY` / `SUPPORT_TO_EMAIL` は manifest 期限警告（本文なし）にだけ残る。
+件名 `[<BRANDING.consoleName>] 新しいお問い合わせがあります` / `新しい通報があります`。本文は 種別・対象アプリ・受付日時・`Ticket ID: #TK-000123`・`<ADMIN_ORIGIN>/tickets/TK-000123` のみ。`Reply-To` 無し。冪等キー `ticket-notify-<ticketId>`。
 
 ## 4. 管理画面リンクと認証
 
 `/tickets/{ticketNumber}`。`TicketService.row()` は UUID でも `TK-` 番号でも引く。URL に番号以外は付けない（`safePath()` が `?` `#` を拒否）。
 
-未認証時は Cloudflare Access が `admin.tmkch.io/*` を止め、ログイン後に元 URL へ戻す。Worker 側も JWT を再検証して 401（`worker.test.ts` "still gates /tickets/TK-000123"）。例外は `/manifest.webmanifest` と `/icons/*` だけ（ブラウザが cookie 無しで取りに来るため。中身は名前と画像）。
+未認証時は Cloudflare Access が管理コンソールのホスト名全体を止め、ログイン後に元 URL へ戻す。Worker 側も JWT を再検証して 401（`worker.test.ts` "still gates /tickets/TK-000123"）。例外は `/manifest.webmanifest` と `/icons/*` だけ（ブラウザが cookie 無しで取りに来るため。中身は名前と画像）。
 
 ## 5. PWA
 
@@ -52,7 +48,7 @@ Remeet → api /remeet/v1/reports
 |---|---|
 | manifest | `apps/admin/public/manifest.webmanifest`（`standalone`、`id: "/"`、`crossorigin="use-credentials"` で参照） |
 | Service Worker | `apps/admin/public/sw.js`。**Cache Storage を一切使わない**。navigation 失敗時だけインライン HTML の「オフラインです」 |
-| アイコン | `public/icons/`（main サイトのロゴを流用） |
+| アイコン | `public/icons/`（差し替える場合はデプロイ前に置き換える） |
 | 登録 | `client/lib/pwa.ts` `registerServiceWorker()`（load 後、権限は要求しない） |
 | 更新 | `useServiceWorkerUpdate()` → 画面右下に「再読み込み」バナー → `SKIP_WAITING` → `controllerchange` で reload |
 | iOS | Home Screen に追加後のみ Push 可。設定画面がその旨を案内 |
@@ -66,7 +62,7 @@ Worker は `/sw.js` に `Cache-Control: no-cache` と `Service-Worker-Allowed: /
 - payload（復号後）:
 
 ```json
-{ "type": "support.ticket.created", "ticketNumber": "TK-000123", "category": "inquiry", "app": "Remeet", "url": "/tickets/TK-000123" }
+{ "type": "support.ticket.created", "ticketNumber": "TK-000123", "category": "inquiry", "app": "Example App", "url": "/tickets/TK-000123" }
 ```
 
 - `sw.js` の表示は固定文言 + `app • #番号`。payload に未知フィールドがあっても描画しない。
@@ -92,20 +88,20 @@ Notification permission は「Push通知を有効にする」ボタンの中で�
 
 | Worker | 名前 | 種別 | 意味 |
 |---|---|---|---|
-| admin-core | `ADMIN_ORIGIN` | var | リンク先 `https://admin.tmkch.io` |
-| admin-core | `VAPID_PUBLIC_KEY` | var | 65 byte P-256 点、base64url。ブラウザの `applicationServerKey` |
-| admin-core | `VAPID_SUBJECT` | var | `mailto:support@tmkch.io` |
-| admin-core | `VAPID_PRIVATE_KEY` | **secret** | 32 byte scalar、base64url |
-| admin-core | `NOTIFICATION_EMAIL` | **secret** | 運営の通知先。無ければメール通知なし |
-| admin-core | `MAIL_API_KEY` | secret（既存） | メール通知にも使う |
+| core | `ADMIN_ORIGIN` | var | リンク先。例 `https://admin.example.com` |
+| core | `VAPID_PUBLIC_KEY` | var | 65 byte P-256 点、base64url。ブラウザの `applicationServerKey` |
+| core | `VAPID_SUBJECT` | var | 例 `mailto:support@example.com` |
+| core | `VAPID_PRIVATE_KEY` | **secret** | 32 byte scalar、base64url |
+| core | `NOTIFICATION_EMAIL` | **secret** | 運営の通知先。無ければメール通知なし |
+| core | `MAIL_API_KEY` | secret（既存） | メール通知にも使う |
 
 生成: `pnpm --filter @inquiry-platform/api run vapid:generate`。**鍵を変えると全端末の再登録が必要**。
 
 ## 10. Cloudflare 側の手動設定
 
-1. `wrangler secret put VAPID_PRIVATE_KEY` / `NOTIFICATION_EMAIL`、`wrangler.jsonc` の `VAPID_PUBLIC_KEY` を埋めて Core を deploy → Web を deploy。
-2. Access: `admin.tmkch.io/manifest.webmanifest` と `admin.tmkch.io/icons/*` に **Bypass** ポリシーの Application を追加（無いとインストール画面のアイコンが Access のログイン HTML になる。ログインや通知タップの動作には影響しない）。
-3. `pnpm admin:migrate:remote`（`0009_notifications.sql`）。
+1. `wrangler secret put VAPID_PRIVATE_KEY` / `NOTIFICATION_EMAIL`、デプロイ設定の `VAPID_PUBLIC_KEY` を埋めて Core を deploy → 管理コンソールを deploy。
+2. Access: `<管理ホスト>/manifest.webmanifest` と `<管理ホスト>/icons/*` に **Bypass** ポリシーの Application を追加（無いとインストール画面のアイコンが Access のログイン HTML になる。ログインや通知タップの動作には影響しない）。
+3. `node scripts/deploy.mjs <deployment-dir> migrate`（`0009_notifications.sql`）。
 
 ## 11. 実装フェーズとの対応
 

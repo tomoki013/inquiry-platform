@@ -16,7 +16,7 @@ export class ModerationRegistry {
 
   /**
    * `SIGNED_MODERATION` maps a project slug to the name of the Service
-   * Binding that implements its adapter, e.g. `{ "remeet": "REMEET_MODERATION" }`.
+   * Binding that implements its adapter, e.g. `{ "my-app": "MY_APP_MODERATION" }`.
    * A name with no binding behind it still marks the project as signed-only.
    */
   static fromEnv(config: unknown, env: object): ModerationRegistry {

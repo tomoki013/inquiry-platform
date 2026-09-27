@@ -1,4 +1,4 @@
--- Tomokichi Studio Admin — initial schema.
+-- Inquiry platform — initial schema.
 --
 -- Forward-only. Nothing here drops, truncates or rewrites an existing table:
 -- this database is where the record of what was reported and what was done
@@ -9,7 +9,7 @@
 -- an autoincrementing integer would let one report id be guessed from another.
 
 -- ---------------------------------------------------------------- apps ----
--- One row per Studio app. Never deleted — `archived_at` is set instead, so the
+-- One row per Project (an app or site this deployment serves). Never deleted — `archived_at` is set instead, so the
 -- reports and threads that point here keep pointing at something.
 CREATE TABLE IF NOT EXISTS apps (
     id            TEXT PRIMARY KEY,
@@ -167,7 +167,7 @@ CREATE TABLE IF NOT EXISTS support_reply_sends (
 );
 
 -- ------------------------------------------------------ reply templates ----
--- `app_id IS NULL` means Studio-wide. `key` is the stable handle the seed
+-- `app_id IS NULL` means deployment-wide. `key` is the stable handle the seed
 -- re-runs against, so seeding twice creates nothing twice and never overwrites
 -- an edit made in the admin screen.
 CREATE TABLE IF NOT EXISTS reply_templates (
@@ -186,7 +186,7 @@ CREATE TABLE IF NOT EXISTS reply_templates (
 );
 CREATE INDEX IF NOT EXISTS idx_reply_templates_scope ON reply_templates(app_id, is_active, sort_order);
 
--- The Studio-wide default is the row whose `app_id` is NULL, which is why this
+-- The deployment-wide default is the row whose `app_id` is NULL, which is why this
 -- is a unique index over an expression rather than a primary key on app_id.
 CREATE TABLE IF NOT EXISTS app_mail_settings (
     app_id         TEXT REFERENCES apps(id),

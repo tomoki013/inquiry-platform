@@ -9,9 +9,8 @@
     "check": "wrangler types --env-interface CloudflareBindings --strict-vars=false && tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "deploy": "wrangler deploy",
-    "migrate:local": "wrangler d1 migrations apply tomokichi-admin --local",
-    "migrate:remote": "wrangler d1 migrations apply tomokichi-admin --remote",
+    "migrate:local": "wrangler d1 migrations apply DB --local",
+    "migrate:remote": "wrangler d1 migrations apply DB --remote",
     "seed": "node --experimental-strip-types scripts/seed.ts",
     "vapid:generate": "node --experimental-strip-types scripts/generate-vapid-keys.ts",
     "cf-typegen": "wrangler types --env-interface CloudflareBindings --strict-vars=false"

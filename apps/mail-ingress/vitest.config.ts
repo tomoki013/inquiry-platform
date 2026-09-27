@@ -7,7 +7,7 @@ export default defineConfig({
       wrangler: { configPath: "./wrangler.jsonc" },
       miniflare: {
         /**
-         * `tomokichi-admin-core` is a real Worker in the account, not something
+         * `inquiry-core` is a real Worker in the account, not something
          * miniflare can conjure — without this the runtime refuses to start
          * because the binding points at a service it cannot find.
          *

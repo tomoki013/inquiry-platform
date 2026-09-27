@@ -150,7 +150,7 @@ describe("Ticket operations", () => {
     const report = value(
       await h.reports.create(
         {
-          appSlug: "remeet",
+          appSlug: "orbit",
           externalReportId: "report-1",
           contentType: "wish",
           reasonCode: "spam",
@@ -277,7 +277,7 @@ describe("Ticket operations", () => {
     for (const t of triggers.results) await h.db.prepare(`DROP TRIGGER ${t.name}`).run();
     const a = value<SupportThreadDetail>(
       await h.support.createThread(
-        { source: "web_form", appSlug: "remeet", subject: "old", bodyText: "legacy body" },
+        { source: "web_form", appSlug: "orbit", subject: "old", bodyText: "legacy body" },
         appActor,
       ),
     );
@@ -368,7 +368,7 @@ it("requires signed moderation instead of closing a report with a label", async 
   const report = value(
     await h.reports.create(
       {
-        appSlug: "remeet",
+        appSlug: "orbit",
         externalReportId: "pending-report",
         contentType: "wish",
         reasonCode: "spam",
@@ -394,12 +394,12 @@ it("requires signed moderation instead of closing a report with a label", async 
 
 it("lets a project without a moderation adapter close a report with a label", async () => {
   const h = await harness();
-  await seedApp(h, "colorvia");
+  await seedApp(h, "prism");
   const tickets = new TicketService(h.db, h.moderation);
   const report = value(
     await h.reports.create(
       {
-        appSlug: "colorvia",
+        appSlug: "prism",
         externalReportId: "label-closable",
         contentType: "spot",
         reasonCode: "spam",
@@ -440,7 +440,7 @@ it("maps every legacy support status without changing the source records", async
       await h.support.createThread(
         {
           source: "web_form",
-          appSlug: "remeet",
+          appSlug: "orbit",
           subject: `old-${oldStatus}`,
           bodyText: "retained",
         },
@@ -532,7 +532,7 @@ it("leaves failed/no-address receipts unanswered, then records the successful re
   await seedApp(h);
   const tickets = new TicketService(h.db, h.moderation);
   const input = {
-    appSlug: "remeet",
+    appSlug: "orbit",
     externalReportId: "failed-receipt",
     contentType: "wish",
     reasonCode: "spam",
@@ -564,7 +564,7 @@ it("backfills an earlier receipt safely even when a manual response was already 
   const report = value(
     await h.reports.create(
       {
-        appSlug: "remeet",
+        appSlug: "orbit",
         externalReportId: "backfill",
         contentType: "wish",
         reasonCode: "spam",

@@ -9,7 +9,6 @@
     "check": "wrangler types --env-interface CloudflareBindings --strict-vars=false && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "deploy": "wrangler deploy",
     "cf-typegen": "wrangler types --env-interface CloudflareBindings --strict-vars=false"
   },
   "dependencies": {

@@ -57,7 +57,7 @@ function stubFetch(overrides: Record<string, unknown> = {}): void {
         overrides.templates ?? [
           {
             id: "tpl-1",
-            key: "remeet_general",
+            key: "orbit_general",
             name: "一般返信",
             category: "general",
             body: "",

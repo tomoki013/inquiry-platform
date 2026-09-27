@@ -1,9 +1,9 @@
 /**
  * Turning an app's own user id into something this database can hold.
  *
- * Remeet's author ids are CloudKit record names that mean something inside
- * Remeet. Storing them here would put a second copy of Remeet's identity graph
- * in a system whose only job is moderation, and a plain SHA-256 would not help:
+ * An app's author ids are its own account or record identifiers, and they
+ * mean something inside that app. Storing them here would put a second copy of
+ * the app's identity graph in a system whose only job is moderation, and a plain SHA-256 would not help:
  * anybody with the original list — which the app backend has — could hash it
  * and match every row.
  *

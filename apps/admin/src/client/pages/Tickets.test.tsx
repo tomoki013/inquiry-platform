@@ -47,13 +47,13 @@ it("defaults to open tickets and switches queues without retaining a closed stat
   expect(screen.getByRole("button", { name: "すべて" })).toHaveAttribute("aria-pressed", "true");
 });
 it("keeps report/service filters while resetting pagination on a one-tap queue change", async () => {
-  mount("/reports?status=CLOSED&service_id=remeet&offset=50", true);
+  mount("/reports?status=CLOSED&service_id=orbit&offset=50", true);
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "未完了" }));
   await waitFor(() => expect(requests.at(-1)?.get("queue")).toBe("OPEN"));
   const query = requests.at(-1);
   expect(query?.get("type")).toBe("REPORT");
-  expect(query?.get("service_id")).toBe("remeet");
+  expect(query?.get("service_id")).toBe("orbit");
   expect(query?.has("status")).toBe(false);
   expect(query?.has("offset")).toBe(false);
 });

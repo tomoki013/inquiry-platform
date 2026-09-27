@@ -133,9 +133,12 @@ export async function reset(): Promise<void> {
     "audit_logs",
     "apps",
     "services",
+    "platform_settings",
   ];
   await testEnv.DB.batch(tables.map((table) => testEnv.DB.prepare(`DELETE FROM ${table}`)));
-  await testEnv.DB.prepare("INSERT INTO services VALUES ('studio','tmkch.io','tmkch-io',1)").run();
+  await testEnv.DB.prepare(
+    "INSERT INTO services VALUES ('unassigned','Unassigned','unassigned',1)",
+  ).run();
 }
 
 /**
@@ -242,8 +245,9 @@ export async function harness(
   const templateRepo = new TemplateRepository(db);
   const auditRepo = new AuditRepository(db);
   const mail = options.mail ?? new FakeMailProvider();
-  // Remeet, as in production: listed, with or without a reachable adapter.
-  const moderation = new ModerationRegistry(new Map([["remeet", options.moderation]]));
+  // A project whose reports need a signed decision: listed, with or without
+  // a reachable adapter.
+  const moderation = new ModerationRegistry(new Map([["orbit", options.moderation]]));
   const push = options.push ?? new FakePushTransport();
   const notifications = new NotificationService(
     db,
@@ -328,7 +332,7 @@ export function expectOk<T>(result: { ok: boolean } & Record<string, unknown>): 
   return (result as unknown as { value: T }).value;
 }
 
-export async function seedApp(h: Harness, slug = "remeet"): Promise<string> {
+export async function seedApp(h: Harness, slug = "orbit"): Promise<string> {
   const created = await h.apps.create(
     { slug, name: slug, platform: "ios", status: "testflight" },
     admin,

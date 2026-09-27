@@ -15,7 +15,7 @@ import { createApp } from "./index";
 let privateKey: CryptoKey;
 let jwks: { keys: unknown[] };
 
-const AUD = "aud-tag-for-tomokichi-admin";
+const AUD = "aud-tag-for-inquiry-admin";
 let domainCounter = 0;
 
 /** A fresh team domain per test: `createRemoteJWKSet` is cached per domain, on

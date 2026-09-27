@@ -1,17 +1,19 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "tomokichi-admin-core",
+  "name": "inquiry-core",
   "main": "src/index.ts",
   "compatibility_date": "2026-07-23",
 
-  // The Worker name is the one tomokichi-studio deployed before this
-  // repository existed, kept so every Service Binding and the D1 / R2 below stay
-  // where they are. Renaming is a separate, later change.
+  // This file is the reference configuration: it is what local development and
+  // the tests run against, and every value below is a placeholder. A real
+  // deployment keeps its own copy of this file (its Worker names, D1 id,
+  // addresses and BRANDING) outside this repository and deploys with
+  // `wrangler deploy --config <that file>`. See docs/operations/deployment.md.
   //
   // Never on the internet. No route, no custom domain, and `workers.dev` off:
   // the only ways in are the Service Bindings declared by the admin console,
-  // the mail Worker and `tomokichi-api`. That is what lets this Worker hold the D1 and
-  // R2 bindings while Admin Web holds neither.
+  // the mail Worker and each Project's `Intake` binding. That is what lets this
+  // Worker hold the D1 and R2 bindings while the admin console holds neither.
   "workers_dev": false,
   "triggers": { "crons": ["*/5 * * * *"] },
 
@@ -20,47 +22,40 @@
   },
 
   "vars": {
-    // Addresses live here, not in code, so a Workspace migration is a config
+    // Addresses live here, not in code, so moving mailboxes is a config
     // change. The operator's own forwarding address is a Secret, not a var.
-    "SUPPORT_EMAIL": "support@tmkch.io",
-    "SUPPORT_FROM_NAME": "Tomokichi Studio Support",
-    "NOREPLY_EMAIL": "notification@tmkch.io",
-    "REPORT_EMAIL": "report@tmkch.io",
-    "DEFAULT_SUPPORT_URL": "https://tmkch.io/support",
+    "SUPPORT_EMAIL": "support@example.com",
+    "SUPPORT_FROM_NAME": "Support",
+    "NOREPLY_EMAIL": "notification@example.com",
+    "REPORT_EMAIL": "report@example.com",
+    "DEFAULT_SUPPORT_URL": "https://example.com/support",
     // Where a notification's "open in admin" link points.
-    "ADMIN_ORIGIN": "https://admin.tmkch.io",
+    "ADMIN_ORIGIN": "https://admin.example.com",
     // Web Push. The public key is handed to every browser that subscribes, so
     // it is a var; the private half is the Secret `VAPID_PRIVATE_KEY`. Empty
     // means push is unavailable and the settings screen says so. Generate a
     // pair with `pnpm --filter @inquiry-platform/api run vapid:generate`.
-    "VAPID_PUBLIC_KEY": "BH_x4ecKrNnv73trqmRzVywqkJWYyVIRySWdiK8XP8GQYF1UlSFcO5jXYoZeWIPasjEcCaULEdS58hmLWmWbES0",
-    "VAPID_SUBJECT": "mailto:support@tmkch.io",
+    "VAPID_PUBLIC_KEY": "",
+    "VAPID_SUBJECT": "mailto:support@example.com",
     // Everything this deployment calls itself. Code reads it through
     // `parseBranding` (packages/core/src/branding.ts) and never names it.
+    // Every field is optional; see docs/architecture/overview.md §4.
     "BRANDING": {
-      "consoleName": "Tomokichi Studio",
-      "consoleShortName": "Tomokichi",
-      "defaultSignature": "Tomokichi Studio\n髙木友喜 / Tomoki Takagi\n────────────────────────\nhttps://tmkch.io\nsupport@tmkch.io  ·  080-6648-1475",
-      "legacySignatures": [
-        "────────────────────────\nTomokichi Studio\n髙木 友喜\n\nWeb: https://tmkch.io\nEmail: support@tmkch.io\nTEL: 080-6648-1475\n────────────────────────"
-      ],
-      "mailLogo": { "url": "https://tmkch.io/assets/mail-logo.png", "alt": "Tomokichi Studio" },
-      "defaultProjectId": "studio"
+      "consoleName": "Inquiry Platform"
     },
     // Projects whose reported content is acted on by a signed decision through
-    // their own adapter: project slug → Service Binding name (below).
-    "SIGNED_MODERATION": { "remeet": "REMEET_MODERATION" }
+    // their own adapter: project slug → Service Binding name, for example
+    // `{ "my-app": "MY_APP_MODERATION" }` together with a `services` entry
+    // binding `MY_APP_MODERATION` to the Worker that implements the adapter.
+    "SIGNED_MODERATION": {}
   },
-
-  "services": [
-    { "binding": "REMEET_MODERATION", "service": "tomokichi-api", "entrypoint": "RemeetModeration" }
-  ],
 
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "tomokichi-admin",
-      "database_id": "303d025d-51a8-4a90-9a19-97a08d715ec3",
+      "database_name": "inquiry-platform",
+      // Placeholder. `wrangler d1 create <name>` prints the real id.
+      "database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "migrations"
     }
   ],
@@ -68,9 +63,9 @@
   "r2_buckets": [
     {
       // Private. Report evidence and support attachments. No public URL is ever
-      // generated; bytes are read back through Admin Web behind Access.
+      // generated; bytes are read back through the admin console behind Access.
       "binding": "PRIVATE_FILES",
-      "bucket_name": "tomokichi-admin-files"
+      "bucket_name": "inquiry-platform-files"
     }
   ]
 }

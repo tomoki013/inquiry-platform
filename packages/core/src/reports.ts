@@ -3,9 +3,9 @@ import { z } from "zod";
 /**
  * Content reports, from any registered app.
  *
- * The vocabulary here is deliberately wider than Remeet's: `reasonCode` and
- * `contentType` are validated as slugs rather than against Remeet's own enums,
- * because Colorvia and Yohaku will report different things and a shared table
+ * The vocabulary here is deliberately wider than any one app's: `reasonCode`
+ * and `contentType` are validated as slugs rather than against an app's own
+ * enums, because different apps report different things and a shared table
  * that only accepts one app's words is a table the next app cannot use. The
  * app's own backend is where its enum is enforced.
  */
@@ -77,7 +77,7 @@ export const createReportInputSchema = z.object({
   appSlug: z.string().min(1).max(64),
   /** The id the reporting app minted. Unique — see `createReport`. */
   externalReportId: z.string().trim().min(1).max(200),
-  /** The app's own container for the reported thing (a Remeet reunion, say).
+  /** The app's own container for the reported thing (a group or a conversation, say).
    * Opaque here. */
   contextExternalId: optionalText(200),
   contentType: slugish,

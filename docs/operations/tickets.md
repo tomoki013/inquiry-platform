@@ -13,7 +13,7 @@ Admin Core owns D1 and private R2. Admin Web is authenticated on every route by 
 | report_events / audit_logs | preserved, projected into the unified timeline |
 | support_drafts / support_reply_sends / mail headers | retained in mail transport compatibility layer |
 | report_attachments / support_attachments | retained; authenticated access only |
-| apps | services with stable app IDs; unknown/Studio correspondence uses tmkch.io |
+| apps | services with stable app IDs; correspondence with no app uses the default service (`platform_settings.default_service_id`, else `unassigned`) |
 | support open / pending_user | NEW / WAITING_CUSTOMER |
 | support resolved / spam | CLOSED + RESOLVED / SPAM |
 | reports open / reviewing / actioned / closed | NEW / TRIAGE / RESOLVED / CLOSED |
@@ -49,7 +49,7 @@ Ticket UUID is separate from a monotonic TK number. No hard-delete endpoint. Mut
 - ACK records the first acknowledgement once. Start work, choose customer/internal wait, and record the next action and deadline. Deadline inputs use the operator's device timezone; day filters explicitly use UTC.
 - Resolve with a result, then close. To edit a closed ticket, reopen to IN_PROGRESS. A customer reply to a waiting/resolved/closed ticket resumes work and adds a status/reopen event. There is no automatic close scheduler in this release.
 - A missing requester email shows an internal-note-only composer. Public replies retain existing idempotency, Message-ID/In-Reply-To/References, report Reply-To routing, automatic signature insertion and signature-free drafts. Replying does not automatically choose a waiting status.
-- Remeet moderation still requires the signed content action. Select deletion or no action there; no action publishes the manifest that restores report-hidden content in the app. A status/resolution label alone cannot perform or bypass that operation.
+- A Project registered in `SIGNED_MODERATION` still requires the signed content action. Select deletion or no action there; "no action" lets the Project undo whatever it hid while the report was open. A status/resolution label alone cannot perform or bypass that operation.
 - Relations are available across requesters. Merge requires matching requester email, a nonterminal canonical target, and completed moderation on any source report. Original messages stay on the source; the target links that history and receives subsequent replies. Search can find merged ticket numbers; normal queues hide merged sources.
 - Operational service/type classification does not rewrite original evidence or the original mail transport's product branding.
 - Settings can maintain services, components, type-scoped categories, groups, assignees and SLA goals. Deactivate master records rather than deleting them. This does not grant login access: Cloudflare Access remains the authorization boundary.
@@ -73,43 +73,12 @@ All `/api/tickets/*` endpoints are on Admin Web behind Access, including masters
 
 The existing support reply/draft/template and authenticated attachment routes remain as the mail/evidence transport. Legacy lifecycle mutation routes return 409 so they cannot bypass the Ticket service. There is no ticket/event/message delete API. Notes are written by a service that has no mail provider. Important service failures emit structured `admin_core.error` logs with operation scope; validation/conflict failures have explicit API error codes.
 
-## Migration rehearsal result — 2026-09-18
-
-A private production export was restored locally and migration 0006 was applied twice. Original rows were compared in full (not just their counts); no legacy rows changed. New rows were identical on replay.
-
-| Data | Before | After |
-| --- | ---: | ---: |
-| Legacy support threads | 16 | 16 |
-| Legacy reports | 4 | 4 |
-| Legacy support messages | 26 | 26 |
-| Legacy report events | 17 | 17 |
-| Legacy audit entries | 55 | 55 |
-| Unified tickets | — | 18 |
-| Ticket source mappings | — | 20 |
-| Ticket messages | — | 26 |
-| Ticket events | — | 90 |
-| Ticket report details | — | 4 |
-| Ticket relations | — | 1 |
-
-Missing source mappings/messages, broken report links, internal messages with recipients and terminal tickets without a resolution: all zero. Foreign-key check passed. Separate local Wrangler migration execution succeeded; the test configuration also validates Wrangler's SQL splitter because CASE/END spacing inside triggers is significant to that splitter.
-
-These are rehearsal counts, not a claim that production migration has run. No backup contents are checked into Git.
-
 ## Deployment and recovery
 
-1. Export `tomokichi-admin` to a private backup and record current Worker versions. Run the rehearsal and the relevant Core/Web/API/mail tests.
+1. Export the D1 database to a private backup and record current Worker versions. Run the rehearsal and the relevant Core/Web/API/mail tests.
 2. Apply D1 migration 0006 before deploying any code that reads the new tables. The existing ingestion code continues writing legacy records; transactional triggers populate the new model.
 3. Deploy Admin Core, then Admin Web. Existing API and mail ingress contracts remain compatible.
 4. Compare legacy/source/message counts and foreign keys remotely. Check unauthenticated ticket APIs are denied, and check authenticated queue/detail rendering. Do not send customer emails as a deployment test.
 5. If the new UI needs rollback, disable operator mutations while investigating. Retain additive tables/triggers and deploy a corrected Worker. Do not drop new tables or blindly restore the pre-migration export after new messages have arrived; that would discard later data. Restoring old admin editing routes also requires reconciliation of lifecycle edits, so prefer a forward fix.
 
 The initial release intentionally excludes automation, AI replies, on-call scheduling, complex SLA calendars and incident-specific root-cause forms. INCIDENT tickets, relations and manual follow-up are available on the shared core.
-
-## Production release — 2026-09-18
-
-Migration 0006 completed remotely (75 statements). Post-migration counts matched the rehearsal: 16 legacy conversations, 4 reports, 26 legacy/new messages, 18 tickets, 20 source mappings and 90 events. Missing support/report/message mappings, internal-note recipients and terminal tickets without resolutions were all zero; `foreign_key_check` returned no violations.
-
-- Admin Core version: `d9d8d0ff-a15f-47f0-b216-d8cdaf341354`
-- Admin Web version: `c831d31e-494d-4e5a-bbcf-cd34dcc50224`
-- Unauthenticated production ticket endpoints were denied. The browser reaches Cloudflare Access login; authenticated production screen verification is pending operator login.
-- Local and automated verification: 356 tests passed across Core, Admin Worker/UI, public API, contracts, mail provider and ingress; related typechecks/builds passed. Browser lifecycle verification used isolated local test data and sent no emails.

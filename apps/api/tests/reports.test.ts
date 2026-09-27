@@ -13,7 +13,7 @@ import {
 let h: Harness;
 
 const report = (overrides: Record<string, unknown> = {}) => ({
-  appSlug: "remeet",
+  appSlug: "orbit",
   externalReportId: "11111111-1111-4111-8111-111111111111",
   contentType: "waitingMemory",
   reasonCode: "harassment",
@@ -40,7 +40,7 @@ describe("createReport", () => {
 
     const detail = expectOk<ReportDetail>((await h.reports.detail(created.reportId)) as never);
     expect(detail.status).toBe("open");
-    expect(detail.appSlug).toBe("remeet");
+    expect(detail.appSlug).toBe("orbit");
     expect(detail.snapshotText).toBe("報告された本文");
     expect(detail.events.map((event) => event.eventType)).toEqual(["created"]);
   });
@@ -149,7 +149,7 @@ describe("status transitions", () => {
     ).reportId;
   });
 
-  it("requires a signed content decision instead of merely marking Remeet actioned or closed", async () => {
+  it("requires a signed content decision instead of merely marking Orbit actioned or closed", async () => {
     expect((await h.reports.changeStatus({ reportId, to: "closed" }, admin)).ok).toBe(false);
     expect((await h.reports.changeStatus({ reportId, to: "reviewing" }, admin)).ok).toBe(true);
     expect((await h.reports.changeStatus({ reportId, to: "actioned" }, admin)).ok).toBe(false);
@@ -220,7 +220,7 @@ describe("report email", () => {
     expect(h.mail.sendCount).toBe(1);
     expect(h.mail.sent[0]?.to).toBe("reporter@example.com");
     expect(h.mail.sent[0]?.subject).toBe(
-      `[remeet] 通報の受付・対応について [通報ID:${input.externalReportId}]`,
+      `[orbit] 通報の受付・対応について [通報ID:${input.externalReportId}]`,
     );
     expect(h.mail.sent[0]?.text).toContain(TEST_BRANDING.defaultSignature);
     expect(h.mail.sent[0]?.text).not.toContain("報告された本文");
@@ -251,7 +251,7 @@ describe("report email", () => {
     );
     expect(reply.ok).toBe(true);
     expect(h.mail.sent[1]?.subject).toBe(
-      `Re: [remeet] 通報の受付・対応について [通報ID:${input.externalReportId}]`,
+      `Re: [orbit] 通報の受付・対応について [通報ID:${input.externalReportId}]`,
     );
     expect(h.mail.sent[1]?.inReplyTo).toBe("<reply@example.com>");
     expect(h.mail.sent[1]?.text).toContain(`受付ID: ${input.externalReportId}`);
@@ -410,12 +410,12 @@ describe("report reply correlation without provider headers", () => {
     const first = await create();
     await h.db
       .prepare("UPDATE support_threads SET subject=? WHERE id=?")
-      .bind("[Remeet] 通報の受付・対応について", first)
+      .bind("[Orbit] 通報の受付・対応について", first)
       .run();
     const result = await h.support.ingestInboundEmail(
       {
         from: "reporter@example.com",
-        subject: "Re: [Remeet] 通報の受付・対応について",
+        subject: "Re: [Orbit] 通報の受付・対応について",
         bodyText:
           "追記です\n> 受付ID: 11111111-1111-4111-8111-111111111111\n> ありがとうございます",
       },
@@ -455,8 +455,8 @@ describe("author history", () => {
       report({ externalReportId: "other-author", authorRefHash: "someone-else" }),
       appActor,
     );
-    await seedApp(h, "yohaku");
-    await h.reports.create(report({ externalReportId: "other-app", appSlug: "yohaku" }), admin);
+    await seedApp(h, "margin");
+    await h.reports.create(report({ externalReportId: "other-app", appSlug: "margin" }), admin);
     const detail = expectOk<ReportDetail>((await h.reports.detail(first.reportId)) as never);
     expect(detail.authorHistory).toMatchObject({ total: 2, uniqueReporters: 2, actioned: 0 });
     expect(detail.authorHistory?.recent.map((item) => item.id).sort()).toEqual(
