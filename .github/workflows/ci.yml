@@ -8,9 +8,9 @@ on:
 permissions:
   contents: read
 
-# Checks only. There is deliberately no deploy workflow here yet: until the
-# cutover in docs/operations/cutover.md, tomokichi-studio is the only
-# repository that deploys these Workers.
+# Checks only. This repository has no deployment of its own: each deployment
+# deploys a tagged release with its own configuration
+# (docs/operations/deployment.md).
 jobs:
   check:
     name: Lint, check, test, build

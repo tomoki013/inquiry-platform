@@ -117,16 +117,16 @@ describe("ingestInboundEmail", () => {
   });
 
   it("links a thread to an app when the mail Worker knew which one", async () => {
-    await seedApp(h, "remeet");
+    await seedApp(h, "orbit");
     const result = expectOk<IngestInboundEmailResult>(
-      (await h.support.ingestInboundEmail(inbound({ appSlug: "remeet" }), {
+      (await h.support.ingestInboundEmail(inbound({ appSlug: "orbit" }), {
         type: "email",
       })) as never,
     );
     const thread = expectOk<SupportThreadDetail>(
       (await h.support.detail(result.threadId)) as never,
     );
-    expect(thread.appSlug).toBe("remeet");
+    expect(thread.appSlug).toBe("orbit");
   });
 });
 
@@ -141,7 +141,7 @@ describe("createThread from the support form", () => {
           subject: "[bug] req-1",
           bodyText: "落ちます",
         },
-        { type: "app", id: "tomokichi-api" },
+        { type: "app", id: "project-api" },
       )) as never,
     );
     expect(thread.requesterName).toBe("ともきち");
@@ -163,7 +163,7 @@ describe("createThread from the support form", () => {
           subject: "[bug] req-2",
           bodyText: "返信は要りませんが、落ちます。",
         },
-        { type: "app", id: "tomokichi-api" },
+        { type: "app", id: "project-api" },
       )) as never,
     );
     expect(thread.requesterEmail).toBeUndefined();
@@ -181,7 +181,7 @@ describe("createThread from the support form", () => {
     const thread = expectOk<SupportThreadDetail>(
       (await h.support.createThread(
         { source: "web_form", requesterEmail: "", subject: "[bug] req-3", bodyText: "だめです" },
-        { type: "app", id: "tomokichi-api" },
+        { type: "app", id: "project-api" },
       )) as never,
     );
     const result = await h.reply.send(

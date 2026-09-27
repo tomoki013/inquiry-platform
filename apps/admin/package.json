@@ -9,7 +9,6 @@
     "check": "wrangler types --env-interface CloudflareBindings --strict-vars=false && tsc --noEmit",
     "test": "vitest run --config vitest.worker.config.ts && vitest run",
     "test:watch": "vitest",
-    "deploy": "pnpm build && wrangler deploy",
     "cf-typegen": "wrangler types --env-interface CloudflareBindings --strict-vars=false"
   },
   "dependencies": {

@@ -176,5 +176,5 @@ async function forward(message: InboundMessage, env: MailIngressEnv): Promise<vo
  * everything else is in the admin screen, behind Access.
  */
 function log(event: string, fields: Record<string, string | number | boolean>): void {
-  console.log(JSON.stringify({ worker: "tomokichi-mail-ingress", event, ...fields }));
+  console.log(JSON.stringify({ worker: "mail-ingress", event, ...fields }));
 }

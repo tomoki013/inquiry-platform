@@ -5,12 +5,12 @@ import { admin, appActor, expectOk, type Harness, harness } from "./harness";
 let h: Harness;
 
 const app = (overrides: Record<string, unknown> = {}) => ({
-  slug: "colorvia",
-  name: "Colorvia",
+  slug: "prism",
+  name: "Prism",
   platform: "ios",
   status: "live",
-  bundleId: "io.tmkch.colorvia",
-  publicUrl: "https://colorvia.tmkch.io",
+  bundleId: "com.example.prism",
+  publicUrl: "https://prism.example.com",
   ...overrides,
 });
 
@@ -21,8 +21,8 @@ beforeEach(async () => {
 describe("apps", () => {
   it("creates one and reads it back", async () => {
     const created = expectOk<AppDetail>((await h.apps.create(app(), admin)) as never);
-    expect(created.slug).toBe("colorvia");
-    expect(created.bundleId).toBe("io.tmkch.colorvia");
+    expect(created.slug).toBe("prism");
+    expect(created.bundleId).toBe("com.example.prism");
     expect(created.openReports).toBe(0);
   });
 
@@ -40,11 +40,11 @@ describe("apps", () => {
   });
 
   it("refuses a URL that is not https and one carrying a credential", async () => {
-    expect((await h.apps.create(app({ publicUrl: "http://colorvia.tmkch.io" }), admin)).ok).toBe(
+    expect((await h.apps.create(app({ publicUrl: "http://prism.example.com" }), admin)).ok).toBe(
       false,
     );
     expect(
-      (await h.apps.create(app({ publicUrl: "https://a:b@colorvia.tmkch.io" }), admin)).ok,
+      (await h.apps.create(app({ publicUrl: "https://a:b@prism.example.com" }), admin)).ok,
     ).toBe(false);
   });
 
@@ -54,8 +54,8 @@ describe("apps", () => {
       (await h.apps.update(created.id, { status: "paused" }, admin)) as never,
     );
     expect(updated.status).toBe("paused");
-    expect(updated.name).toBe("Colorvia");
-    expect(updated.bundleId).toBe("io.tmkch.colorvia");
+    expect(updated.name).toBe("Prism");
+    expect(updated.bundleId).toBe("com.example.prism");
   });
 
   /**
@@ -67,7 +67,7 @@ describe("apps", () => {
     const created = expectOk<AppDetail>((await h.apps.create(app(), admin)) as never);
     await h.reports.create(
       {
-        appSlug: "colorvia",
+        appSlug: "prism",
         externalReportId: "ext-1",
         contentType: "post",
         reasonCode: "spam",
@@ -103,7 +103,7 @@ describe("apps", () => {
   it("counts what is outstanding per app", async () => {
     const created = expectOk<AppDetail>((await h.apps.create(app(), admin)) as never);
     await h.reports.create(
-      { appSlug: "colorvia", externalReportId: "ext-2", contentType: "post", reasonCode: "spam" },
+      { appSlug: "prism", externalReportId: "ext-2", contentType: "post", reasonCode: "spam" },
       appActor,
     );
     const summaries = expectOk<AppSummary[]>(
@@ -169,11 +169,11 @@ describe("dashboard", () => {
   it("counts open and reviewing reports separately", async () => {
     await h.apps.create(app(), admin);
     const first = await h.reports.create(
-      { appSlug: "colorvia", externalReportId: "e1", contentType: "post", reasonCode: "spam" },
+      { appSlug: "prism", externalReportId: "e1", contentType: "post", reasonCode: "spam" },
       appActor,
     );
     await h.reports.create(
-      { appSlug: "colorvia", externalReportId: "e2", contentType: "post", reasonCode: "spam" },
+      { appSlug: "prism", externalReportId: "e2", contentType: "post", reasonCode: "spam" },
       appActor,
     );
     if (first.ok)
@@ -190,7 +190,7 @@ describe("activity", () => {
   it("gathers everything belonging to one app", async () => {
     const created = expectOk<AppDetail>((await h.apps.create(app(), admin)) as never);
     await h.reports.create(
-      { appSlug: "colorvia", externalReportId: "e3", contentType: "post", reasonCode: "spam" },
+      { appSlug: "prism", externalReportId: "e3", contentType: "post", reasonCode: "spam" },
       appActor,
     );
 

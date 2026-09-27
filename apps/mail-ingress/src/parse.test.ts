@@ -51,7 +51,7 @@ describe("parseInboundEmail", () => {
       raw(
         [
           "From: Someone <someone@example.com>",
-          "To: support@tmkch.io",
+          "To: support@example.com",
           "Subject: Test subject",
           "Message-ID: <first@example.com>",
           "Content-Type: text/plain; charset=utf-8",

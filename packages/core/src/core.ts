@@ -236,7 +236,7 @@ export type AdminCoreStub = AdminCoreApi & { fetch: typeof fetch };
  * Paths on Admin Core's `fetch()` handler.
  *
  * Only bytes go over HTTP: RPC cannot stream a ten-megabyte photo, and
- * base64-in-JSON is exactly what the Remeet report route already refuses to do.
+ * base64-in-JSON is exactly what a Project's report route should refuse to do.
  * None of these is reachable from the internet — Admin Core has no route and no
  * `workers.dev` in production, so the only way in is a Service Binding.
  */
@@ -256,5 +256,5 @@ export const INTERNAL_PATHS = {
 export const INTERNAL_ORIGIN = "https://admin-core.internal";
 
 export const ATTACHMENT_FILENAME_HEADER = "X-Attachment-Filename";
-/** One report photo, matching what Remeet already accepts. */
+/** One report photo or support attachment. */
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;

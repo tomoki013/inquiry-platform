@@ -1,6 +1,6 @@
 # Architecture
 
-最終更新: 2026-09-24。
+最終更新: 2026-09-27。
 
 ## 1. 境界
 
@@ -8,8 +8,8 @@
 flowchart TB
   subgraph Projects["各 Project（基盤の外）"]
     Site["ブランドサイトの /support フォーム"]
-    ProjAPI["各 Project の公開 API\n（例: tomokichi-api）"]
-    Adapter["Moderation adapter\n（例: RemeetModeration）"]
+    ProjAPI["各 Project の公開 API"]
+    Adapter["Moderation adapter\n（Project が実装）"]
   end
   subgraph Platform["inquiry-platform"]
     Admin["apps/admin\nAccess JWT → 認可 → /api/*"]
@@ -28,18 +28,18 @@ flowchart TB
 
 - Core（`apps/api`）は route も `workers.dev` も持たない。到達手段は Service Binding だけで、呼び出し側は `@inquiry-platform/core` の型しか知らない。
 - Core には入口が 2 つある。`AdminCore`（基盤自身: 管理コンソールと mail-ingress）と `Intake`（Project 用: 受付だけ）。Project は `Intake` にだけ bind する（§7）。
-- インターネットに面した受付口（Turnstile・client key・rate limit）は Project 側（tomokichi-api）にある。基盤は公開 HTTP を持たないので、独自ドメインは要らない。Service Binding が使えない相手（別アカウントの Worker、iOS から直接など）が出たときに、`Intake` の前に公開 Worker を足す。
+- インターネットに面した受付口（Turnstile・client key・rate limit）は Project 側の Worker にある。基盤は公開 HTTP を持たないので、独自ドメインは要らない。Service Binding が使えない相手（別アカウントの Worker、iOS から直接など）が出たときに、`Intake` の前に公開 Worker を足す。
 - 基盤が知るのは「誰が・どの対象を・何の理由で」まで。対象が何であるか、どう消すかは Project が知る（Moderation adapter）。
 
 ## 2. Project
 
 - **Project の正は `apps` 表**（slug、名前、リンク、メール署名）。管理画面の「アプリ」は Project のこと。
-- `services` 表は Ticket 分類用の写しで、`apps` への INSERT トリガで同期される（`0006_ticket_core.sql`）。`services.studio` は Tomokichi 環境の「特定アプリに属さない問い合わせ」用の通常データ。
+- `services` 表は Ticket 分類用の写しで、`apps` への INSERT トリガで同期される（`0006_ticket_core.sql`）。Project を持たない問い合わせは `platform_settings.default_service_id` の service に入る。未設定なら組み込みの `unassigned`。どの service にするかはデプロイ側の seed（`defaultServiceId`）で決める（`0010_default_service_setting.sql`）。
 - Tenant は導入しない。外部提供を始めるときに `Tenant → Project` へ拡張する。
 
 ## 3. Ticket モデル
 
-現行モデルを正とする（ADR-022、tomokichi-studio `docs/DECISIONS.md`）。
+現行モデルを正とする。
 
 | 項目 | 値 |
 |---|---|
@@ -70,7 +70,7 @@ Report の拡張項目は指示書の語彙と次の対応: `targetType`=`conten
 
 ## 4. Branding
 
-表示名・フォールバック署名・旧署名・メールロゴ・既定 Project は `apps/api/wrangler.jsonc` の `BRANDING`（構造化 var）だけに置く。`parseBranding`（`packages/core/src/branding.ts`）が検証し、不正・未設定なら中立な既定値（"Inquiry Platform"、署名なし、ロゴなし）になる。
+表示名・フォールバック署名・旧署名・メールロゴ・既定 Project はデプロイ設定の `BRANDING`（Core の構造化 var）だけに置く。`parseBranding`（`packages/core/src/branding.ts`）が検証し、不正・未設定なら中立な既定値（"Inquiry Platform"、署名なし、ロゴなし）になる。
 
 - Core: 通知メール件名、返信のフォールバック署名、HTML メールのロゴ、Push のタイトル。
 - 管理コンソール: `consoleProfile()` を `/api/session` で受け取り表示。PWA manifest と HTML の `<title>` は Worker が配信時に書き換える（ビルド成果物は "Admin" のみ）。
@@ -95,7 +95,7 @@ Report の拡張項目は指示書の語彙と次の対応: `targetType`=`conten
 | `operator` | + Ticket 操作（返信・メモ・状態・通報の決定） |
 | `admin` | + Project・マスタ・定型文・署名の設定 |
 
-role は `ADMIN_ROLES`（Access subject → role）、なければ `DEFAULT_ADMIN_ROLE`、なければ `viewer`。Tomokichi 環境は `DEFAULT_ADMIN_ROLE=admin`（1 人運用）。
+role は `ADMIN_ROLES`（Access subject → role）、なければ `DEFAULT_ADMIN_ROLE`、なければ `viewer`。運営者が 1 人なら `DEFAULT_ADMIN_ROLE=admin` でよい。
 
 Core 自身は呼び出し元を Service Binding で信頼する（Core に到達できる Worker は宣言済みの 3 つだけ）。
 
@@ -114,9 +114,9 @@ if (r.ok) await inquiry.attachReportEvidence(r.value.reportId, { bytes, contentT
 - 冪等キー（`externalReportId`、`idempotencyKey`）が他 Project のものと衝突した場合は `CONFLICT` を返し、相手の ID も番号も返さない。証跡も他 Project の通報には「存在しない」と同じ 404。
 - 返すのは受付番号と簡易 status（`OPEN` 等）だけ。本文は返さない。
 - 読み取り・メモ・状態変更は `Intake` に存在しない。
-- SDK は依存ゼロ。本 Repository は private なので、Project へは `scripts/vendor-sdk.mjs` でコピーする（コピー元コミットを `VENDORED.md` に記録、`--check` で差分検出）。
+- SDK は依存ゼロ。Project は release tag を指定した git 依存で取り込む（[packages/sdk/README.md](../../packages/sdk/README.md)）。
 
 ## 決定事項
 
-- 独立化・モデル維持・資源名維持: tomokichi-studio `docs/DECISIONS.md` ADR-022（Owner 承認 2026-09-24）。
-- それ以前の設計判断（3 Worker 分割、Access の再検証、監査の同一 batch、署名付き削除、ID の仮名化、legacy 表 + トリガ、番号だけの通知、自前 Web Push）は同 ADR-001〜021 を参照。
+- 3 Worker 分割（Core は非公開、管理コンソールは D1 / R2 を持たない）、Access JWT の Worker 側再検証、監査ログを変更と同一 batch に書く、署名付き削除、通報者・投稿者 ID の HMAC 仮名化、旧表 + トリガによる Ticket モデルへの移行、番号だけの通知、依存なしの Web Push。
+- 運営者固有の値はコードにも参照設定にも置かず、デプロイ設定（`BRANDING`、`SIGNED_MODERATION`、Worker 名・資源名）と seed で与える。

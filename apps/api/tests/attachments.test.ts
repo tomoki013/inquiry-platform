@@ -15,7 +15,7 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2
 beforeEach(async () => {
   h = await harness();
   await h.apps.create(
-    { slug: "remeet", name: "Remeet", platform: "ios", status: "testflight" },
+    { slug: "orbit", name: "Orbit", platform: "ios", status: "testflight" },
     {
       type: "admin",
       id: "t",
@@ -23,7 +23,7 @@ beforeEach(async () => {
   );
   reportId = expectOk<CreateReportResult>(
     (await h.reports.create(
-      { appSlug: "remeet", externalReportId: "ext-1", contentType: "wish", reasonCode: "sexual" },
+      { appSlug: "orbit", externalReportId: "ext-1", contentType: "wish", reasonCode: "sexual" },
       appActor,
     )) as never,
   ).reportId;
@@ -224,7 +224,7 @@ describe("report evidence", () => {
 
     const other = expectOk<CreateReportResult>(
       (await h.reports.create(
-        { appSlug: "remeet", externalReportId: "ext-2", contentType: "wish", reasonCode: "spam" },
+        { appSlug: "orbit", externalReportId: "ext-2", contentType: "wish", reasonCode: "spam" },
         appActor,
       )) as never,
     ).reportId;

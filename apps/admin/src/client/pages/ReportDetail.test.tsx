@@ -9,7 +9,7 @@ function setup(fail = false, overrides: Record<string, unknown> = {}) {
   const writes: Record<string, unknown>[] = [];
   const report = {
     id: "r1",
-    appName: "Remeet",
+    appName: "Orbit",
     status: "open",
     priority: "normal",
     reasonCode: "spam",

@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "tomokichi-admin-web",
+  "name": "inquiry-admin",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-07-23",
 
@@ -18,12 +18,8 @@
   // would be a second door that Access does not cover. The Worker verifies the
   // JWT itself and would refuse that door anyway — this closes it regardless.
   "workers_dev": false,
-  "routes": [
-    {
-      "pattern": "admin.tmkch.io",
-      "custom_domain": true
-    }
-  ],
+  // A deployment adds its own hostname in its copy of this file, e.g.
+  //   "routes": [{ "pattern": "admin.example.com", "custom_domain": true }]
 
   "observability": {
     "enabled": true
@@ -34,13 +30,13 @@
     // secret — it appears in every JWT this Worker verifies. Fill both in after
     // creating the Access application; empty means "refuse everything" in
     // production, not "allow everything".
-    "ACCESS_TEAM_DOMAIN": "tomoki-ttttt.cloudflareaccess.com",
-    "ACCESS_AUD": "9863cfa41b1979226ae61a717e47100dccac18c83a4e14ac7248ff7a8e696599",
-    "ADMIN_ORIGIN": "https://admin.tmkch.io",
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": "",
+    "ADMIN_ORIGIN": "https://admin.example.com",
     "ENVIRONMENT": "production",
-    // Everybody the Access policy admits. One operator today, who administers
-    // everything; name others by Access subject id in ADMIN_ROLES.
-    "DEFAULT_ADMIN_ROLE": "admin"
+    // The role of anybody the Access policy admits who is not named in
+    // ADMIN_ROLES (Access subject id → role). Unset means `viewer`.
+    "DEFAULT_ADMIN_ROLE": "viewer"
   },
 
   "services": [
@@ -49,7 +45,7 @@
       // half of Admin cannot reach the database even if a route handler is
       // wrong. Least privilege, and the reason Admin Core exists at all.
       "binding": "ADMIN_CORE",
-      "service": "tomokichi-admin-core",
+      "service": "inquiry-core",
       "entrypoint": "AdminCore"
     }
   ]

@@ -42,7 +42,7 @@ async function openThread(overrides: Record<string, unknown> = {}): Promise<stri
 
 beforeEach(async () => {
   h = await harness();
-  appId = await seedApp(h, "remeet");
+  appId = await seedApp(h, "orbit");
   threadId = await openThread();
   await h.support.assignApp({ threadId, appId }, admin);
 });
@@ -84,7 +84,7 @@ async function makeTemplate(overrides: Record<string, unknown> = {}): Promise<Re
   return expectOk<ReplyTemplate>(
     (await h.reply.createTemplate(
       {
-        key: "remeet_general",
+        key: "orbit_general",
         name: "一般返信",
         category: "general",
         appId,
@@ -100,19 +100,19 @@ async function makeTemplate(overrides: Record<string, unknown> = {}): Promise<Re
 }
 
 describe("templates", () => {
-  it("shows this app's templates alongside the Studio-wide ones", async () => {
+  it("shows this app's templates alongside the deployment-wide ones", async () => {
     await makeTemplate();
-    await makeTemplate({ key: "studio_general", name: "共通", appId: undefined });
+    await makeTemplate({ key: "shared_general", name: "共通", appId: undefined });
 
     const forApp = expectOk<ReplyTemplate[]>(
       (await h.reply.listTemplates({ forAppId: appId, includeInactive: false })) as never,
     );
     expect(forApp.map((template) => template.key).sort()).toEqual([
-      "remeet_general",
-      "studio_general",
+      "orbit_general",
+      "shared_general",
     ]);
     // App-specific first: the more specific answer is usually the right one.
-    expect(forApp[0]?.key).toBe("remeet_general");
+    expect(forApp[0]?.key).toBe("orbit_general");
   });
 
   it("hides a deactivated template from the composer but keeps the record", async () => {
@@ -134,7 +134,7 @@ describe("templates", () => {
   it("refuses a duplicate key so a re-run of the seed cannot fork a template", async () => {
     await makeTemplate();
     const again = await h.reply.createTemplate(
-      { key: "remeet_general", name: "別物", category: "general", body: "x" } as never,
+      { key: "orbit_general", name: "別物", category: "general", body: "x" } as never,
       admin,
     );
     expect(again.ok).toBe(false);
@@ -142,7 +142,7 @@ describe("templates", () => {
   });
 
   it("fills variables without putting the signature in the draft", async () => {
-    await h.reply.setSettings({ appId: null, signatureText: "Tomokichi Studio" }, admin);
+    await h.reply.setSettings({ appId: null, signatureText: "Example Support" }, admin);
     const template = await makeTemplate();
     // A name the person actually typed.
     await h.db
@@ -155,8 +155,8 @@ describe("templates", () => {
     );
 
     expect(applied.bodyText).toContain("ともきち様");
-    expect(applied.bodyText).toContain("いつもremeetをご利用");
-    expect(applied.bodyText).not.toContain("Tomokichi Studio");
+    expect(applied.bodyText).toContain("いつもorbitをご利用");
+    expect(applied.bodyText).not.toContain("Example Support");
     // The one step nobody can pre-write is still standing, and blocks sending.
     expect(applied.unresolved).toEqual(["answerToInquiry"]);
   });
@@ -171,7 +171,7 @@ describe("templates", () => {
   });
 
   it("does not append a signature when the template says it has its own", async () => {
-    await h.reply.setSettings({ appId: null, signatureText: "Tomokichi Studio" }, admin);
+    await h.reply.setSettings({ appId: null, signatureText: "Example Support" }, admin);
     const template = await makeTemplate({ includeSignature: false, body: "本文だけ" });
     const applied = expectOk<AppliedTemplate>(
       (await h.reply.applyTemplate({ threadId, templateId: template.id })) as never,
@@ -243,7 +243,7 @@ describe("sendSupportReply", () => {
           subject: "[bug] 8f21c9de",
           bodyText: "共有できません。",
         },
-        { type: "app", id: "tomokichi-api" },
+        { type: "app", id: "project-api" },
       )) as never,
     );
 
@@ -455,7 +455,7 @@ describe("sendSupportReply", () => {
 describe("with no mail provider configured", () => {
   beforeEach(async () => {
     h = await harness({ mail: new FakeMailProvider(false) });
-    appId = await seedApp(h, "remeet");
+    appId = await seedApp(h, "orbit");
     threadId = await openThread();
   });
 

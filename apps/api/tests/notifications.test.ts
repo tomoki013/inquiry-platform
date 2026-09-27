@@ -32,7 +32,7 @@ async function inquiry(h: Awaited<ReturnType<typeof harness>>, requestId = crypt
   const thread = expectOk<{ id: string }>(
     (await h.support.createThread(
       {
-        appSlug: "remeet",
+        appSlug: "orbit",
         source: "web_form",
         requesterEmail: requester.email,
         requesterName: requester.name,
@@ -87,7 +87,7 @@ describe("ticket notifications carry a reference, never content", () => {
     expect(mail.subject).toBe("[Example Console] 新しいお問い合わせがあります");
     expect(mail.text).toContain(`Ticket ID: #${ticketNumber}`);
     expect(mail.text).toContain(`https://admin.example.com/tickets/${ticketNumber}`);
-    expect(mail.text).toContain("対象アプリ: remeet");
+    expect(mail.text).toContain("対象アプリ: orbit");
     expect(mail.replyTo).toBeUndefined();
     for (const secret of secrets) expect(mail.text).not.toContain(secret);
     expect(mail.subject).not.toContain(requester.name);
@@ -98,7 +98,7 @@ describe("ticket notifications carry a reference, never content", () => {
       type: "support.ticket.created",
       ticketNumber,
       category: "inquiry",
-      app: "remeet",
+      app: "orbit",
       title: "Example Admin",
       url: `/tickets/${ticketNumber}`,
     });
@@ -114,7 +114,7 @@ describe("ticket notifications carry a reference, never content", () => {
     const created = expectOk<{ reportId: string }>(
       (await h.reports.create(
         {
-          appSlug: "remeet",
+          appSlug: "orbit",
           externalReportId: crypto.randomUUID(),
           contentType: "wish",
           contentExternalId: "content-1",
@@ -297,7 +297,7 @@ describe("settings", () => {
     expectOk(
       (await h.reports.create(
         {
-          appSlug: "remeet",
+          appSlug: "orbit",
           externalReportId: crypto.randomUUID(),
           contentType: "wish",
           contentExternalId: "c",

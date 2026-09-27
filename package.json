@@ -1,6 +1,6 @@
 {
   "name": "inquiry-platform",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@11.11.0",
   "engines": {
@@ -19,7 +19,8 @@
     "test:watch": "turbo run test:watch",
     "migrate:local": "pnpm --filter @inquiry-platform/api run migrate:local",
     "migrate:remote": "pnpm --filter @inquiry-platform/api run migrate:remote",
-    "seed": "pnpm --filter @inquiry-platform/api run seed"
+    "seed": "pnpm --filter @inquiry-platform/api run seed",
+    "deployment": "node scripts/deploy.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.5",

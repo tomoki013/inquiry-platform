@@ -21,7 +21,6 @@ export default defineConfig({
       miniflare: {
         // Every test file gets its own database, applied from `migrations/` by
         // `tests/harness.ts`, so nothing leaks between suites.
-        serviceBindings: { REMEET_MODERATION: () => new Response("stub", { status: 501 }) },
         d1Databases: ["DB"],
         r2Buckets: ["PRIVATE_FILES"],
       },

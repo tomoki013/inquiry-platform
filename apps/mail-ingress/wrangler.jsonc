@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "tomokichi-mail-ingress",
+  "name": "inquiry-mail-ingress",
   "main": "src/index.ts",
   "compatibility_date": "2026-07-23",
   // postal-mime reaches for a few Node built-ins when parsing MIME.
@@ -15,7 +15,7 @@
   },
 
   "vars": {
-    "SUPPORT_EMAIL": "support@tmkch.io",
+    "SUPPORT_EMAIL": "support@example.com",
     // Bytes above this are forwarded but not stored: a 25MB mail parsed into a
     // Worker's memory is a way to make ingestion fail for everybody.
     "MAX_STORED_BYTES": "5242880"
@@ -25,7 +25,7 @@
     {
       // The only thing this Worker can reach. No D1, no R2.
       "binding": "ADMIN_CORE",
-      "service": "tomokichi-admin-core",
+      "service": "inquiry-core",
       "entrypoint": "AdminCore"
     }
   ]

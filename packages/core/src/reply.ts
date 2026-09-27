@@ -46,7 +46,7 @@ export type ReplyTemplateCategory = (typeof replyTemplateCategories)[number];
  *
  * Small on purpose. `userName` is filled **only** from a name the person typed
  * into the support form — never derived from the address, because
- * `tomoki123@example.com` is not evidence that anybody is called Tomoki, and
+ * `alex123@example.com` is not evidence that anybody is called Alex, and
  * guessing it into a greeting is worse than having no greeting.
  */
 export const replyTemplateVariables = ["appName", "userName", "supportUrl"] as const;

@@ -6,9 +6,9 @@ import { ReportAuthorHistory } from "./ReportAuthorHistory";
 
 const report: ReportDetail = {
   id: "r1",
-  appId: "remeet",
-  appSlug: "remeet",
-  appName: "Remeet",
+  appId: "orbit",
+  appSlug: "orbit",
+  appName: "Orbit",
   externalReportId: "external",
   contentType: "waitingMemory",
   reasonCode: "spam",
