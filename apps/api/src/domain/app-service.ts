@@ -15,7 +15,7 @@ import { internalFailure, notFound, validationFailure } from "./failures";
  * The registry of the apps (projects) this platform serves.
  *
  * Nothing here changes how an app behaves — there is no flag an operator can
- * flip that reaches a phone. That is a deliberate limit: a管理画面 that can
+ * flip that reaches a phone. That is a deliberate limit: an operator client that can
  * change what a shipped app does is one compromised session away from changing
  * it for everybody, and Phase 1–3 has no need for it.
  */

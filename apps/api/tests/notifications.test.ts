@@ -84,10 +84,14 @@ describe("ticket notifications carry a reference, never content", () => {
     const mail = h.mail.sent[0] as NonNullable<(typeof h.mail.sent)[0]>;
     expect(mail.to).toBe("operator@example.com");
     expect(mail.from).toBe("Example Support <notification@example.com>");
-    expect(mail.subject).toBe("[Example Console] 新しいお問い合わせがあります");
+    expect(mail.subject).toBe(`お問い合わせ #${ticketNumber}`);
     expect(mail.text).toContain(`Ticket ID: #${ticketNumber}`);
-    expect(mail.text).toContain(`https://admin.example.com/tickets/${ticketNumber}`);
+    expect(mail.text).toContain(`https://operator.example.com/tickets/${ticketNumber}`);
     expect(mail.text).toContain("対象アプリ: orbit");
+    expect(mail.text).toContain("種別: お問い合わせ");
+    expect(mail.text).toContain(`リンク: https://operator.example.com/tickets/${ticketNumber}`);
+    expect(mail.text).not.toContain("受付日時");
+    expect(mail.text).not.toContain("管理画面");
     expect(mail.replyTo).toBeUndefined();
     for (const secret of secrets) expect(mail.text).not.toContain(secret);
     expect(mail.subject).not.toContain(requester.name);
@@ -99,8 +103,8 @@ describe("ticket notifications carry a reference, never content", () => {
       ticketNumber,
       category: "inquiry",
       app: "orbit",
-      title: "Example Admin",
-      url: `/tickets/${ticketNumber}`,
+      title: `お問い合わせ #${ticketNumber}`,
+      url: `https://operator.example.com/tickets/${ticketNumber}`,
     });
     expect(String(payload.url)).not.toContain("?");
     for (const secret of secrets) expect(h.push.sent[0]?.payload).not.toContain(secret);
@@ -134,7 +138,7 @@ describe("ticket notifications carry a reference, never content", () => {
     // the one addressed to the operator.
     const alert = h.mail.sent.find((mail) => mail.to === "operator@example.com");
     expect(alert).toBeDefined();
-    expect(alert?.subject).toBe("[Example Console] 新しい通報があります");
+    expect(alert?.subject).toMatch(/^通報 #TK-\d{6}$/);
     expect(alert?.text).toContain("種別: 通報");
     for (const secret of [
       "harassment",

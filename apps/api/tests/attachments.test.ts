@@ -152,7 +152,7 @@ describe("report evidence", () => {
   });
 
   /**
-   * A file emailed by a stranger must not be able to run script in the admin
+   * A file emailed by a stranger must not be able to run script in an operator
    * origin by being previewed. Anything not on the inline allowlist is served
    * as an opaque download.
    */

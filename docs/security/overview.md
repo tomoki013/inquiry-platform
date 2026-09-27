@@ -6,8 +6,9 @@
 |---|---|---|
 | 認証 | Cloudflare Access + Worker での JWT 再検証（aud / iss / exp / 署名）。未設定なら全拒否 | `apps/admin/src/worker/access.ts`, `identity.ts` |
 | 認可 | role（viewer / operator / admin）× permission。全 `/api/*` に適用、未知メソッドは拒否、未設定 role は viewer | `packages/core/src/authorization.ts`, `apps/admin/src/worker/index.ts` |
-| 管理 API と公開 API の分離 | 管理は管理コンソールのホスト名（Access 背後）のみ。Core は route・`workers.dev` なし、Service Binding のみ | `apps/*/wrangler.jsonc` |
-| CSRF | 変更系は Origin 一致 + `application/json` のみ、CORS ヘッダを出さない | `apps/admin/src/worker/security.ts` |
+| 管理 API と公開 API の分離 | Operator API は Access 背後の gateway のみ。Core は route・`workers.dev` なし、Service Binding のみ | `apps/*/wrangler.jsonc` |
+| API-only gateway | HTML、静的 asset、PWA、UI fallback を提供しない。全入口を同じ認証・認可 middleware に通す | `apps/admin/src/worker/index.ts` |
+| CSRF / API client | Cookie 認証の変更系は Origin 一致 + `application/json`。Bearer / Access assertion の API client は JSON のみ。CORS ヘッダは出さない | `apps/admin/src/worker/security.ts`, `access.ts` |
 | XSS | CSP・`nosniff` 等を全応答に付与。HTML メールはエスケープのみで生成、画像はデプロイ設定のロゴ 1 枚だけ | `security.ts`, `packages/notification/src/mail/html.ts` |
 | Input validation | すべての Core 入力を zod で検証 | `packages/core/src/*.ts` |
 | IDOR | 単一 Tenant。管理 API は Access + 認可の背後。Push 購読は操作者本人のものしか見えない・消せない。インターネットに Ticket を ID で引く経路は無い。Project 用 `Intake` は binding の `props` で Project を限定し、他 Project の ID 衝突には中身を返さない | `apps/api/src/db/notifications.ts`, `apps/api/src/intake.ts` |
@@ -23,4 +24,4 @@
 
 - `mail-ingress` は DKIM / SPF を検証しない。
 - Core は Service Binding の呼び出し元を信頼する。Core 内での role 再検証はしていない（到達できる Worker が 3 つに限られるため）。
-- role による UI の出し分けは未実装（サーバ側では拒否される）。
+- role による UI の出し分けは利用者クライアントの責務（サーバ側では常に拒否される）。

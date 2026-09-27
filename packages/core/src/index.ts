@@ -13,6 +13,7 @@ export type {
   ReportSubmission,
 } from "@inquiry-platform/sdk";
 export { toPublicStatus, toPublicType } from "@inquiry-platform/sdk";
+export * from "./api";
 export * from "./apps";
 export * from "./audit";
 export * from "./authorization";

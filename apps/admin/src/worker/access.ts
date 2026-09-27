@@ -44,7 +44,9 @@ export async function verifyAccessJwt(request: Request, env: AdminWebEnv): Promi
   }
 
   const token =
-    request.headers.get("Cf-Access-Jwt-Assertion") ?? cookie(request, "CF_Authorization");
+    request.headers.get("Cf-Access-Jwt-Assertion") ??
+    bearer(request) ??
+    cookie(request, "CF_Authorization");
   if (!token) return { ok: false, reason: "missing" };
 
   try {
@@ -61,6 +63,11 @@ export async function verifyAccessJwt(request: Request, env: AdminWebEnv): Promi
     // verification error message can quote the token.
     return { ok: false, reason: "invalid" };
   }
+}
+
+function bearer(request: Request): string | undefined {
+  const value = request.headers.get("Authorization");
+  return value?.startsWith("Bearer ") ? value.slice("Bearer ".length).trim() : undefined;
 }
 
 function toClaims(payload: JWTPayload): AccessClaims {

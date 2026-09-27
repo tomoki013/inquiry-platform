@@ -2,7 +2,7 @@
 
 ## Existing system investigation and mapping (2026-09-17)
 
-Admin Core owns D1 and private R2. Admin Web is authenticated on every route by Cloudflare Access JWT validation; mutation requests also require same-origin JSON. Public support/report ingestion lives in apps/api, and parsed inbound email in apps/mail-ingress. Both call private Service Bindings. Public callers receive receipt identifiers only; no public ticket read API will be added.
+Admin Core owns D1 and private R2. The API gateway is authenticated on every route by Cloudflare Access JWT validation; cookie-authenticated mutations also require same-origin JSON. Public support/report ingestion lives in apps/api, and parsed inbound email in apps/mail-ingress. Both call private Service Bindings. Public callers receive receipt identifiers only; no public ticket read API will be added.
 
 | Existing source | New representation |
 | --- | --- |
@@ -56,7 +56,7 @@ Ticket UUID is separate from a monotonic TK number. No hard-delete endpoint. Mut
 
 ## API and privacy boundary
 
-All `/api/tickets/*` endpoints are on Admin Web behind Access, including masters and reply context. JSON mutations also require a same-origin request. Core is reachable only by existing private Service Bindings. Public support/report intake has no ticket read endpoint.
+All `/api/tickets/*` endpoints are on the API gateway behind Access, including masters and reply context. JSON mutations require the common gateway protections. Core is reachable only by existing private Service Bindings. Public support/report intake has no ticket read endpoint.
 
 | Method / path | Purpose |
 | --- | --- |
@@ -77,8 +77,8 @@ The existing support reply/draft/template and authenticated attachment routes re
 
 1. Export the D1 database to a private backup and record current Worker versions. Run the rehearsal and the relevant Core/Web/API/mail tests.
 2. Apply D1 migration 0006 before deploying any code that reads the new tables. The existing ingestion code continues writing legacy records; transactional triggers populate the new model.
-3. Deploy Admin Core, then Admin Web. Existing API and mail ingress contracts remain compatible.
+3. Deploy Admin Core, then the API gateway. Existing API and mail ingress contracts remain compatible.
 4. Compare legacy/source/message counts and foreign keys remotely. Check unauthenticated ticket APIs are denied, and check authenticated queue/detail rendering. Do not send customer emails as a deployment test.
-5. If the new UI needs rollback, disable operator mutations while investigating. Retain additive tables/triggers and deploy a corrected Worker. Do not drop new tables or blindly restore the pre-migration export after new messages have arrived; that would discard later data. Restoring old admin editing routes also requires reconciliation of lifecycle edits, so prefer a forward fix.
+5. If a new client needs rollback, disable operator mutations while investigating. Retain additive tables/triggers and deploy a corrected Worker. Do not drop new tables or blindly restore the pre-migration export after new messages have arrived; that would discard later data. Restoring old API routes also requires reconciliation of lifecycle edits, so prefer a forward fix.
 
 The initial release intentionally excludes automation, AI replies, on-call scheduling, complex SLA calendars and incident-specific root-cause forms. INCIDENT tickets, relations and manual follow-up are available on the shared core.

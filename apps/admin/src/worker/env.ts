@@ -3,7 +3,6 @@ import type { AdminCoreStub } from "@inquiry-platform/core";
 export interface AdminWebEnv {
   /** The only binding this Worker has. See `wrangler.jsonc`. */
   ADMIN_CORE: AdminCoreStub;
-  ASSETS: Fetcher;
 
   /** e.g. `example.cloudflareaccess.com`. Empty means Access is not wired up
    * yet, which in production means every request is refused. */
@@ -11,6 +10,7 @@ export interface AdminWebEnv {
   /** The Access Application's AUD tag. Not a secret — it is a claim in every
    * token this Worker verifies — so it lives in `vars`, not in Secrets. */
   ACCESS_AUD: string;
+  /** Allowed Origin for cookie-authenticated browser clients. */
   ADMIN_ORIGIN: string;
   ENVIRONMENT: string;
 

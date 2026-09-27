@@ -1,4 +1,4 @@
-import { consoleAppName, parseBranding } from "@inquiry-platform/core";
+import { parseBranding } from "@inquiry-platform/core";
 import type { MailProvider } from "@inquiry-platform/notification/mail";
 import { ResendMailProvider, UnconfiguredMailProvider } from "@inquiry-platform/notification/mail";
 import { importVapid, sendWebPush, type VapidSigner } from "@inquiry-platform/notification/push";
@@ -34,7 +34,7 @@ export function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknow
   const audit = new AuditRepository(env.DB);
 
   // One decision, made once: with no key, every send refuses and every other
-  // part of the support screen still works.
+  // part of the support API still works.
   const mail: MailProvider = env.MAIL_API_KEY
     ? new ResendMailProvider(env.MAIL_API_KEY, undefined, branding.mailLogo)
     : new UnconfiguredMailProvider();
@@ -55,9 +55,8 @@ export function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknow
     {
       notifyEmail: env.NOTIFICATION_EMAIL,
       from: `${env.SUPPORT_FROM_NAME} <${env.NOREPLY_EMAIL}>`,
-      adminOrigin: env.ADMIN_ORIGIN,
-      consoleName: branding.consoleName,
-      pushTitle: consoleAppName(branding).shortName,
+      ticketUrlTemplate:
+        env.OPERATOR_TICKET_URL_TEMPLATE ?? `${env.ADMIN_ORIGIN}/tickets/{ticketNumber}`,
     },
   );
   const notify = (ref: TicketCreatedRef) => schedule(notifications.ticketCreated(ref));
@@ -108,8 +107,8 @@ export function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknow
  * The VAPID signer, imported on first use.
  *
  * `importVapid` is asynchronous and `buildServices` is not; the public key is
- * known synchronously either way, which is all the settings screen needs
- * before anybody presses anything. A malformed private key surfaces as a
+ * known synchronously either way, which is all an API consumer needs before
+ * registering a subscription. A malformed private key surfaces as a
  * failed first send in the log, not as a Worker that will not start.
  */
 function lazyVapid(env: AdminCoreEnv): VapidSigner | undefined {

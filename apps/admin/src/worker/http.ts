@@ -50,7 +50,7 @@ export function failure(c: Context, error: AdminErrorBody, status: number): Resp
 function logFailure(c: Context, id: string, error: AdminErrorBody): void {
   console.log(
     JSON.stringify({
-      worker: "admin",
+      worker: "api-gateway",
       requestId: id,
       route: new URL(c.req.url).pathname,
       method: c.req.method,

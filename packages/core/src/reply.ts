@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { SupportSource } from "./support";
 
 /**
- * Replying to a support thread from the admin screen.
+ * Replying to a support thread through the Operator API.
  *
  * Three rules shape this file, and they are all about not losing or misdirecting
  * somebody's words:
@@ -109,7 +109,7 @@ export const DEFAULT_REPLY_SUBJECT = "お問い合わせいただいた件につ
  * A form submission is the opposite case: there is no message of theirs to
  * reply to, because they never sent one. `admin-bridge.ts` still needs a
  * subject for the row and builds `[category] requestId`, which is fine as a
- * heading in the admin screen and reads as `Re: [bug] 8f21c…` in a customer's
+ * heading in an operator client and reads as `Re: [bug] 8f21c…` in a customer's
  * inbox — meaningless, and obviously machine-made. With no thread to preserve,
  * the subject is chosen rather than echoed: the template's, when one was used,
  * and a plain default otherwise.

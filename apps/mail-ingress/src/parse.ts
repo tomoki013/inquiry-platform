@@ -5,7 +5,7 @@ import PostalMime from "postal-mime";
  *
  * The important half of this file is what it throws away. An HTML mail is
  * flattened to text **here**, at the edge, before anything is stored — so no
- * layer below has to decide whether to trust it, and the admin screen never has
+ * layer below has to decide whether to trust it, and an operator client never has
  * a reason to render markup a stranger wrote. `dangerouslySetInnerHTML` does
  * not appear anywhere in this codebase, and this is why it does not need to.
  */

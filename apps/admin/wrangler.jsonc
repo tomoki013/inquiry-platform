@@ -1,17 +1,8 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "inquiry-admin",
+  "name": "inquiry-api",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-07-23",
-
-  "assets": {
-    "directory": "./dist",
-    "binding": "ASSETS",
-    // The Worker sees every request first: it sets the security headers and
-    // answers `/api/*`, then hands anything else to the built client.
-    "run_worker_first": true,
-    "not_found_handling": "single-page-application"
-  },
 
   // The one entrance. `workers.dev` is off deliberately: a Cloudflare Access
   // policy is attached to a hostname, so leaving the `*.workers.dev` URL up
@@ -19,7 +10,7 @@
   // JWT itself and would refuse that door anyway — this closes it regardless.
   "workers_dev": false,
   // A deployment adds its own hostname in its copy of this file, e.g.
-  //   "routes": [{ "pattern": "admin.example.com", "custom_domain": true }]
+  //   "routes": [{ "pattern": "api.example.com", "custom_domain": true }]
 
   "observability": {
     "enabled": true
@@ -32,7 +23,9 @@
     // production, not "allow everything".
     "ACCESS_TEAM_DOMAIN": "",
     "ACCESS_AUD": "",
-    "ADMIN_ORIGIN": "https://admin.example.com",
+    // Origin of a browser client, if one is used. Bearer API clients do not
+    // need this value; the gateway deliberately emits no CORS headers.
+    "ADMIN_ORIGIN": "https://operator.example.com",
     "ENVIRONMENT": "production",
     // The role of anybody the Access policy admits who is not named in
     // ADMIN_ROLES (Access subject id → role). Unset means `viewer`.
@@ -42,8 +35,8 @@
   "services": [
     {
       // The only binding this Worker has. No D1 and no R2: the internet-facing
-      // half of Admin cannot reach the database even if a route handler is
-      // wrong. Least privilege, and the reason Admin Core exists at all.
+      // API cannot reach the database even if a route handler is
+      // wrong. Least privilege, and the reason Core is separated at all.
       "binding": "ADMIN_CORE",
       "service": "inquiry-core",
       "entrypoint": "AdminCore"

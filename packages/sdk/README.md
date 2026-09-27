@@ -1,8 +1,9 @@
 # @inquiry-platform/sdk
 
 The contract and client a Project uses to hand contacts and reports to an
-inquiry-platform deployment. No runtime dependencies; TypeScript source, meant
-to be bundled by Wrangler with the Project's Worker.
+inquiry-platform deployment. It also contains transport for the
+platform-owned operator API. No UI is included and there are no runtime
+dependencies.
 
 ## Install
 
@@ -11,7 +12,7 @@ Pin a release tag:
 ```jsonc
 // package.json
 "dependencies": {
-  "@inquiry-platform/sdk": "github:tomoki013/inquiry-platform#v0.1.0&path:/packages/sdk"
+  "@inquiry-platform/sdk": "github:example-org/inquiry-platform#v0.2.0&path:/packages/sdk"
 }
 ```
 
@@ -69,3 +70,16 @@ A Project that wants to carry out moderation decisions itself implements the
 `ModerationAdapter` contract (`ModerationRequest` and friends are exported
 here) as a `WorkerEntrypoint` and is registered in the deployment's
 `SIGNED_MODERATION`.
+
+## Operator API
+
+運用者向けの画面、CLI、自動化は各自で実装できますが、標準機能は gateway の API を呼びます。ブラウザから別 Origin へ直接呼ぶ CORS は提供しないため、同一 Origin または利用者側の BFF を使ってください。
+
+```ts
+import { createPlatformApiClient } from "@inquiry-platform/sdk";
+
+const api = createPlatformApiClient({ origin: "https://api.example.com", token });
+const descriptor = await api.describe();
+```
+
+`GET /api` と SDK の descriptor が示す機能は platform-owned です。認証・認可・検証・監査・通知・エラー形式を Project 側で複製しないでください。独自機能は gateway の標準 path を上書きせず、別 Worker / 別 namespace として追加します。

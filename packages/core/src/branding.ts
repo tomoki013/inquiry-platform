@@ -3,7 +3,7 @@ import { z } from "zod";
 /**
  * What a deployment of this platform calls itself.
  *
- * None of this is logic: it is the name on the operator's console, the
+ * None of this is logic: it is the deployment name exposed by the API, the
  * signature a reply ends with when a project has not set its own, and the
  * picture beside that signature. It lives in the deployment's configuration
  * (`BRANDING` in `apps/api/wrangler.jsonc`) so that nothing under `src/` names
@@ -11,9 +11,9 @@ import { z } from "zod";
  * are, in `app_mail_settings`; this is only the fallback.
  */
 export const brandingSchema = z.object({
-  /** Shown in the admin header, the PWA name and the operator mail subject. */
+  /** Shown in API metadata and available to clients that render branding. */
   consoleName: z.string().trim().min(1).max(80).default("Inquiry Platform"),
-  /** Where there is less room: the home-screen label, a push title. Falls back
+  /** Where there is less room: a short API label. Falls back
    * to `consoleName`. */
   consoleShortName: z.string().trim().min(1).max(40).optional(),
   /** Appended to a reply when neither the project nor the deployment-wide
@@ -33,14 +33,14 @@ export const brandingSchema = z.object({
 
 export type Branding = z.infer<typeof brandingSchema>;
 
-/** The installed console's own name: "<short name> Admin". */
+/** The deployment's display names for clients that choose to render them. */
 export function consoleAppName(branding: Pick<Branding, "consoleName" | "consoleShortName">): {
   name: string;
   shortName: string;
 } {
   return {
-    name: `${branding.consoleName} Admin`,
-    shortName: `${branding.consoleShortName ?? branding.consoleName} Admin`,
+    name: branding.consoleName,
+    shortName: branding.consoleShortName ?? branding.consoleName,
   };
 }
 
@@ -54,8 +54,7 @@ export function parseBranding(raw: unknown): Branding {
   return parsed.success ? parsed.data : brandingSchema.parse({});
 }
 
-/** What the console needs to label itself. Only `consoleName` is ever shown
- * before sign-in (the PWA manifest and the page title). */
+/** Display metadata for API consumers that choose to render a label. */
 export interface ConsoleProfile {
   consoleName: string;
   consoleShortName?: string;

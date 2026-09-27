@@ -4,7 +4,7 @@ import { TicketService } from "../src/domain/ticket-service";
 import { admin, harness, seedApp } from "./harness";
 
 /*
- * Why this exists: the audit story of the admin is "every change leaves a row
+ * Why this exists: the audit story of the operator API is "every change leaves a row
  * that says who did it, in the same transaction". The individual ticket tests
  * touch on that as a side effect; nothing checked it across *every* mutating
  * method, so a new method — or a refactor that moved an event out of the
@@ -15,7 +15,7 @@ import { admin, harness, seedApp } from "./harness";
  * zero for a read, and by exactly zero for a change the service refused.
  * `ticket_events` is where Ticket operations write; `audit_logs` is where the
  * master-data changes write. Both are counted, because an operator reading the
- * activity screen does not care which table the answer came from.
+ * activity API does not care which table the answer came from.
  */
 
 function value<T>(r: Result<T>): T {

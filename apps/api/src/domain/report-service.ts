@@ -34,10 +34,10 @@ import { reportMailSubject } from "./report-threading";
 /**
  * Moderation, as far as the platform is concerned.
  *
- * The status machine is enforced here rather than in the UI: the browser
- * disables the buttons that would be illegal, and this refuses them anyway,
- * because the UI is not the only thing that can call Admin Core and a disabled
- * button is a hint, not a rule.
+ * The status machine is enforced here rather than in a client: a client may
+ * hide controls that would be illegal, and this refuses them anyway, because
+ * the client is not the only thing that can call Admin Core and a hidden
+ * control is a hint, not a rule.
  */
 export class ReportService {
   constructor(

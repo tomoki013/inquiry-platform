@@ -4,14 +4,13 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "types": ["./worker-configuration.d.ts", "vite/client"],
+    "types": ["./worker-configuration.d.ts"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noEmit": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
-    "isolatedModules": true,
-    "jsx": "react-jsx"
+    "isolatedModules": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "worker-configuration.d.ts", "vite.config.ts"]
+  "include": ["src/worker/**/*.ts", "worker-configuration.d.ts"]
 }

@@ -258,9 +258,7 @@ export async function harness(
     {
       notifyEmail: options.notifyEmail,
       from: "Example Support <notification@example.com>",
-      adminOrigin: "https://admin.example.com",
-      consoleName: TEST_BRANDING.consoleName,
-      pushTitle: "Example Admin",
+      ticketUrlTemplate: "https://operator.example.com/tickets/{ticketNumber}",
     },
   );
   const pending: Promise<unknown>[] = [];

@@ -44,7 +44,7 @@ import { buildServices } from "./services";
  * The platform API: every ticket, report, reply and audit row.
  *
  * Not on the internet. `workers_dev` is off and there is no route, so the only
- * ways to reach this Worker are the Service Bindings declared by the admin
+ * ways to reach this Worker are the Service Bindings declared by the API gateway,
  * console, the mail Worker and the projects' own public APIs. That is what lets the D1 and R2 bindings
  * live here and nowhere else: a bug in an internet-facing route handler cannot
  * reach a database it was never given.

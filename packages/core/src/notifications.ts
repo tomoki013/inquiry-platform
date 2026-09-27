@@ -5,10 +5,10 @@ import { z } from "zod";
  *
  * The rule this file exists to hold: **a notification carries a reference,
  * never content.** {@link TicketNotificationEvent} is everything the mail and
- * push channels are ever told about a ticket — a number, a kind, an app and a
- * time. There is no field for a subject, a body, a name or an address, and
- * adding one is the change this design forbids. The person reads the ticket on
- * the admin screen, behind Access, and nowhere else.
+ * push channels are ever told about a ticket — a number, a kind and an app.
+ * There is no field for a subject, a body, a name, an address or a timestamp,
+ * and adding one is the change this design forbids. The person follows the
+ * configured link into their own operator client, behind Access.
  */
 export const ticketNotificationCategories = ["inquiry", "report"] as const;
 export type TicketNotificationCategory = (typeof ticketNotificationCategories)[number];
@@ -20,25 +20,23 @@ export interface TicketNotificationEvent {
   /** `TK-000123` — what the notification shows and the link resolves. */
   ticketNumber: string;
   category: TicketNotificationCategory;
-  /** The app's display name, or the console's, for the notification line. */
+  /** The Project's display name for the notification line. */
   app: string;
-  createdAt: string;
 }
 
 /**
  * What a push message says on the wire, once decrypted by the device.
  *
- * Shown on a lock screen, so even less than the mail: no time, no requester,
- * nothing that is not needed to open the right ticket.
+ * Shown on a lock screen, so it contains no requester, subject or body.
  */
 export interface PushPayload {
   type: "support.ticket.created";
   ticketNumber: string;
   category: TicketNotificationCategory;
   app: string;
-  /** The notification's title: the console's short name. Not ticket data. */
+  /** A short label made only from the ticket kind and number. */
   title: string;
-  /** Path on the admin origin. No query string, ever. */
+  /** A deployment-provided operator-client URL. No query string is added. */
   url: string;
 }
 
@@ -72,7 +70,7 @@ export const registerPushSubscriptionInputSchema = z.object({
     auth: z.string().min(16).max(32),
   }),
   deviceName: z.string().trim().max(80).optional(),
-  /** Taken from the request, not the body, by Admin Web. */
+  /** Taken from the request, not the body, by the API gateway. */
   userAgent: z.string().max(300).optional(),
 });
 export type RegisterPushSubscriptionInput = z.infer<typeof registerPushSubscriptionInputSchema>;
@@ -83,7 +81,7 @@ export const revokePushSubscriptionInputSchema = z.union([
 ]);
 export type RevokePushSubscriptionInput = z.infer<typeof revokePushSubscriptionInputSchema>;
 
-/** A device as the settings screen lists it. Deliberately without `endpoint`,
+/** A device summary for API consumers. Deliberately without `endpoint`,
  * `p256dh` or `auth`. */
 export interface PushDeviceSummary {
   id: string;
@@ -94,8 +92,8 @@ export interface PushDeviceSummary {
 }
 
 export interface NotificationOverview {
-  /** Absent when Admin Core has no VAPID keys, in which case the screen says
-   * push is not available in this environment. */
+  /** Absent when Core has no VAPID keys; API consumers can decide how to
+   * present that unavailable channel. */
   pushPublicKey?: string;
   emailConfigured: boolean;
   settings: NotificationSettings;
