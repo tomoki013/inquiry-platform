@@ -61,6 +61,13 @@ export interface NotificationConfig {
   from: string;
   /** URL template owned by the deployment's operator client. */
   ticketUrlTemplate: string;
+  /** Resolve the project-specific operator recipient and sender. */
+  resolve?: (appId: string | undefined) => Promise<NotificationMailConfig>;
+}
+
+export interface NotificationMailConfig {
+  notifyEmail?: string;
+  from: string;
 }
 
 export interface PushTransport {
@@ -179,11 +186,11 @@ export class NotificationService {
   private async eventFor(ref: TicketCreatedRef): Promise<TicketNotificationEvent | null> {
     const row = await this.db
       .prepare(
-        `SELECT t.ticket_number, s.name AS app FROM tickets t
+        `SELECT t.ticket_number, t.service_id AS app_id, s.name AS app FROM tickets t
          JOIN services s ON s.id = t.service_id WHERE t.id = ?`,
       )
       .bind(ref.ticketId)
-      .first<{ ticket_number: string; app: string }>();
+      .first<{ ticket_number: string; app_id: string; app: string }>();
     if (!row) return null;
     return {
       type: "support.ticket.created",
@@ -191,17 +198,22 @@ export class NotificationService {
       ticketNumber: row.ticket_number,
       category: ref.category,
       app: row.app,
+      appId: row.app_id,
     };
   }
 
   private async sendEmail(event: TicketNotificationEvent): Promise<NotificationOutcome["email"]> {
-    if (!this.config.notifyEmail || !this.mail.configured) return "unconfigured";
     try {
+      const resolved = (await this.config.resolve?.(event.appId)) ?? {
+        notifyEmail: this.config.notifyEmail,
+        from: this.config.from,
+      };
+      if (!resolved.notifyEmail || !this.mail.configured) return "unconfigured";
       if (!(await this.repo.emailWanted())) return "disabled";
       const result = await this.mail.sendAdminNotification(
         renderTicketNotificationMail(event, {
-          to: this.config.notifyEmail,
-          from: this.config.from,
+          to: resolved.notifyEmail,
+          from: resolved.from,
           ticketUrlTemplate: this.config.ticketUrlTemplate,
         }),
       );

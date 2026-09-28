@@ -123,6 +123,28 @@ describe("email()", () => {
     expect(message.forwardedTo).toEqual(["operator@example.com"]);
   });
 
+  it("routes a project address into the matching project and inbox", async () => {
+    const { env, ingest } = makeEnv({
+      APP_MAIL_ROUTES: JSON.stringify([
+        {
+          address: "support@zakkary.app",
+          projectSlug: "zakkary",
+          forwardEmail: "zakkary001@gmail.com",
+        },
+      ]),
+    });
+    const projectMessage = new FakeMessage(
+      "someone@example.com",
+      "support@zakkary.app",
+      RAW.replaceAll("support@example.com", "support@zakkary.app"),
+    );
+
+    await worker.email(projectMessage as never, env, ctx);
+
+    expect(projectMessage.forwardedTo).toEqual(["zakkary001@gmail.com"]);
+    expect((ingest.mock.calls[0]?.[0] as Record<string, unknown>).appSlug).toBe("zakkary");
+  });
+
   /** The rule: the inbox that worked before Admin existed keeps working. */
   it("still forwards when Admin Core refuses the message", async () => {
     const { env, ingest } = makeEnv();

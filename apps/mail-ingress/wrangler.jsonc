@@ -16,6 +16,7 @@
 
   "vars": {
     "SUPPORT_EMAIL": "support@example.com",
+    "APP_MAIL_ROUTES": "[]",
     // Bytes above this are forwarded but not stored: a 25MB mail parsed into a
     // Worker's memory is a way to make ingestion fail for everybody.
     "MAX_STORED_BYTES": "5242880"

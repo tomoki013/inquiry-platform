@@ -5,7 +5,8 @@ import { z } from "zod";
  *
  * The rule this file exists to hold: **a notification carries a reference,
  * never content.** {@link TicketNotificationEvent} is everything the mail and
- * push channels are ever told about a ticket — a number, a kind and an app.
+ * push channels are ever told about a ticket — a number, a kind, an app and an
+ * internal project reference used only for delivery configuration.
  * There is no field for a subject, a body, a name, an address or a timestamp,
  * and adding one is the change this design forbids. The person follows the
  * configured link into their own operator client, behind Access.
@@ -22,6 +23,8 @@ export interface TicketNotificationEvent {
   category: TicketNotificationCategory;
   /** The Project's display name for the notification line. */
   app: string;
+  /** Project/service id used only to resolve project-scoped delivery config. */
+  appId?: string;
 }
 
 /**

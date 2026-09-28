@@ -225,6 +225,32 @@ describe("sendSupportReply", () => {
     expect(mail?.subject).toBe("Re: アプリで共有できません");
   });
 
+  it("uses the thread project's sender and reply address", async () => {
+    await h.db
+      .prepare(
+        `INSERT INTO app_mail_settings
+          (app_id, signature_text, support_email, from_name, noreply_email, notification_email, updated_at)
+         VALUES (?, '', ?, ?, ?, NULL, ?)`,
+      )
+      .bind(
+        appId,
+        "support@zakkary.app",
+        "Zakkary",
+        "noreply@zakkary.app",
+        new Date().toISOString(),
+      )
+      .run();
+
+    await h.reply.send(
+      { threadId, bodyText: "Zakkaryからの返信です。", idempotencyKey: "idem-key-project-0001" },
+      admin,
+    );
+
+    const mail = h.mail.sent.at(-1);
+    expect(mail?.from).toBe("Zakkary <support@zakkary.app>");
+    expect(mail?.replyTo).toBe("support@zakkary.app");
+  });
+
   /**
    * The subject a form submission gets answered with.
    *

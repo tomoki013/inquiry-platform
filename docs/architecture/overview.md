@@ -74,7 +74,7 @@ Report の拡張項目は指示書の語彙と次の対応: `targetType`=`conten
 
 - Core: 返信のフォールバック署名、HTML メールのロゴ、API の表示メタデータ。
 - API gateway: `consoleProfile()` などは JSON API として返す。HTML、PWA manifest、静的 asset は提供しない。画面、CLI、自動化は利用側が必要なら実装する。
-- Project ごとの署名は従来どおり `app_mail_settings`。
+- Project ごとの署名とメール配送先は `app_mail_settings`。未設定の項目はデプロイ環境の既定値にフォールバックし、共有デプロイでもProject間の送信元・通知先を混線させない。
 
 ## 5. Moderation adapter
 

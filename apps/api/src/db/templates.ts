@@ -24,6 +24,14 @@ interface TemplateRow {
   app_slug: string | null;
 }
 
+/** Internal only. Notification recipients must never be returned to a browser. */
+export interface ProjectMailSettings {
+  supportEmail?: string;
+  fromName?: string;
+  noreplyEmail?: string;
+  notificationEmail?: string;
+}
+
 function toTemplate(row: TemplateRow): ReplyTemplate {
   return {
     id: row.id,
@@ -173,6 +181,39 @@ export class TemplateRepository {
       .prepare("SELECT signature_text FROM app_mail_settings WHERE app_id IS NULL")
       .first<{ signature_text: string }>();
     return fallback?.signature_text;
+  }
+
+  /**
+   * Resolve a project's mail overrides, falling back field-by-field to the
+   * deployment-wide row. The caller supplies the deployment env values for
+   * fields that are absent from both rows.
+   */
+  async mailSettings(appId: string | undefined): Promise<ProjectMailSettings> {
+    const rows = await this.db
+      .prepare(
+        `SELECT app_id, support_email, from_name, noreply_email, notification_email
+           FROM app_mail_settings
+          WHERE app_id IS NULL OR app_id = ?
+          ORDER BY app_id IS NULL`,
+      )
+      .bind(appId ?? "")
+      .all<{
+        app_id: string | null;
+        support_email: string | null;
+        from_name: string | null;
+        noreply_email: string | null;
+        notification_email: string | null;
+      }>();
+
+    const resolved: ProjectMailSettings = {};
+    for (const row of rows.results) {
+      if (!resolved.supportEmail && row.support_email) resolved.supportEmail = row.support_email;
+      if (!resolved.fromName && row.from_name) resolved.fromName = row.from_name;
+      if (!resolved.noreplyEmail && row.noreply_email) resolved.noreplyEmail = row.noreply_email;
+      if (!resolved.notificationEmail && row.notification_email)
+        resolved.notificationEmail = row.notification_email;
+    }
+    return resolved;
   }
 
   async listSettings(): Promise<AppMailSettings[]> {

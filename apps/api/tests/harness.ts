@@ -259,6 +259,13 @@ export async function harness(
       notifyEmail: options.notifyEmail,
       from: "Example Support <notification@example.com>",
       ticketUrlTemplate: "https://operator.example.com/tickets/{ticketNumber}",
+      resolve: async (appId) => {
+        const settings = await templateRepo.mailSettings(appId);
+        return {
+          notifyEmail: settings.notificationEmail ?? options.notifyEmail,
+          from: `${settings.fromName ?? "Example Support"} <${settings.noreplyEmail ?? "notification@example.com"}>`,
+        };
+      },
     },
   );
   const pending: Promise<unknown>[] = [];
@@ -281,6 +288,7 @@ export async function harness(
       defaultSupportUrl: "https://example.com/support",
       defaultSignature: TEST_BRANDING.defaultSignature,
       legacySignatures: TEST_BRANDING.legacySignatures,
+      resolve: (appId) => templateRepo.mailSettings(appId),
     },
   );
 

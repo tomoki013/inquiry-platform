@@ -106,6 +106,23 @@ if (seed.signature !== undefined) {
   );
 }
 
+for (const settings of seed.mailSettings ?? []) {
+  const scope = settings.appSlug
+    ? `(SELECT id FROM apps WHERE slug = ${text(settings.appSlug)})`
+    : "NULL";
+  const whereScope = settings.appSlug
+    ? `app_id = ${scope}`
+    : "app_id IS NULL";
+  lines.push(
+    `UPDATE app_mail_settings SET support_email = ${text(settings.supportEmail)}, from_name = ${text(settings.fromName)}, noreply_email = ${text(settings.noreplyEmail)}, notification_email = ${text(settings.notificationEmail)}, updated_at = ${text(now)}`,
+    ` WHERE ${whereScope};`,
+    `INSERT INTO app_mail_settings (app_id, signature_text, support_email, from_name, noreply_email, notification_email, updated_at)`,
+    `SELECT ${scope}, '', ${text(settings.supportEmail)}, ${text(settings.fromName)}, ${text(settings.noreplyEmail)}, ${text(settings.notificationEmail)}, ${text(now)}`,
+    ` WHERE ${settings.appSlug ? `EXISTS (SELECT 1 FROM apps WHERE slug = ${text(settings.appSlug)}) AND ` : ""}NOT EXISTS (SELECT 1 FROM app_mail_settings WHERE ${whereScope});`,
+    "",
+  );
+}
+
 if (seed.defaultServiceId !== undefined) {
   // Only once the service exists: a setting naming a missing service would
   // stop tickets being opened for contacts without a Project.

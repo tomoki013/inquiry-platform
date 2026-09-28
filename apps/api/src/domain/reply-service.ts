@@ -27,7 +27,7 @@ import type { MailProvider } from "@inquiry-platform/notification/mail";
 import type { AppRepository } from "../db/apps";
 import type { AuditRepository } from "../db/audit";
 import type { SupportRepository } from "../db/support";
-import type { TemplateRepository } from "../db/templates";
+import type { ProjectMailSettings, TemplateRepository } from "../db/templates";
 import { internalFailure, notFound, validationFailure } from "./failures";
 import type { SupportService } from "./support-service";
 import { TicketService } from "./ticket-service";
@@ -41,6 +41,8 @@ export interface ReplyAddresses {
   defaultSignature: string;
   /** Older signatures to strip from drafts; see `Branding.legacySignatures`. */
   legacySignatures: readonly string[];
+  /** Project-scoped overrides from the platform's mail settings repository. */
+  resolve?: (appId: string | undefined) => Promise<ProjectMailSettings>;
 }
 
 /**
@@ -72,6 +74,15 @@ export class ReplyService {
 
   get mailConfigured(): boolean {
     return this.mail.configured;
+  }
+
+  private async addressesFor(appId: string | undefined) {
+    const override = (await this.addresses.resolve?.(appId)) ?? {};
+    return {
+      supportEmail: override.supportEmail ?? this.addresses.supportEmail,
+      fromName: override.fromName ?? this.addresses.fromName,
+      defaultSignature: this.addresses.defaultSignature,
+    };
   }
 
   // ---- drafts ------------------------------------------------------------
@@ -393,7 +404,8 @@ export class ReplyService {
 
       await this.refreshMessageIds(input.threadId);
       const { references, inReplyTo } = await this.support.threadReferences(input.threadId);
-      const from = `${this.addresses.fromName} <${this.addresses.supportEmail}>`;
+      const addresses = await this.addressesFor(thread.app_id ?? undefined);
+      const from = `${addresses.fromName} <${addresses.supportEmail}>`;
       // The subject is resolved here, from the thread and — for a thread that
       // has no subject of its own — the template the operator inserted. The
       // request carried that template's id and never its text, so a tampered
@@ -412,7 +424,7 @@ export class ReplyService {
 
       const signature =
         (await this.templates.signature(thread.app_id ?? undefined))?.trim() ||
-        this.addresses.defaultSignature.trim();
+        addresses.defaultSignature.trim();
       const body = await this.withoutSignature(input.threadId, input.bodyText);
       if (!body.trim()) return fail("VALIDATION_ERROR", "返信本文を入力してください。");
       const linkedReport = await this.db
@@ -425,7 +437,7 @@ export class ReplyService {
       const sent = await this.mail.sendSupportReply({
         to: thread.requester_email,
         from,
-        replyTo: this.addresses.supportEmail,
+        replyTo: addresses.supportEmail,
         subject,
         text,
         signatureText: signature,
@@ -472,7 +484,7 @@ export class ReplyService {
           providerMessageId: sent.providerMessageId,
           transportId: sent.transportId,
           inReplyTo,
-          sender: this.addresses.supportEmail,
+          sender: addresses.supportEmail,
           recipient: thread.requester_email,
           // The finished text, stored as sent. Never re-rendered from a
           // template later: editing a template must not change what somebody

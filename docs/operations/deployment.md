@@ -25,6 +25,11 @@
 | `admin.jsonc` の `routes` | API gateway のホスト名（`custom_domain: true`） |
 | `admin.jsonc` の `vars` | `ACCESS_TEAM_DOMAIN`、`ACCESS_AUD`、`ADMIN_ORIGIN`（cookie 認証する利用者クライアントの Origin）、`DEFAULT_ADMIN_ROLE`（任意で `ADMIN_ROLES`） |
 
+`seed.ts` の `mailSettings` で Project ごとの `supportEmail` / `noreplyEmail` /
+`notificationEmail` / `fromName` を指定できます。未設定の項目は `api.jsonc` の既存値へ
+フォールバックします。`mail-ingress.jsonc` の `APP_MAIL_ROUTES` は受信アドレスから
+Project slug と転送先を解決する JSON 配列です。
+
 `BRANDING` の項目は `packages/core/src/branding.ts` を参照（すべて任意。未設定なら中立な既定値）。UI のアイコンや画面は設定しない。利用者の UI は別途用意する。
 
 ## 2. コマンド
@@ -60,7 +65,7 @@ Service Binding は相手の Worker が存在しないと作れないので、�
    - `HASH_PEPPER`（必須。`openssl rand -hex 32`。通報が入った後に変えると仮名 ID が繋がらなくなる）
    - `MAIL_API_KEY`（任意。無ければ返信の送信ボタンだけが無効）
    - `NOTIFICATION_EMAIL`、`VAPID_PRIVATE_KEY`（任意。[通知](notifications.md)）
-4. **Core をデプロイ**して seed: `deploy.mjs <dir> deploy api`、`deploy.mjs <dir> seed`。seed は guarded insert だけで、再実行しても重複せず、API で編集した定型文を上書きしない。
+4. **Core をデプロイ**して seed: `deploy.mjs <dir> deploy api`、`deploy.mjs <dir> seed`。`0011_project_mail_settings.sql` 適用後、seed の `mailSettings` は指定した Project のメール設定を同期します。未指定の Project は従来の環境変数へフォールバックします。
 5. **API gateway をデプロイ**: `deploy.mjs <dir> deploy gateway`（従来の `admin` も互換で利用可能）。
 6. **Cloudflare Access**: Zero Trust → Access → Applications で API gateway のホスト名に Self-hosted の Application を作り、AUD tag とチームドメインを `admin.jsonc` に入れて再デプロイ。未設定の間、gateway は**すべての**リクエストを拒否する（意図した失敗モード）。
 7. **受信メール**: `apps/mail-ingress` に Secret `SUPPORT_FORWARD_EMAIL` を入れて `deploy.mjs <dir> deploy mail-ingress`。Email Routing は、新しいテスト用アドレスで往復を確認してから本来のアドレスを Worker に向ける。

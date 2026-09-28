@@ -110,6 +110,31 @@ describe("ticket notifications carry a reference, never content", () => {
     for (const secret of secrets) expect(h.push.sent[0]?.payload).not.toContain(secret);
   });
 
+  it("uses the ticket project's notification recipient and no-reply sender", async () => {
+    const h = await harness({ notifyEmail: "operator@example.com" });
+    const appId = await seedApp(h, "orbit");
+    await h.db
+      .prepare(
+        `INSERT INTO app_mail_settings
+          (app_id, signature_text, support_email, from_name, noreply_email, notification_email, updated_at)
+         VALUES (?, '', NULL, ?, ?, ?, ?)`,
+      )
+      .bind(
+        appId,
+        "Orbit Support",
+        "noreply@orbit.example",
+        "orbit-ops@example.com",
+        new Date().toISOString(),
+      )
+      .run();
+
+    await inquiry(h);
+
+    const mail = h.mail.sent.at(-1);
+    expect(mail?.to).toBe("orbit-ops@example.com");
+    expect(mail?.from).toBe("Orbit Support <noreply@orbit.example>");
+  });
+
   it("says 通報 for a report and leaves the reason, the comment and the reporter out", async () => {
     const h = await harness({ notifyEmail: "operator@example.com" });
     await seedApp(h);

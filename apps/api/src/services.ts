@@ -57,6 +57,13 @@ export function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknow
       from: `${env.SUPPORT_FROM_NAME} <${env.NOREPLY_EMAIL}>`,
       ticketUrlTemplate:
         env.OPERATOR_TICKET_URL_TEMPLATE ?? `${env.ADMIN_ORIGIN}/tickets/{ticketNumber}`,
+      resolve: async (appId) => {
+        const settings = await templates.mailSettings(appId);
+        return {
+          notifyEmail: settings.notificationEmail ?? env.NOTIFICATION_EMAIL,
+          from: `${settings.fromName ?? env.SUPPORT_FROM_NAME} <${settings.noreplyEmail ?? env.NOREPLY_EMAIL}>`,
+        };
+      },
     },
   );
   const notify = (ref: TicketCreatedRef) => schedule(notifications.ticketCreated(ref));
@@ -77,6 +84,7 @@ export function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknow
       defaultSupportUrl: env.DEFAULT_SUPPORT_URL,
       defaultSignature: branding.defaultSignature,
       legacySignatures: branding.legacySignatures,
+      resolve: async (appId) => templates.mailSettings(appId),
     },
   );
 

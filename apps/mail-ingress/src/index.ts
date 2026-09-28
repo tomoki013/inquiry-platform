@@ -31,6 +31,14 @@ export interface MailIngressEnv {
    * value here that must not be in git. Unset means forwarding is skipped, and
    * that is logged loudly. */
   SUPPORT_FORWARD_EMAIL?: string;
+  /** JSON array of `{ address, projectSlug, forwardEmail }` route overrides. */
+  APP_MAIL_ROUTES?: string;
+}
+
+interface MailRoute {
+  address: string;
+  projectSlug: string;
+  forwardEmail?: string;
 }
 
 /** Cloudflare's shape for an inbound message, narrowed to what is used. */
@@ -46,6 +54,7 @@ interface InboundMessage {
 
 export default {
   async email(message: InboundMessage, env: MailIngressEnv, ctx: ExecutionContext): Promise<void> {
+    const route = routeFor(message.to, env);
     // Deliver first, parse second.
     //
     // The order used to be the other way round, with the parse wrapped in a
@@ -61,10 +70,10 @@ export default {
     // for any reason at all, the worst case is a copy missing from Admin,
     // which is logged and recoverable, rather than a message that reached
     // nobody.
-    await forward(message, env);
+    await forward(message, route.forwardEmail);
 
     try {
-      await store(message, env, ctx);
+      await store(message, env, ctx, route.projectSlug);
     } catch (error) {
       // Never rethrow: an exception here would make Cloudflare retry the whole
       // delivery, and the mail has already gone out once.
@@ -77,6 +86,7 @@ async function store(
   message: InboundMessage,
   env: MailIngressEnv,
   ctx: ExecutionContext,
+  projectSlug?: string,
 ): Promise<"stored" | "skipped"> {
   const limit = Number(env.MAX_STORED_BYTES) || 5 * 1024 * 1024;
   if (message.rawSize > limit) {
@@ -102,6 +112,7 @@ async function store(
       inReplyTo: parsed.inReplyTo,
       references: parsed.references,
       requesterName: parsed.fromName,
+      appSlug: projectSlug,
     },
     { type: "email", id: "mail-ingress" },
   );
@@ -154,8 +165,7 @@ async function store(
  * destinations would deliver the raw mail twice on a retry and Admin's copy
  * once.
  */
-async function forward(message: InboundMessage, env: MailIngressEnv): Promise<void> {
-  const to = env.SUPPORT_FORWARD_EMAIL;
+async function forward(message: InboundMessage, to?: string): Promise<void> {
   if (!to) {
     log("mail.forward_unconfigured", {});
     return;
@@ -165,6 +175,29 @@ async function forward(message: InboundMessage, env: MailIngressEnv): Promise<vo
     log("mail.forwarded", {});
   } catch (error) {
     log("mail.forward_failed", { error: error instanceof Error ? error.name : "Unknown" });
+  }
+}
+
+function routeFor(address: string, env: MailIngressEnv): { projectSlug?: string; forwardEmail?: string } {
+  if (!env.APP_MAIL_ROUTES) return { forwardEmail: env.SUPPORT_FORWARD_EMAIL };
+  try {
+    const routes = JSON.parse(env.APP_MAIL_ROUTES) as unknown;
+    if (!Array.isArray(routes)) throw new Error("routes must be an array");
+    const route = routes.find(
+      (candidate): candidate is MailRoute =>
+        typeof candidate === "object" &&
+        candidate !== null &&
+        typeof (candidate as MailRoute).address === "string" &&
+        (candidate as MailRoute).address.trim().toLowerCase() === address.trim().toLowerCase() &&
+        typeof (candidate as MailRoute).projectSlug === "string" &&
+        (candidate as MailRoute).projectSlug.trim().length > 0,
+    );
+    return route
+      ? { projectSlug: route.projectSlug, forwardEmail: route.forwardEmail }
+      : { forwardEmail: env.SUPPORT_FORWARD_EMAIL };
+  } catch {
+    log("mail.route_unconfigured", {});
+    return { forwardEmail: env.SUPPORT_FORWARD_EMAIL };
   }
 }
 

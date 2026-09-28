@@ -26,6 +26,9 @@ export interface DeploymentSeed {
   /** Where a contact that names no Project is filed: a service id, from
    * `services` or a Project's id. Unset means the built-in `unassigned`. */
   defaultServiceId?: string;
+  /** Project-scoped delivery addresses. These are deployment configuration,
+   * not browser-editable mail settings. Re-running the seed synchronises them. */
+  mailSettings?: MailSettingsSeed[];
 }
 
 export type AppSeed = CreateAppInput & {
@@ -49,4 +52,13 @@ export interface ServiceSeed {
   id: string;
   name: string;
   slug: string;
+}
+
+export interface MailSettingsSeed {
+  /** Omit for the deployment-wide fallback row. */
+  appSlug?: string;
+  supportEmail?: string;
+  fromName?: string;
+  noreplyEmail?: string;
+  notificationEmail?: string;
 }
