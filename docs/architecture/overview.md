@@ -27,7 +27,7 @@ flowchart TB
 ```
 
 - Core（`apps/api`）は route も `workers.dev` も持たない。到達手段は Service Binding だけで、呼び出し側は `@inquiry-platform/core` の型しか知らない。
-- Core には入口が 2 つある。`AdminCore`（基盤自身: API gateway と mail-ingress）と `Intake`（Project 用: 受付だけ）。Project は `Intake` にだけ bind する（§7）。
+- Core には入口が 3 つある。`AdminCore`（基盤自身: API gateway と mail-ingress）、`Intake`（Project 用: 受付だけ）、`ProjectOperator`（Project 自身の管理画面用: 自 Project のチケットの閲覧・対応だけ）。Project は後の 2 つにだけ bind する（§7）。
 - インターネットに面した受付口（Turnstile・client key・rate limit）は Project 側の Worker にある。基盤は公開 HTTP を持たないので、独自ドメインは要らない。Service Binding が使えない相手（別アカウントの Worker、iOS から直接など）が出たときに、`Intake` の前に公開 Worker を足す。
 - 基盤が知るのは「誰が・どの対象を・何の理由で」まで。対象が何であるか、どう消すかは Project が知る（Moderation adapter）。
 
@@ -97,7 +97,7 @@ Report の拡張項目は指示書の語彙と次の対応: `targetType`=`conten
 
 role は `ADMIN_ROLES`（Access subject → role）、なければ `DEFAULT_ADMIN_ROLE`、なければ `viewer`。運営者が 1 人なら `DEFAULT_ADMIN_ROLE=admin` でよい。
 
-Core 自身は呼び出し元を Service Binding で信頼する（Core に到達できる Worker は宣言済みの 3 つだけ）。
+Core 自身は呼び出し元を Service Binding で信頼する。`AdminCore` に到達できるのは宣言済みの 2 Worker（gateway・mail-ingress）だけで、Project の Worker は `props` で範囲を限った `Intake` / `ProjectOperator` にだけ到達する。
 
 ## 7. Intake と SDK
 
@@ -113,8 +113,19 @@ if (r.ok) await inquiry.attachReportEvidence(r.value.reportId, { bytes, contentT
 - **どの Project に書けるかは binding が決める。** Project 側 `wrangler.jsonc` の Service Binding に `props: { caller, projects, allowUnassigned }` を書く。`props` が無い・不正なら全拒否。許可外の `projectSlug` は `FORBIDDEN`。
 - 冪等キー（`externalReportId`、`idempotencyKey`）が他 Project のものと衝突した場合は `CONFLICT` を返し、相手の ID も番号も返さない。証跡も他 Project の通報には「存在しない」と同じ 404。
 - 返すのは受付番号と簡易 status（`OPEN` 等）だけ。本文は返さない。
-- 読み取り・メモ・状態変更は `Intake` に存在しない。
+- 読み取り・メモ・状態変更は `Intake` に存在しない。それらは `ProjectOperator` の役目（下記）。
 - SDK は依存ゼロ。Project は release tag を指定した git 依存で取り込む（[packages/sdk/README.md](../../packages/sdk/README.md)）。
+
+### ProjectOperator
+
+Project が自分の管理画面で自分のチケットを扱う入口。`apps/api/src/project-operator.ts` と SDK の `createProjectOperatorClient`。
+
+- binding の `props: { caller, projects }` が扱える Project を決める。許可外は `FORBIDDEN`、未登録は `NOT_FOUND`。
+- 一覧は常にその Project に絞られる。他 Project のチケットは ID でも番号でも `NOT_FOUND`（存在しないものと区別しない）。
+- 変更は Core の同じサービス（`TicketService`・`ReplyService`）を通るので、状態遷移・楽観ロック・SLA・監査・返信の宛先決定は gateway と同一。入力はフィールド単位で組み立て直し、Project・担当・優先度の上書きは受け付けない。
+- 監査の actor は `{ type: "app", id: "<caller>:<operator.id>" }`。`operator.id` は Project が決める不透明な ID（メールアドレスは拒否）。
+- 誰が管理画面を使えるかは Project の認証が決める。基盤の gateway・Access・role には何も足さない。
+- 通知のリンクは `app_mail_settings.ticket_url_template`（seed の `mailSettings[].ticketUrlTemplate`）で Project の管理画面へ向ける。未設定ならデプロイ全体の `OPERATOR_TICKET_URL_TEMPLATE`。
 
 標準機能は API gateway/Core が唯一の実装である。利用者は `GET /api` の descriptor と SDK を使い、標準 path を Project 側で再実装しない。追加機能は標準 path と衝突しない独自 namespace / Worker に分離する。UI が標準機能を隠すことはできても、サーバー側の認証・認可・検証・状態遷移を置き換えることはできない。
 

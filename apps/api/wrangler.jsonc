@@ -12,7 +12,7 @@
   //
   // Never on the internet. No route, no custom domain, and `workers.dev` off:
   // the only ways in are the Service Bindings declared by the API gateway,
-  // the mail Worker and each Project's `Intake` binding. That is what lets this
+  // the mail Worker and each Project's `Intake` / `ProjectOperator` binding. That is what lets this
   // Worker holds the D1 and R2 bindings while the API gateway holds neither.
   "workers_dev": false,
   "triggers": { "crons": ["*/5 * * * *"] },

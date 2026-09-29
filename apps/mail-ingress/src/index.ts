@@ -178,7 +178,10 @@ async function forward(message: InboundMessage, to?: string): Promise<void> {
   }
 }
 
-function routeFor(address: string, env: MailIngressEnv): { projectSlug?: string; forwardEmail?: string } {
+function routeFor(
+  address: string,
+  env: MailIngressEnv,
+): { projectSlug?: string; forwardEmail?: string } {
   if (!env.APP_MAIL_ROUTES) return { forwardEmail: env.SUPPORT_FORWARD_EMAIL };
   try {
     const routes = JSON.parse(env.APP_MAIL_ROUTES) as unknown;

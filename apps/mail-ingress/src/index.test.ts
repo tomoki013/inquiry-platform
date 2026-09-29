@@ -142,7 +142,9 @@ describe("email()", () => {
     await worker.email(projectMessage as never, env, ctx);
 
     expect(projectMessage.forwardedTo).toEqual(["zakkary001@gmail.com"]);
-    expect((ingest.mock.calls[0]?.[0] as Record<string, unknown>).appSlug).toBe("zakkary");
+    expect((ingest.mock.calls[0]?.[0] as Record<string, unknown> | undefined)?.appSlug).toBe(
+      "zakkary",
+    );
   });
 
   /** The rule: the inbox that worked before Admin existed keeps working. */

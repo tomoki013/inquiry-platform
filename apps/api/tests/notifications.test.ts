@@ -135,6 +135,31 @@ describe("ticket notifications carry a reference, never content", () => {
     expect(mail?.from).toBe("Orbit Support <noreply@orbit.example>");
   });
 
+  it("links to the project's own console when it has one", async () => {
+    const h = await harness({ notifyEmail: "operator@example.com" });
+    const appId = await seedApp(h, "orbit");
+    await subscribe(h, "https://push.example/a");
+    await h.db
+      .prepare(
+        `INSERT INTO app_mail_settings (app_id, signature_text, ticket_url_template, updated_at)
+         VALUES (?, '', ?, ?)`,
+      )
+      .bind(
+        appId,
+        "https://admin.orbit.example/#/inquiries/{ticketNumber}",
+        new Date().toISOString(),
+      )
+      .run();
+
+    const { ticketNumber } = await inquiry(h);
+
+    const link = `https://admin.orbit.example/#/inquiries/${ticketNumber}`;
+    expect(h.mail.sent.at(-1)?.text).toContain(`リンク: ${link}`);
+    expect(h.mail.sent.at(-1)?.text).not.toContain("operator.example.com");
+    const payload = JSON.parse(h.push.sent.at(-1)?.payload ?? "{}") as { url?: string };
+    expect(payload.url).toBe(link);
+  });
+
   it("says 通報 for a report and leaves the reason, the comment and the reporter out", async () => {
     const h = await harness({ notifyEmail: "operator@example.com" });
     await seedApp(h);

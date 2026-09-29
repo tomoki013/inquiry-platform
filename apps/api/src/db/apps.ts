@@ -18,7 +18,7 @@ import { newId, nowIso } from "@inquiry-platform/core";
  * could write a query would be a route handler that could write the wrong one,
  * and the whole point of Admin Core is that callers never learn the schema.
  */
-interface AppRow {
+export interface AppRow {
   id: string;
   slug: string;
   name: string;

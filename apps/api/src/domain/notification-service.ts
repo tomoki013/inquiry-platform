@@ -68,6 +68,8 @@ export interface NotificationConfig {
 export interface NotificationMailConfig {
   notifyEmail?: string;
   from: string;
+  /** The project's own console, when it has one; else the deployment's. */
+  ticketUrlTemplate?: string;
 }
 
 export interface PushTransport {
@@ -202,19 +204,25 @@ export class NotificationService {
     };
   }
 
-  private async sendEmail(event: TicketNotificationEvent): Promise<NotificationOutcome["email"]> {
-    try {
-      const resolved = (await this.config.resolve?.(event.appId)) ?? {
+  private async resolved(event: TicketNotificationEvent): Promise<NotificationMailConfig> {
+    return (
+      (await this.config.resolve?.(event.appId)) ?? {
         notifyEmail: this.config.notifyEmail,
         from: this.config.from,
-      };
+      }
+    );
+  }
+
+  private async sendEmail(event: TicketNotificationEvent): Promise<NotificationOutcome["email"]> {
+    try {
+      const resolved = await this.resolved(event);
       if (!resolved.notifyEmail || !this.mail.configured) return "unconfigured";
       if (!(await this.repo.emailWanted())) return "disabled";
       const result = await this.mail.sendAdminNotification(
         renderTicketNotificationMail(event, {
           to: resolved.notifyEmail,
           from: resolved.from,
-          ticketUrlTemplate: this.config.ticketUrlTemplate,
+          ticketUrlTemplate: resolved.ticketUrlTemplate ?? this.config.ticketUrlTemplate,
         }),
       );
       if (!result.ok) {
@@ -240,7 +248,13 @@ export class NotificationService {
       internalFailure("notification.push_lookup", error);
       return counts;
     }
-    const payload = JSON.stringify(renderPushPayload(event, this.config.ticketUrlTemplate));
+    let template = this.config.ticketUrlTemplate;
+    try {
+      template = (await this.resolved(event)).ticketUrlTemplate ?? template;
+    } catch (error) {
+      internalFailure("notification.push_link", error);
+    }
+    const payload = JSON.stringify(renderPushPayload(event, template));
     const at = nowIso();
     await Promise.all(
       targets.map(async (row) => {

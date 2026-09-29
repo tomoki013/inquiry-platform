@@ -4,6 +4,13 @@ import type {
   EvidenceReceipt,
   IntakeBinding,
   IntakeResult,
+  OperatorProject,
+  OperatorRef,
+  OperatorTicketChange,
+  OperatorTicketDetail,
+  OperatorTicketPage,
+  OperatorTicketQuery,
+  ProjectOperatorApi,
   ReportReceipt,
   ReportSubmission,
 } from "./types";
@@ -77,5 +84,59 @@ export function createInquiryClient(binding: IntakeBinding | undefined): Inquiry
               : "VALIDATION_ERROR";
       return { ok: false, error: { code, message: `Evidence was refused (${response.status}).` } };
     },
+  };
+}
+
+/** A project's handle on its own tickets, bound to one project slug. */
+export interface ProjectOperatorClient {
+  project(): Promise<IntakeResult<OperatorProject>>;
+  listTickets(query?: OperatorTicketQuery): Promise<IntakeResult<OperatorTicketPage>>;
+  getTicket(ref: string, offset?: number): Promise<IntakeResult<OperatorTicketDetail>>;
+  changeTicket(
+    ticketId: string,
+    change: OperatorTicketChange,
+    operator: OperatorRef,
+  ): Promise<IntakeResult<OperatorTicketDetail>>;
+  addNote(
+    ticketId: string,
+    note: { body: string; idempotencyKey: string },
+    operator: OperatorRef,
+  ): Promise<IntakeResult<OperatorTicketDetail>>;
+  reply(
+    ticketId: string,
+    reply: { body: string; idempotencyKey: string; reopenIfResolved?: boolean },
+    operator: OperatorRef,
+  ): Promise<IntakeResult<OperatorTicketDetail>>;
+  setSignature(signature: string, operator: OperatorRef): Promise<IntakeResult<OperatorProject>>;
+}
+
+/**
+ * @param binding The Service Binding to the platform's `ProjectOperator`
+ * entrypoint, or `undefined` where there is none — every call then resolves
+ * to `UNAVAILABLE` rather than throwing.
+ */
+export function createProjectOperatorClient(
+  binding: ProjectOperatorApi | undefined,
+  projectSlug: string,
+): ProjectOperatorClient {
+  const unavailable = {
+    ok: false as const,
+    error: { code: "UNAVAILABLE" as const, message: "The inquiry platform is not bound." },
+  };
+  const call = async <T>(
+    run: (api: ProjectOperatorApi) => Promise<IntakeResult<T>>,
+  ): Promise<IntakeResult<T>> => (binding ? await run(binding) : unavailable);
+  return {
+    project: () => call((api) => api.project(projectSlug)),
+    listTickets: (query) => call((api) => api.listTickets(projectSlug, query)),
+    getTicket: (ref, offset) => call((api) => api.getTicket(projectSlug, ref, offset)),
+    changeTicket: (ticketId, change, operator) =>
+      call((api) => api.changeTicket(projectSlug, ticketId, change, operator)),
+    addNote: (ticketId, note, operator) =>
+      call((api) => api.addNote(projectSlug, ticketId, note, operator)),
+    reply: (ticketId, reply, operator) =>
+      call((api) => api.reply(projectSlug, ticketId, reply, operator)),
+    setSignature: (signature, operator) =>
+      call((api) => api.setSignature(projectSlug, signature, operator)),
   };
 }

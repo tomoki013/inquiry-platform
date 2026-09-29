@@ -61,4 +61,8 @@ export interface MailSettingsSeed {
   fromName?: string;
   noreplyEmail?: string;
   notificationEmail?: string;
+  /** The project's own operator console, e.g.
+   * `https://admin.example.com/#/inquiries/{ticketNumber}`. Notification links
+   * point there instead of at the deployment-wide template. */
+  ticketUrlTemplate?: string;
 }

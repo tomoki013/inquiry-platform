@@ -431,4 +431,5 @@ async function stream(
 }
 
 export { Intake } from "./intake";
+export { ProjectOperator } from "./project-operator";
 export { AdminCore, sha256Hex };

@@ -12,7 +12,7 @@ Pin a release tag:
 ```jsonc
 // package.json
 "dependencies": {
-  "@inquiry-platform/sdk": "github:example-org/inquiry-platform#v0.2.0&path:/packages/sdk"
+  "@inquiry-platform/sdk": "github:example-org/inquiry-platform#v0.3.0&path:/packages/sdk"
 }
 ```
 
@@ -71,9 +71,42 @@ A Project that wants to carry out moderation decisions itself implements the
 here) as a `WorkerEntrypoint` and is registered in the deployment's
 `SIGNED_MODERATION`.
 
+## Your own console: `ProjectOperator`
+
+A Project that runs its own admin binds a second entrypoint to work its own
+tickets. The binding's `props` name the projects; nothing is added to the
+platform's gateway or its Access application.
+
+```jsonc
+"services": [
+  {
+    "binding": "INQUIRY_OPERATOR",
+    "service": "<your inquiry-core Worker name>",
+    "entrypoint": "ProjectOperator",
+    "props": { "caller": "my-api", "projects": ["my-app"] }
+  }
+]
+```
+
+```ts
+import { createProjectOperatorClient } from "@inquiry-platform/sdk";
+
+const tickets = createProjectOperatorClient(env.INQUIRY_OPERATOR, "my-app");
+const page = await tickets.listTickets({ status: "open", offset: 0 });
+const ticket = await tickets.getTicket("TK-000123"); // id or number
+await tickets.changeTicket(ticket.id, { revision, status: "ACKNOWLEDGED" }, { id: operatorId });
+await tickets.reply(ticket.id, { body, idempotencyKey }, { id: operatorId });
+await tickets.setSignature("My App\nhttps://my-app.example", { id: operatorId });
+```
+
+Who may use the console is your admin's authentication; the platform records
+`operator.id` (an opaque id of your choosing, never an address) in its audit
+log. Point notification links at your console with the deployment seed's
+`mailSettings[].ticketUrlTemplate`.
+
 ## Operator API
 
-運用者向けの画面、CLI、自動化は各自で実装できますが、標準機能は gateway の API を呼びます。ブラウザから別 Origin へ直接呼ぶ CORS は提供しないため、同一 Origin または利用者側の BFF を使ってください。
+基盤全体を運用する画面、CLI、自動化は gateway の API を呼びます（Access の背後）。Project 自身の管理画面は上の `ProjectOperator` を使います。ブラウザから別 Origin へ直接呼ぶ CORS は提供しないため、同一 Origin または利用者側の BFF を使ってください。
 
 ```ts
 import { createPlatformApiClient } from "@inquiry-platform/sdk";
