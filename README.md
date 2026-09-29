@@ -42,7 +42,7 @@ Project の Worker は `packages/sdk` を依存に加え、`Intake` entrypoint �
 
 ```jsonc
 // package.json
-"@inquiry-platform/sdk": "github:example-org/inquiry-platform#v0.3.0&path:/packages/sdk"
+"@inquiry-platform/sdk": "github:example-org/inquiry-platform#v0.3.1&path:/packages/sdk"
 ```
 
 詳しくは [packages/sdk/README.md](packages/sdk/README.md)。

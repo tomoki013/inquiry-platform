@@ -38,7 +38,8 @@ const operatorSchema = z.object({
     .trim()
     .min(1)
     .max(96)
-    .regex(/^[A-Za-z0-9._:@+-]+$/),
+    // No "@": an operator id is opaque, and an address is not.
+    .regex(/^[A-Za-z0-9._:+-]+$/),
 });
 const querySchema = z
   .object({

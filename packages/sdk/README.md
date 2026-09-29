@@ -12,7 +12,7 @@ Pin a release tag:
 ```jsonc
 // package.json
 "dependencies": {
-  "@inquiry-platform/sdk": "github:example-org/inquiry-platform#v0.3.0&path:/packages/sdk"
+  "@inquiry-platform/sdk": "github:example-org/inquiry-platform#v0.3.1&path:/packages/sdk"
 }
 ```
 
