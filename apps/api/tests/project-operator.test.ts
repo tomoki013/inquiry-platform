@@ -176,7 +176,7 @@ describe("ProjectOperator: changes go through Core's rules", () => {
       ),
     ).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
     expect(
-      await api.changeTicket("orbit", own.id, { revision: 0 }, { id: "a person@example.com" }),
+      await api.changeTicket("orbit", own.id, { revision: 0 }, { id: "person@example.com" }),
     ).toMatchObject({ error: { code: "FORBIDDEN" } });
   });
 
