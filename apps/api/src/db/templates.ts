@@ -30,6 +30,8 @@ export interface ProjectMailSettings {
   fromName?: string;
   noreplyEmail?: string;
   notificationEmail?: string;
+  /** The project's operator-console link, `{ticketNumber}` substituted. */
+  ticketUrlTemplate?: string;
 }
 
 function toTemplate(row: TemplateRow): ReplyTemplate {
@@ -191,7 +193,8 @@ export class TemplateRepository {
   async mailSettings(appId: string | undefined): Promise<ProjectMailSettings> {
     const rows = await this.db
       .prepare(
-        `SELECT app_id, support_email, from_name, noreply_email, notification_email
+        `SELECT app_id, support_email, from_name, noreply_email, notification_email,
+                ticket_url_template
            FROM app_mail_settings
           WHERE app_id IS NULL OR app_id = ?
           ORDER BY app_id IS NULL`,
@@ -203,6 +206,7 @@ export class TemplateRepository {
         from_name: string | null;
         noreply_email: string | null;
         notification_email: string | null;
+        ticket_url_template: string | null;
       }>();
 
     const resolved: ProjectMailSettings = {};
@@ -212,6 +216,8 @@ export class TemplateRepository {
       if (!resolved.noreplyEmail && row.noreply_email) resolved.noreplyEmail = row.noreply_email;
       if (!resolved.notificationEmail && row.notification_email)
         resolved.notificationEmail = row.notification_email;
+      if (!resolved.ticketUrlTemplate && row.ticket_url_template)
+        resolved.ticketUrlTemplate = row.ticket_url_template;
     }
     return resolved;
   }

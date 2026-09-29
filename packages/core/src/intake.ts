@@ -3,6 +3,7 @@ import type {
   IntakeErrorCode,
   IntakeProps,
   InternalTicketStatus,
+  ProjectOperatorProps,
   ReportSubmission,
 } from "@inquiry-platform/sdk";
 import { z } from "zod";
@@ -28,6 +29,13 @@ export const intakePropsSchema = z.object({
   projects: z.array(slug).max(50),
   allowUnassigned: z.boolean().optional(),
 }) satisfies z.ZodType<IntakeProps>;
+
+/** A `ProjectOperator` binding's grant. No `allowUnassigned`: an operator
+ * works on named projects and nothing else. */
+export const projectOperatorPropsSchema = z.object({
+  caller: z.string().trim().min(1).max(64),
+  projects: z.array(slug).min(1).max(50),
+}) satisfies z.ZodType<ProjectOperatorProps>;
 
 export const contactSubmissionSchema = z.object({
   projectSlug: slug.optional(),

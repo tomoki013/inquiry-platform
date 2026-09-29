@@ -147,3 +147,162 @@ export interface ModerationAdapter {
   prepare(input: ModerationRequest): Promise<ModerationProposal>;
   complete(id: string, envelope: string): Promise<{ revision: number }>;
 }
+
+// ---- Project operator (a project's own console) --------------------------
+
+/**
+ * What a `ProjectOperator` binding's `props` must say. The same shape as
+ * {@link IntakeProps} without `allowUnassigned`: an operator works on the
+ * projects named here and cannot see any other.
+ */
+export interface ProjectOperatorProps {
+  /** Recorded in the audit log as the acting app. */
+  caller: string;
+  /** Project slugs this binding may operate. */
+  projects: string[];
+}
+
+/** Who, inside the project's own console, did something. An opaque, stable id
+ * of the project's choosing (a hashed subject, a user id) — never an address. */
+export interface OperatorRef {
+  id: string;
+}
+
+export type OperatorTicketStatus =
+  | "NEW"
+  | "TRIAGE"
+  | "ACKNOWLEDGED"
+  | "IN_PROGRESS"
+  | "WAITING_CUSTOMER"
+  | "WAITING_INTERNAL"
+  | "RESOLVED"
+  | "CLOSED";
+
+export type OperatorResolution =
+  | "RESOLVED"
+  | "NO_ACTION_REQUIRED"
+  | "SPAM"
+  | "DUPLICATE"
+  | "INVALID"
+  | "USER_WITHDREW"
+  | "OTHER";
+
+export interface OperatorTicketSummary {
+  id: string;
+  /** Human-facing, e.g. `TK-000123`. */
+  number: string;
+  status: OperatorTicketStatus;
+  resolution: string | null;
+  priority: string;
+  subject: string;
+  /** Absent when the person asked for no reply. */
+  requesterEmail: string | null;
+  slaState: "OK" | "AT_RISK" | "BREACHED";
+  nextAction: string | null;
+  nextActionAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type OperatorTimelineItem =
+  | {
+      kind: "message";
+      id: string;
+      /** `note` is internal: never sent, never shown to the person. */
+      direction: "inbound" | "outbound" | "note";
+      sender: string | null;
+      body: string;
+      createdAt: string;
+    }
+  | { kind: "event"; id: string; type: string; createdAt: string };
+
+export interface OperatorTicketDetail extends OperatorTicketSummary {
+  /** Optimistic lock: a change names the revision it was based on. */
+  revision: number;
+  acknowledgedAt: string | null;
+  resolvedAt: string | null;
+  closedAt: string | null;
+  /** Where the platform's state machine allows this ticket to go next. */
+  allowedStatuses: OperatorTicketStatus[];
+  /** A reply needs a mail thread and an address to send to. */
+  canReply: boolean;
+  timeline: OperatorTimelineItem[];
+  totalTimeline: number;
+}
+
+export interface OperatorTicketPage {
+  items: OperatorTicketSummary[];
+  total: number;
+}
+
+export interface OperatorTicketQuery {
+  /** `open` is every status that still needs something. */
+  status?: OperatorTicketStatus | "open";
+  query?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface OperatorTicketChange {
+  revision: number;
+  status?: OperatorTicketStatus;
+  /** Required when moving to `RESOLVED` or `CLOSED` without one on record. */
+  resolution?: OperatorResolution;
+  nextAction?: string | null;
+  nextActionAt?: string | null;
+}
+
+export interface OperatorProject {
+  id: string;
+  slug: string;
+  name: string;
+  /** Whether replies can be sent at all in this deployment. */
+  mailConfigured: boolean;
+  /** The project's own reply signature; empty means the deployment's is used. */
+  signature: string;
+}
+
+/**
+ * What the platform's `ProjectOperator` entrypoint answers: a project's own
+ * console working its own tickets. Every call names the project, the binding's
+ * `props` decide whether it may, and a ticket of any other project answers
+ * `NOT_FOUND` exactly as a missing one does.
+ */
+export interface ProjectOperatorApi {
+  project(projectSlug: string): Promise<IntakeResult<OperatorProject>>;
+  listTickets(
+    projectSlug: string,
+    query?: OperatorTicketQuery,
+  ): Promise<IntakeResult<OperatorTicketPage>>;
+  /** `ref` is a ticket id or its number (`TK-000123`), as a notification link carries. */
+  getTicket(
+    projectSlug: string,
+    ref: string,
+    offset?: number,
+  ): Promise<IntakeResult<OperatorTicketDetail>>;
+  changeTicket(
+    projectSlug: string,
+    ticketId: string,
+    change: OperatorTicketChange,
+    operator: OperatorRef,
+  ): Promise<IntakeResult<OperatorTicketDetail>>;
+  addNote(
+    projectSlug: string,
+    ticketId: string,
+    note: { body: string; idempotencyKey: string },
+    operator: OperatorRef,
+  ): Promise<IntakeResult<OperatorTicketDetail>>;
+  /** Mails the person who wrote in. Only a body goes up: recipient, sender and
+   * subject are decided by the platform from the ticket's thread. */
+  reply(
+    projectSlug: string,
+    ticketId: string,
+    reply: { body: string; idempotencyKey: string; reopenIfResolved?: boolean },
+    operator: OperatorRef,
+  ): Promise<IntakeResult<OperatorTicketDetail>>;
+  setSignature(
+    projectSlug: string,
+    signature: string,
+    operator: OperatorRef,
+  ): Promise<IntakeResult<OperatorProject>>;
+}

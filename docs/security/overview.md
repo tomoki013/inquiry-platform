@@ -11,7 +11,7 @@
 | CSRF / API client | Cookie 認証の変更系は Origin 一致 + `application/json`。Bearer / Access assertion の API client は JSON のみ。CORS ヘッダは出さない | `apps/admin/src/worker/security.ts`, `access.ts` |
 | XSS | CSP・`nosniff` 等を全応答に付与。HTML メールはエスケープのみで生成、画像はデプロイ設定のロゴ 1 枚だけ | `security.ts`, `packages/notification/src/mail/html.ts` |
 | Input validation | すべての Core 入力を zod で検証 | `packages/core/src/*.ts` |
-| IDOR | 単一 Tenant。管理 API は Access + 認可の背後。Push 購読は操作者本人のものしか見えない・消せない。インターネットに Ticket を ID で引く経路は無い。Project 用 `Intake` は binding の `props` で Project を限定し、他 Project の ID 衝突には中身を返さない | `apps/api/src/db/notifications.ts`, `apps/api/src/intake.ts` |
+| IDOR | 単一 Tenant。管理 API は Access + 認可の背後。Push 購読は操作者本人のものしか見えない・消せない。インターネットに Ticket を ID で引く経路は無い。Project 用 `Intake` / `ProjectOperator` は binding の `props` で Project を限定し、他 Project のチケットは存在しないものと同じに扱う | `apps/api/src/db/notifications.ts`, `apps/api/src/intake.ts` |
 | 内部メモ | `visibility = 'INTERNAL'`。公開面から読む経路は無い。返信経路（`sendSupportReply`）と別メソッドで、メモが送信されることはない | `packages/core/src/core.ts` |
 | Rate limit / Turnstile | 公開受付口。基盤は公開 HTTP を持たないので Project 側の Worker が持つ | 各 Project |
 | Audit log | 変更と同一 `db.batch()`。削除 API なし。metadata は ID・コード・件数のみ | `apps/api/src/db/audit.ts` |
@@ -23,5 +23,6 @@
 ## 既知の未対応
 
 - `mail-ingress` は DKIM / SPF を検証しない。
-- Core は Service Binding の呼び出し元を信頼する。Core 内での role 再検証はしていない（到達できる Worker が 3 つに限られるため）。
+- Core は Service Binding の呼び出し元を信頼する。Core 内での role 再検証はしていない（`AdminCore` に到達できる Worker が限られるため）。
+- `ProjectOperator` の `props` は binding を書いた側（同じ Cloudflare アカウントの Worker）が決める。アカウント内の Worker は信頼境界の内側として扱う。誰がその Project の管理画面を使えるかは Project 側の認証の責務で、基盤は `operator.id` を監査に残すだけ。
 - role による UI の出し分けは利用者クライアントの責務（サーバ側では常に拒否される）。

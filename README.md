@@ -42,16 +42,28 @@ Project の Worker は `packages/sdk` を依存に加え、`Intake` entrypoint �
 
 ```jsonc
 // package.json
-"@inquiry-platform/sdk": "github:example-org/inquiry-platform#v0.2.0&path:/packages/sdk"
+"@inquiry-platform/sdk": "github:example-org/inquiry-platform#v0.3.0&path:/packages/sdk"
 ```
 
 詳しくは [packages/sdk/README.md](packages/sdk/README.md)。
 
+### Project の管理画面から使う
+
+Project が自分の管理画面（自分の認証の内側）で自分のチケットを扱うときは、`ProjectOperator` entrypoint に Service Binding します。どの Project を扱えるかは binding の `props` が決め、他 Project のチケットは存在しないものと同じに扱われます。gateway や Access には何も足しません。状態遷移・SLA・監査・返信の送信ルールは gateway と同じ Core のサービスが強制します。
+
+```ts
+const tickets = createProjectOperatorClient(env.INQUIRY_OPERATOR, "my-app");
+const page = await tickets.listTickets({ status: "open" });
+await tickets.reply(ticketId, { body, idempotencyKey }, { id: operatorId });
+```
+
+通知メール・Web Push のリンクは seed の `mailSettings[].ticketUrlTemplate` で Project の管理画面に向けます。
+
 ### Operator API から使う
 
-運用者向けの標準機能も API だけを提供します。管理画面・CLI・自動化は各利用者が実装し、`@inquiry-platform/sdk` の `createPlatformApiClient` で同じ API を使います。認証・認可・入力検証・監査・通知・個人情報の扱いは gateway/Core が強制するため、利用者側で再実装しません。`GET /api` が標準機能とセキュリティ契約を返します。ブラウザから別 Origin へ直接呼ぶための CORS は提供しないため、同一 Origin または利用者側の BFF を使います。
+基盤全体を運用する人向けの標準機能は、Access の背後にある API gateway が提供します。管理画面・CLI・自動化は各利用者が実装し、`@inquiry-platform/sdk` の `createPlatformApiClient` で同じ API を使います。認証・認可・入力検証・監査・通知・個人情報の扱いは gateway/Core が強制するため、利用者側で再実装しません。`GET /api` が標準機能とセキュリティ契約を返します。ブラウザから別 Origin へ直接呼ぶための CORS は提供しないため、同一 Origin または利用者側の BFF を使います。
 
-標準 API と同じ機能を Project 側で置き換えることは許可しません。追加機能は標準 API の外側にある独自拡張として実装します。
+標準機能の規則（状態遷移・監査・送信）を Project 側で再実装することは許可しません。Project の管理画面は `ProjectOperator` 経由で Core の同じ規則を使い、追加機能は標準 API の外側にある独自拡張として実装します。
 
 ## ドキュメント
 

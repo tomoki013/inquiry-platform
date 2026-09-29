@@ -26,7 +26,7 @@
 | `admin.jsonc` の `vars` | `ACCESS_TEAM_DOMAIN`、`ACCESS_AUD`、`ADMIN_ORIGIN`（cookie 認証する利用者クライアントの Origin）、`DEFAULT_ADMIN_ROLE`（任意で `ADMIN_ROLES`） |
 
 `seed.ts` の `mailSettings` で Project ごとの `supportEmail` / `noreplyEmail` /
-`notificationEmail` / `fromName` を指定できます。未設定の項目は `api.jsonc` の既存値へ
+`notificationEmail` / `fromName` / `ticketUrlTemplate`（通知リンクの行き先、v0.3.0+）を指定できます。未設定の項目は `api.jsonc` の既存値へ
 フォールバックします。`mail-ingress.jsonc` の `APP_MAIL_ROUTES` は受信アドレスから
 Project slug と転送先を解決する JSON 配列です。
 
@@ -37,7 +37,7 @@ Project slug と転送先を解決する JSON 配列です。
 固定した tag を clone して依存を入れ、`scripts/deploy.mjs` にデプロイ側のディレクトリを渡す。
 
 ```bash
-git clone --depth 1 --branch v0.2.0 https://github.com/example-org/inquiry-platform.git
+git clone --depth 1 --branch v0.3.0 https://github.com/example-org/inquiry-platform.git
 cd inquiry-platform
 pnpm install --frozen-lockfile
 ```

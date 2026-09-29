@@ -58,4 +58,6 @@ Project → Intake.submitContact / Intake.submitReport
 
 `OPERATOR_TICKET_URL_TEMPLATE` は `https://operator.example.com/tickets/{ticketNumber}` のような URL template。利用者が作る運用クライアントの実際の route を指定し、`{ticketNumber}` だけを基盤が差し替える。
 
+Project が自分の管理画面を持つ場合は、seed の `mailSettings[].ticketUrlTemplate`（`app_mail_settings.ticket_url_template`、migration 0012）でその Project の通知リンクだけを差し替える。メールと Web Push の両方に効く。
+
 具体的な値はデプロイ側の設定に置く。API gateway は通知を送らず、Core の結果を認証済み利用者へ返すだけである。
