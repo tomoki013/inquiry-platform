@@ -23,6 +23,7 @@ import { TicketService } from "./domain/ticket-service";
 import type { AdminCoreEnv } from "./env";
 import { putReportEvidence } from "./evidence";
 import { json } from "./http";
+import { recordMailReceipt } from "./mail-receipts";
 import { buildServices } from "./services";
 
 const forbidden = {
@@ -42,7 +43,7 @@ const taken = {
 
 /**
  * The door a project uses: submit a contact, submit a report, attach evidence.
- * Nothing else — no reads, no notes, no status changes.
+ * Provider delivery receipts also enter here. No reads, notes or status changes.
  *
  * `AdminCore` is the platform's own entrypoint and can do everything; a
  * project binds to this one instead. Which projects a binding may submit for
@@ -178,6 +179,14 @@ export class Intake extends WorkerEntrypoint<AdminCoreEnv> implements IntakeApi 
   override async fetch(request: Request): Promise<Response> {
     const grant = this.grant();
     if (!grant) return json({ error: "FORBIDDEN" }, 403);
+    const receipt = /^\/internal\/projects\/([a-z0-9-]{1,64})\/mail-receipts$/.exec(
+      new URL(request.url).pathname,
+    );
+    if (receipt && request.method === "POST") {
+      const slug = receipt[1] as string;
+      if (!grant.projects.includes(slug)) return json({ error: "FORBIDDEN" }, 403);
+      return recordMailReceipt(this.env.DB, slug, request);
+    }
     const match = /^\/internal\/reports\/([^/]+)\/attachments$/.exec(new URL(request.url).pathname);
     if (!match || request.method !== "PUT") return json({ error: "NOT_FOUND" }, 404);
     const reportId = decodeURIComponent(match[1] as string);

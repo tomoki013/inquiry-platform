@@ -16,6 +16,7 @@ import { ReplyService } from "./domain/reply-service";
 import { ReportService } from "./domain/report-service";
 import { SupportService } from "./domain/support-service";
 import type { AdminCoreEnv } from "./env";
+import { projectMailResolver } from "./project-mail";
 
 // Wiring: every service the entrypoints use, built from the environment.
 /**
@@ -38,6 +39,7 @@ export function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknow
   const mail: MailProvider = env.MAIL_API_KEY
     ? new ResendMailProvider(env.MAIL_API_KEY, undefined, branding.mailLogo)
     : new UnconfiguredMailProvider();
+  const delivery = projectMailResolver(env.PROJECT_MAIL_PROVIDERS, env, mail);
 
   const vapid = lazyVapid(env);
   const notifications = new NotificationService(
@@ -60,6 +62,7 @@ export function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknow
       resolve: async (appId) => {
         const settings = await templates.mailSettings(appId);
         return {
+          mail: delivery(appId).mail,
           notifyEmail: settings.notificationEmail ?? env.NOTIFICATION_EMAIL,
           from: `${settings.fromName ?? env.SUPPORT_FROM_NAME} <${settings.noreplyEmail ?? env.NOREPLY_EMAIL}>`,
           ...(settings.ticketUrlTemplate ? { ticketUrlTemplate: settings.ticketUrlTemplate } : {}),
@@ -86,6 +89,7 @@ export function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknow
       defaultSignature: branding.defaultSignature,
       legacySignatures: branding.legacySignatures,
       resolve: async (appId) => templates.mailSettings(appId),
+      delivery,
     },
   );
 

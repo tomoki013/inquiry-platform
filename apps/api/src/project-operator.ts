@@ -316,7 +316,7 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
       id: app.id,
       slug: app.slug,
       name: app.name,
-      mailConfigured: this.services.reply.mailConfigured,
+      mailConfigured: this.services.reply.mailConfiguredForApp(app.id),
       signature: own?.signatureText ?? "",
     };
   }

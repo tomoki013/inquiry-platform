@@ -66,6 +66,7 @@ export interface NotificationConfig {
 }
 
 export interface NotificationMailConfig {
+  mail?: MailProvider;
   notifyEmail?: string;
   from: string;
   /** The project's own console, when it has one; else the deployment's. */
@@ -216,9 +217,10 @@ export class NotificationService {
   private async sendEmail(event: TicketNotificationEvent): Promise<NotificationOutcome["email"]> {
     try {
       const resolved = await this.resolved(event);
-      if (!resolved.notifyEmail || !this.mail.configured) return "unconfigured";
+      const mail = resolved.mail ?? this.mail;
+      if (!resolved.notifyEmail || !mail.configured) return "unconfigured";
       if (!(await this.repo.emailWanted())) return "disabled";
-      const result = await this.mail.sendAdminNotification(
+      const result = await mail.sendAdminNotification(
         renderTicketNotificationMail(event, {
           to: resolved.notifyEmail,
           from: resolved.from,
