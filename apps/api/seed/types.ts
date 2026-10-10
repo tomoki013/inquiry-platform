@@ -65,4 +65,8 @@ export interface MailSettingsSeed {
    * `https://admin.example.com/#/inquiries/{ticketNumber}`. Notification links
    * point there instead of at the deployment-wide template. */
   ticketUrlTemplate?: string;
+  /** False: no "new ticket" mail for this project (push still goes), for a
+   * project whose messages already arrive in its own inbox. Omit to keep the
+   * deployment's behaviour. */
+  notifyByEmail?: boolean;
 }

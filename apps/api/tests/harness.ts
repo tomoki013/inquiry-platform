@@ -268,6 +268,7 @@ export async function harness(
           notifyEmail: settings.notificationEmail ?? options.notifyEmail,
           from: `${settings.fromName ?? "Example Support"} <${settings.noreplyEmail ?? "notification@example.com"}>`,
           ...(settings.ticketUrlTemplate ? { ticketUrlTemplate: settings.ticketUrlTemplate } : {}),
+          ...(settings.notifyByEmail === false ? { emailEnabled: false } : {}),
         };
       },
     },

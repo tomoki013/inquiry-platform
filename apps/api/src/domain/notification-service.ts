@@ -71,6 +71,8 @@ export interface NotificationMailConfig {
   from: string;
   /** The project's own console, when it has one; else the deployment's. */
   ticketUrlTemplate?: string;
+  /** False when the project has turned announcement mail off. */
+  emailEnabled?: boolean;
 }
 
 export interface PushTransport {
@@ -218,6 +220,7 @@ export class NotificationService {
     try {
       const resolved = await this.resolved(event);
       const mail = resolved.mail ?? this.mail;
+      if (resolved.emailEnabled === false) return "disabled";
       if (!resolved.notifyEmail || !mail.configured) return "unconfigured";
       if (!(await this.repo.emailWanted())) return "disabled";
       const result = await mail.sendAdminNotification(

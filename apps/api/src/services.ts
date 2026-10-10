@@ -66,6 +66,7 @@ export function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknow
           notifyEmail: settings.notificationEmail ?? env.NOTIFICATION_EMAIL,
           from: `${settings.fromName ?? env.SUPPORT_FROM_NAME} <${settings.noreplyEmail ?? env.NOREPLY_EMAIL}>`,
           ...(settings.ticketUrlTemplate ? { ticketUrlTemplate: settings.ticketUrlTemplate } : {}),
+          ...(settings.notifyByEmail === false ? { emailEnabled: false } : {}),
         };
       },
     },

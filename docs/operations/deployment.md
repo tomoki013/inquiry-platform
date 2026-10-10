@@ -1,6 +1,6 @@
 # デプロイ
 
-最終更新: 2026-10-06。
+最終更新: 2026-10-10。
 
 このリポジトリは特定の環境を持たない。`apps/*/wrangler.jsonc` はローカル開発とテストのための参照設定で、名前・ID・アドレスはすべてプレースホルダ。自分の Cloudflare アカウントに立てるときは、実際の値を持った設定を**自分のリポジトリ**に置き、release tag を固定してこのリポジトリをデプロイする。
 
@@ -26,7 +26,9 @@
 | `admin.jsonc` の `vars` | `ACCESS_TEAM_DOMAIN`、`ACCESS_AUD`、`ADMIN_ORIGIN`（cookie 認証する利用者クライアントの Origin）、`DEFAULT_ADMIN_ROLE`（任意で `ADMIN_ROLES`） |
 
 `seed.ts` の `mailSettings` で Project ごとの `supportEmail` / `noreplyEmail` /
-`notificationEmail` / `fromName` / `ticketUrlTemplate`（通知リンクの行き先、v0.3.1+）を指定できます。未設定の項目は `api.jsonc` の既存値へ
+`notificationEmail` / `fromName` / `ticketUrlTemplate`（通知リンクの行き先、v0.3.1+）/
+`notifyByEmail`（`false` でその Project の新着通知メールを止める。Push は届く。v0.3.3+、migration
+`0013`）を指定できます。未設定の項目は `api.jsonc` の既存値へ
 フォールバックします。`mail-ingress.jsonc` の `APP_MAIL_ROUTES` は受信アドレスから
 Project slug と転送先を解決する JSON 配列です。
 

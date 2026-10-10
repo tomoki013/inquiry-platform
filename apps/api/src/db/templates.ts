@@ -32,6 +32,8 @@ export interface ProjectMailSettings {
   notificationEmail?: string;
   /** The project's operator-console link, `{ticketNumber}` substituted. */
   ticketUrlTemplate?: string;
+  /** False when the project's new tickets are not announced by mail. */
+  notifyByEmail?: boolean;
 }
 
 function toTemplate(row: TemplateRow): ReplyTemplate {
@@ -194,7 +196,7 @@ export class TemplateRepository {
     const rows = await this.db
       .prepare(
         `SELECT app_id, support_email, from_name, noreply_email, notification_email,
-                ticket_url_template
+                ticket_url_template, notify_by_email
            FROM app_mail_settings
           WHERE app_id IS NULL OR app_id = ?
           ORDER BY app_id IS NULL`,
@@ -207,6 +209,7 @@ export class TemplateRepository {
         noreply_email: string | null;
         notification_email: string | null;
         ticket_url_template: string | null;
+        notify_by_email: number | null;
       }>();
 
     const resolved: ProjectMailSettings = {};
@@ -218,6 +221,8 @@ export class TemplateRepository {
         resolved.notificationEmail = row.notification_email;
       if (!resolved.ticketUrlTemplate && row.ticket_url_template)
         resolved.ticketUrlTemplate = row.ticket_url_template;
+      if (resolved.notifyByEmail === undefined && row.notify_by_email !== null)
+        resolved.notifyByEmail = row.notify_by_email === 1;
     }
     return resolved;
   }

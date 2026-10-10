@@ -135,6 +135,39 @@ describe("ticket notifications carry a reference, never content", () => {
     expect(mail?.from).toBe("Orbit Support <noreply@orbit.example>");
   });
 
+  it("pushes but does not mail for a project that turned announcement mail off", async () => {
+    const h = await harness({ notifyEmail: "operator@example.com" });
+    const appId = await seedApp(h, "orbit");
+    await seedApp(h, "prism");
+    await subscribe(h, "https://push.example/a");
+    await h.db
+      .prepare(
+        `INSERT INTO app_mail_settings (app_id, signature_text, notification_email, notify_by_email, updated_at)
+         VALUES (?, '', ?, 0, ?)`,
+      )
+      .bind(appId, "orbit-ops@example.com", new Date().toISOString())
+      .run();
+
+    await inquiry(h);
+    expect(h.mail.sent).toHaveLength(0);
+    expect(h.push.sent).toHaveLength(1);
+
+    // Another project keeps the deployment's behaviour.
+    await h.support.createThread(
+      {
+        appSlug: "prism",
+        source: "web_form",
+        requesterEmail: "someone@example.com",
+        subject: "prism",
+        bodyText: "本文",
+      },
+      { type: "app", id: "test-app" },
+    );
+    await h.settled();
+    expect(h.mail.sent).toHaveLength(1);
+    expect(h.mail.sent[0]?.to).toBe("operator@example.com");
+  });
+
   it("links to the project's own console when it has one", async () => {
     const h = await harness({ notifyEmail: "operator@example.com" });
     const appId = await seedApp(h, "orbit");
