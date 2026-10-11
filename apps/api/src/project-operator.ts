@@ -1,8 +1,13 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type {
   ActorRef,
+  OperatorAppliedTemplate,
   OperatorProject,
   OperatorRef,
+  OperatorReply,
+  OperatorReplyTemplate,
+  OperatorTemplateChange,
+  OperatorTemplateInput,
   OperatorTicketChange,
   OperatorTicketDetail,
   OperatorTicketPage,
@@ -10,6 +15,7 @@ import type {
   OperatorTicketSummary,
   ProjectOperatorApi,
   ProjectOperatorProps,
+  ReplyTemplate,
   Result,
   Ticket,
   TicketDetail,
@@ -73,8 +79,29 @@ const replySchema = z
     body: z.string(),
     idempotencyKey: z.string(),
     reopenIfResolved: z.boolean().optional(),
+    templateId: z.string().min(1).max(200).optional(),
   })
   .strict();
+const templateInputSchema = z
+  .object({
+    key: z.string(),
+    name: z.string(),
+    subject: z.string().nullable().optional(),
+    body: z.string(),
+    isActive: z.boolean().optional(),
+    sortOrder: z.number().optional(),
+  })
+  .strict();
+const templateChangeSchema = z
+  .object({
+    name: z.string().optional(),
+    subject: z.string().nullable().optional(),
+    body: z.string().optional(),
+    isActive: z.boolean().optional(),
+    sortOrder: z.number().optional(),
+  })
+  .strict();
+const listTemplatesSchema = z.object({ includeInactive: z.boolean().optional() }).strict();
 const signatureSchema = z.string().max(2000);
 const TICKET_NUMBER = /^TK-\d{1,12}$/;
 
@@ -261,7 +288,7 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
   async reply(
     projectSlug: string,
     ticketId: string,
-    raw: { body: string; idempotencyKey: string; reopenIfResolved?: boolean },
+    raw: OperatorReply,
     operator: OperatorRef,
   ): Promise<Result<OperatorTicketDetail>> {
     const parsed = replySchema.safeParse(raw);
@@ -279,12 +306,15 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
           error: { code: "CONFLICT", message: "返信先のメール会話がありません。" },
         };
       }
+      const templateId = parsed.data.templateId;
+      if (templateId && !(await this.ownTemplate(scoped.app, templateId))) return notFound;
       const sent = await this.services.reply.send(
         {
           threadId: ticket.thread_id,
           bodyText: parsed.data.body,
           idempotencyKey: parsed.data.idempotencyKey,
           reopenIfResolved: parsed.data.reopenIfResolved ?? false,
+          ...(templateId ? { templateId } : {}),
         },
         actor,
       );
@@ -318,6 +348,125 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
     }
   }
 
+  async listTemplates(
+    projectSlug: string,
+    raw: { includeInactive?: boolean } = {},
+  ): Promise<Result<OperatorReplyTemplate[]>> {
+    const parsed = listTemplatesSchema.safeParse(raw ?? {});
+    if (!parsed.success) return validationFailure(parsed.error);
+    try {
+      const scoped = await this.scope(projectSlug);
+      if (!scoped.ok) return scoped;
+      const listed = await this.services.reply.listTemplates({
+        forAppId: scoped.app.id,
+        includeInactive: parsed.data.includeInactive ?? false,
+      });
+      if (!listed.ok) return listed;
+      // `forAppId` also returns the deployment's shared templates; a project
+      // console neither sees nor edits those.
+      return {
+        ok: true,
+        value: listed.value.filter((row) => row.appId === scoped.app.id).map(toTemplate),
+      };
+    } catch (error) {
+      return internalFailure("operator.listTemplates", error);
+    }
+  }
+
+  async createTemplate(
+    projectSlug: string,
+    raw: OperatorTemplateInput,
+    operator: OperatorRef,
+  ): Promise<Result<OperatorReplyTemplate>> {
+    const parsed = templateInputSchema.safeParse(raw);
+    if (!parsed.success) return validationFailure(parsed.error);
+    try {
+      const scoped = await this.scope(projectSlug);
+      if (!scoped.ok) return scoped;
+      const actor = this.actor(scoped.grant, operator);
+      if (!actor) return forbidden;
+      const { subject, ...rest } = parsed.data;
+      const created = await this.services.reply.createTemplate(
+        {
+          ...rest,
+          ...(subject ? { subject } : {}),
+          category: "general",
+          // Always this project's: a console cannot write a shared template.
+          appId: scoped.app.id,
+        },
+        actor,
+      );
+      return created.ok ? { ok: true, value: toTemplate(created.value) } : created;
+    } catch (error) {
+      return internalFailure("operator.createTemplate", error);
+    }
+  }
+
+  async updateTemplate(
+    projectSlug: string,
+    templateId: string,
+    raw: OperatorTemplateChange,
+    operator: OperatorRef,
+  ): Promise<Result<OperatorReplyTemplate>> {
+    const parsed = templateChangeSchema.safeParse(raw);
+    if (!parsed.success) return validationFailure(parsed.error);
+    try {
+      const scoped = await this.scope(projectSlug);
+      if (!scoped.ok) return scoped;
+      const actor = this.actor(scoped.grant, operator);
+      if (!actor) return forbidden;
+      if (!(await this.ownTemplate(scoped.app, templateId))) return notFound;
+      const updated = await this.services.reply.updateTemplate(templateId, parsed.data, actor);
+      return updated.ok ? { ok: true, value: toTemplate(updated.value) } : updated;
+    } catch (error) {
+      return internalFailure("operator.updateTemplate", error);
+    }
+  }
+
+  async applyTemplate(
+    projectSlug: string,
+    ticketRef: string,
+    templateId: string,
+  ): Promise<Result<OperatorAppliedTemplate>> {
+    try {
+      const scoped = await this.scope(projectSlug);
+      if (!scoped.ok) return scoped;
+      const ticket = await this.ticket(scoped.app, ticketRef);
+      if (!ticket || !(await this.ownTemplate(scoped.app, templateId))) return notFound;
+      if (!ticket.thread_id) {
+        return {
+          ok: false,
+          error: { code: "CONFLICT", message: "返信先のメール会話がありません。" },
+        };
+      }
+      const applied = await this.services.reply.applyTemplate({
+        threadId: ticket.thread_id,
+        templateId,
+      });
+      if (!applied.ok) return applied;
+      return {
+        ok: true,
+        value: {
+          body: applied.value.bodyText,
+          unresolved: applied.value.unresolved,
+          subject: applied.value.subject,
+        },
+      };
+    } catch (error) {
+      return internalFailure("operator.applyTemplate", error);
+    }
+  }
+
+  /** A template of this project, or `null` for a shared one, another
+   * project's, or none. */
+  private async ownTemplate(app: AppRow, templateId: unknown): Promise<ReplyTemplate | null> {
+    if (typeof templateId !== "string" || templateId.length === 0 || templateId.length > 200) {
+      return null;
+    }
+    const found = await this.services.reply.getTemplate(templateId);
+    return found.ok && found.value.appId === app.id ? found.value : null;
+  }
+
   private async projectView(app: AppRow): Promise<OperatorProject> {
     const settings = await this.services.reply.listSettings();
     const own = settings.ok ? settings.value.find((row) => row.appId === app.id) : undefined;
@@ -329,6 +478,19 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
       signature: own?.signatureText ?? "",
     };
   }
+}
+
+function toTemplate(template: ReplyTemplate): OperatorReplyTemplate {
+  return {
+    id: template.id,
+    key: template.key,
+    name: template.name,
+    subject: template.subject ?? null,
+    body: template.body,
+    isActive: template.isActive,
+    sortOrder: template.sortOrder,
+    updatedAt: template.updatedAt,
+  };
 }
 
 function toSummary(ticket: Ticket): OperatorTicketSummary {
