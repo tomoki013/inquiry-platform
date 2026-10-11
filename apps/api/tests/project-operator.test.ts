@@ -31,6 +31,10 @@ function operator(props: ProjectOperatorProps | Record<string, unknown> | undefi
     addNote: entry.addNote.bind(entry),
     reply: entry.reply.bind(entry),
     setSignature: entry.setSignature.bind(entry),
+    listTemplates: entry.listTemplates.bind(entry),
+    createTemplate: entry.createTemplate.bind(entry),
+    updateTemplate: entry.updateTemplate.bind(entry),
+    applyTemplate: entry.applyTemplate.bind(entry),
   };
   return { ctx, api };
 }
@@ -38,7 +42,7 @@ function operator(props: ProjectOperatorProps | Record<string, unknown> | undefi
 const orbitConsole: ProjectOperatorProps = { caller: "orbit-api", projects: ["orbit"] };
 const person = { id: "sub-1234" };
 
-async function contact(projectSlug: string, key: string, email?: string) {
+async function contact(projectSlug: string, key: string, email?: string, name?: string) {
   const ctx = createExecutionContext();
   const props: IntakeProps = { caller: "form", projects: ["orbit", "prism"] };
   Object.defineProperty(ctx, "props", { value: props });
@@ -54,6 +58,7 @@ async function contact(projectSlug: string, key: string, email?: string) {
     subject: `件名 ${key}`,
     message: `本文 ${key}`,
     ...(email ? { email } : {}),
+    ...(name ? { name } : {}),
     channel: "web_form",
   });
   await waitOnExecutionContext(ctx);
@@ -215,6 +220,111 @@ describe("ProjectOperator: changes go through Core's rules", () => {
       "SELECT a.slug FROM app_mail_settings m JOIN apps a ON a.id = m.app_id",
     ).all<{ slug: string }>();
     expect(rows.results.map((row) => row.slug)).toEqual(["orbit"]);
+  });
+});
+
+describe("ProjectOperator: the project's own reply templates", () => {
+  const draft = {
+    key: "orbit_thanks",
+    name: "お礼",
+    subject: "お問い合わせについて",
+    body: "{{userName}} 様\n\n{{appName}}をご利用いただきありがとうございます。\n{{answer}}",
+  };
+
+  it("creates, lists, edits and retires templates of its own project only", async () => {
+    const orbit = createProjectOperatorClient(operator(orbitConsole).api, "orbit");
+    const created = await orbit.createTemplate(draft, person);
+    expect(created).toMatchObject({ ok: true, value: { key: "orbit_thanks", isActive: true } });
+    if (!created.ok) return;
+    const row = await testEnv.DB.prepare(
+      "SELECT a.slug FROM reply_templates t JOIN apps a ON a.id = t.app_id WHERE t.id = ?",
+    )
+      .bind(created.value.id)
+      .first<{ slug: string }>();
+    expect(row?.slug).toBe("orbit");
+
+    // A shared template exists but is not the console's to see.
+    await testEnv.DB.prepare(
+      `INSERT INTO reply_templates (id, key, name, category, app_id, subject, body, include_signature, is_active, sort_order, created_at, updated_at)
+       VALUES ('shared-1', 'shared_one', '共有', 'general', NULL, NULL, '共有本文', 1, 1, 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+    ).run();
+    const listed = await orbit.listTemplates();
+    expect(listed.ok && listed.value.map((t) => t.key)).toEqual(["orbit_thanks"]);
+
+    const edited = await orbit.updateTemplate(
+      created.value.id,
+      { body: "新しい本文", subject: null },
+      person,
+    );
+    expect(edited).toMatchObject({ ok: true, value: { body: "新しい本文", subject: null } });
+    const retired = await orbit.updateTemplate(created.value.id, { isActive: false }, person);
+    expect(retired).toMatchObject({ ok: true, value: { isActive: false } });
+    const active = await orbit.listTemplates();
+    expect(active.ok && active.value).toEqual([]);
+    const all = await orbit.listTemplates({ includeInactive: true });
+    expect(all.ok && all.value.length).toBe(1);
+
+    const prism = createProjectOperatorClient(
+      operator({ caller: "prism-api", projects: ["prism"] }).api,
+      "prism",
+    );
+    expect(await prism.updateTemplate(created.value.id, { body: "x" }, person)).toMatchObject({
+      ok: false,
+      error: { code: "NOT_FOUND" },
+    });
+    expect(await orbit.updateTemplate("shared-1", { body: "x" }, person)).toMatchObject({
+      ok: false,
+      error: { code: "NOT_FOUND" },
+    });
+  });
+
+  it("refuses an operator id that is an address and a field it does not decide", async () => {
+    const orbit = createProjectOperatorClient(operator(orbitConsole).api, "orbit");
+    expect(await orbit.createTemplate(draft, { id: "a@example.com" })).toMatchObject({
+      ok: false,
+      error: { code: "FORBIDDEN" },
+    });
+    expect(await orbit.createTemplate({ ...draft, appId: "other" } as never, person)).toMatchObject(
+      { ok: false, error: { code: "VALIDATION_ERROR" } },
+    );
+  });
+
+  it("renders a template against a ticket, leaving what only a person can write", async () => {
+    const own = await contact("orbit", "o-1", "a@example.com", "山田");
+    const orbit = createProjectOperatorClient(operator(orbitConsole).api, "orbit");
+    const created = await orbit.createTemplate(draft, person);
+    if (!created.ok) throw new Error("fixture template failed");
+    const applied = await orbit.applyTemplate(own.number, created.value.id);
+    expect(applied).toMatchObject({
+      ok: true,
+      value: { unresolved: ["answer"], subject: "お問い合わせについて" },
+    });
+    expect(applied.ok && applied.value.body.startsWith("山田 様")).toBe(true);
+    expect(applied.ok && applied.value.body.includes("{{appName}}")).toBe(false);
+
+    const other = await contact("prism", "p-1", "b@example.com");
+    expect(await orbit.applyTemplate(other.id, created.value.id)).toMatchObject({
+      ok: false,
+      error: { code: "NOT_FOUND" },
+    });
+  });
+
+  it("will not send with another project's template", async () => {
+    const own = await contact("orbit", "o-1", "a@example.com");
+    const prism = createProjectOperatorClient(
+      operator({ caller: "prism-api", projects: ["prism"] }).api,
+      "prism",
+    );
+    const theirs = await prism.createTemplate({ ...draft, key: "prism_thanks" }, person);
+    if (!theirs.ok) throw new Error("fixture template failed");
+    const orbit = createProjectOperatorClient(operator(orbitConsole).api, "orbit");
+    expect(
+      await orbit.reply(
+        own.id,
+        { body: "本文", idempotencyKey: "reply-000002", templateId: theirs.value.id },
+        person,
+      ),
+    ).toMatchObject({ ok: false, error: { code: "NOT_FOUND" } });
   });
 });
 

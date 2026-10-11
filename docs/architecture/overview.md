@@ -27,7 +27,7 @@ flowchart TB
 ```
 
 - Core（`apps/api`）は route も `workers.dev` も持たない。到達手段は Service Binding だけで、呼び出し側は `@inquiry-platform/core` の型しか知らない。
-- Core には入口が 3 つある。`AdminCore`（基盤自身: API gateway と mail-ingress）、`Intake`（Project 用: 受付だけ）、`ProjectOperator`（Project 自身の管理画面用: 自 Project のチケットの閲覧・対応だけ）。Project は後の 2 つにだけ bind する（§7）。
+- Core には入口が 3 つある。`AdminCore`（基盤自身: API gateway と mail-ingress）、`Intake`（Project 用: 受付だけ）、`ProjectOperator`（Project 自身の管理画面用: 自 Project のチケットの閲覧・対応と、自 Project の返信テンプレート・署名の管理だけ）。Project は後の 2 つにだけ bind する（§7）。
 - インターネットに面した受付口（Turnstile・client key・rate limit）は Project 側の Worker にある。基盤は公開 HTTP を持たないので、独自ドメインは要らない。Service Binding が使えない相手（別アカウントの Worker、iOS から直接など）が出たときに、`Intake` の前に公開 Worker を足す。
 - 基盤が知るのは「誰が・どの対象を・何の理由で」まで。対象が何であるか、どう消すかは Project が知る（Moderation adapter）。
 

@@ -271,6 +271,60 @@ export interface OperatorProject {
   signature: string;
 }
 
+/** A reply template owned by one project. Shared deployment templates are not
+ * listed: a project's console only sees and edits its own. */
+export interface OperatorReplyTemplate {
+  id: string;
+  /** Stable handle, lowercase words joined by underscores. Never changes. */
+  key: string;
+  name: string;
+  /** Used only for a ticket with no mail subject of its own (a form submission). */
+  subject: string | null;
+  /** May contain `{{appName}}`, `{{userName}}`, `{{supportUrl}}` and free
+   * placeholders. A reply still containing any `{{...}}` is refused. */
+  body: string;
+  isActive: boolean;
+  sortOrder: number;
+  updatedAt: string;
+}
+
+export interface OperatorTemplateInput {
+  key: string;
+  name: string;
+  subject?: string | null;
+  body: string;
+  isActive?: boolean;
+  sortOrder?: number;
+}
+
+export interface OperatorTemplateChange {
+  name?: string;
+  /** `null` clears it, which puts the default subject back. */
+  subject?: string | null;
+  body?: string;
+  isActive?: boolean;
+  sortOrder?: number;
+}
+
+/** A template rendered against one ticket. The signature is not included: it
+ * is added when the reply is sent. */
+export interface OperatorAppliedTemplate {
+  body: string;
+  /** Placeholders still standing. A non-empty list blocks sending. */
+  unresolved: string[];
+  /** The subject the reply goes out with if this template is named on send. */
+  subject: string;
+}
+
+export interface OperatorReply {
+  body: string;
+  idempotencyKey: string;
+  reopenIfResolved?: boolean;
+  /** The project template the reply was written from, if any. Only its subject
+   * is used, and only for a ticket without a mail subject of its own. */
+  templateId?: string;
+}
+
 /**
  * What the platform's `ProjectOperator` entrypoint answers: a project's own
  * console working its own tickets. Every call names the project, the binding's
@@ -306,7 +360,7 @@ export interface ProjectOperatorApi {
   reply(
     projectSlug: string,
     ticketId: string,
-    reply: { body: string; idempotencyKey: string; reopenIfResolved?: boolean },
+    reply: OperatorReply,
     operator: OperatorRef,
   ): Promise<IntakeResult<OperatorTicketDetail>>;
   setSignature(
@@ -314,4 +368,26 @@ export interface ProjectOperatorApi {
     signature: string,
     operator: OperatorRef,
   ): Promise<IntakeResult<OperatorProject>>;
+  listTemplates(
+    projectSlug: string,
+    options?: { includeInactive?: boolean },
+  ): Promise<IntakeResult<OperatorReplyTemplate[]>>;
+  createTemplate(
+    projectSlug: string,
+    input: OperatorTemplateInput,
+    operator: OperatorRef,
+  ): Promise<IntakeResult<OperatorReplyTemplate>>;
+  updateTemplate(
+    projectSlug: string,
+    templateId: string,
+    change: OperatorTemplateChange,
+    operator: OperatorRef,
+  ): Promise<IntakeResult<OperatorReplyTemplate>>;
+  /** Renders a project template against a ticket: `{{userName}}` from the name
+   * the person typed, `{{appName}}` and `{{supportUrl}}` from the project. */
+  applyTemplate(
+    projectSlug: string,
+    ticketRef: string,
+    templateId: string,
+  ): Promise<IntakeResult<OperatorAppliedTemplate>>;
 }

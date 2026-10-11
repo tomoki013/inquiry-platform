@@ -4,8 +4,13 @@ import type {
   EvidenceReceipt,
   IntakeBinding,
   IntakeResult,
+  OperatorAppliedTemplate,
   OperatorProject,
   OperatorRef,
+  OperatorReply,
+  OperatorReplyTemplate,
+  OperatorTemplateChange,
+  OperatorTemplateInput,
   OperatorTicketChange,
   OperatorTicketDetail,
   OperatorTicketPage,
@@ -104,10 +109,26 @@ export interface ProjectOperatorClient {
   ): Promise<IntakeResult<OperatorTicketDetail>>;
   reply(
     ticketId: string,
-    reply: { body: string; idempotencyKey: string; reopenIfResolved?: boolean },
+    reply: OperatorReply,
     operator: OperatorRef,
   ): Promise<IntakeResult<OperatorTicketDetail>>;
   setSignature(signature: string, operator: OperatorRef): Promise<IntakeResult<OperatorProject>>;
+  listTemplates(options?: {
+    includeInactive?: boolean;
+  }): Promise<IntakeResult<OperatorReplyTemplate[]>>;
+  createTemplate(
+    input: OperatorTemplateInput,
+    operator: OperatorRef,
+  ): Promise<IntakeResult<OperatorReplyTemplate>>;
+  updateTemplate(
+    templateId: string,
+    change: OperatorTemplateChange,
+    operator: OperatorRef,
+  ): Promise<IntakeResult<OperatorReplyTemplate>>;
+  applyTemplate(
+    ticketRef: string,
+    templateId: string,
+  ): Promise<IntakeResult<OperatorAppliedTemplate>>;
 }
 
 /**
@@ -138,5 +159,12 @@ export function createProjectOperatorClient(
       call((api) => api.reply(projectSlug, ticketId, reply, operator)),
     setSignature: (signature, operator) =>
       call((api) => api.setSignature(projectSlug, signature, operator)),
+    listTemplates: (options) => call((api) => api.listTemplates(projectSlug, options)),
+    createTemplate: (input, operator) =>
+      call((api) => api.createTemplate(projectSlug, input, operator)),
+    updateTemplate: (templateId, change, operator) =>
+      call((api) => api.updateTemplate(projectSlug, templateId, change, operator)),
+    applyTemplate: (ticketRef, templateId) =>
+      call((api) => api.applyTemplate(projectSlug, ticketRef, templateId)),
   };
 }
