@@ -58,7 +58,9 @@ const atRisk = [
   .join(" OR ");
 const SELECT = `SELECT t.*,s.name AS service_name,CASE WHEN ${breached} THEN 'BREACHED' WHEN ${atRisk} THEN 'AT_RISK' ELSE 'OK' END AS sla_state,
  (SELECT source_id FROM ticket_sources WHERE ticket_id=t.id AND source_type='report' LIMIT 1) AS report_id,
- COALESCE((SELECT source_id FROM ticket_sources WHERE ticket_id=t.id AND source_type='support' AND source_id=t.id),(SELECT source_id FROM ticket_sources WHERE ticket_id=t.id AND source_type='support' LIMIT 1)) AS thread_id
+ COALESCE((SELECT source_id FROM ticket_sources WHERE ticket_id=t.id AND source_type='support' AND source_id=t.id),(SELECT source_id FROM ticket_sources WHERE ticket_id=t.id AND source_type='support' LIMIT 1)) AS thread_id,
+ CASE WHEN EXISTS(SELECT 1 FROM ticket_sources WHERE ticket_id=t.id AND source_type='report') THEN 'report'
+      ELSE COALESCE((SELECT st.source FROM ticket_sources ts JOIN support_threads st ON st.id=ts.source_id WHERE ts.ticket_id=t.id AND ts.source_type='support' LIMIT 1), 'internal') END AS operator_source
  FROM tickets t JOIN services s ON s.id=t.service_id`;
 const clockBindings = (at: string) => Array(6).fill(at) as string[];
 
@@ -130,6 +132,10 @@ export class TicketService {
           values.push(input[key]);
         }
       }
+    }
+    if (input.sources?.length) {
+      where.push(`operator_source IN (${input.sources.map(() => "?").join(",")})`);
+      values.push(...input.sources);
     }
     if (input.queue) {
       where.push("status NOT IN ('RESOLVED','CLOSED')");

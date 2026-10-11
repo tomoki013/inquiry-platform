@@ -13,6 +13,7 @@ export type {
   OperatorTicketDetail,
   OperatorTicketPage,
   OperatorTicketQuery,
+  OperatorTicketSource,
   OperatorTicketSummary,
   OperatorTimelineItem,
   ProjectOperatorApi,
