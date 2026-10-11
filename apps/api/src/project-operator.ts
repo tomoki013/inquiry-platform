@@ -173,7 +173,39 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
   private async detail(id: string, offset = 0): Promise<Result<OperatorTicketDetail>> {
     const detail = await this.tickets.detail(id, offset);
     if (!detail.ok) return detail;
-    return { ok: true, value: toDetail(detail.value, await this.receiptId(detail.value.ticket)) };
+    return { ok: true, value: await this.view(detail.value) };
+  }
+
+  private async view(detail: TicketDetail): Promise<OperatorTicketDetail> {
+    const grant = this.grant();
+    const assignees = grant ? await this.assignees(grant, [detail.ticket.id]) : new Map();
+    return toDetail(
+      detail,
+      await this.receiptId(detail.ticket),
+      assignees.get(detail.ticket.id) ?? null,
+      (actorId) => (grant ? ownOperator(grant, actorId) : null),
+    );
+  }
+
+  /** Per ticket, the console operator who last moved it to ACKNOWLEDGED. */
+  private async assignees(
+    grant: ProjectOperatorProps,
+    ids: string[],
+  ): Promise<Map<string, string>> {
+    const found = new Map<string, string>();
+    if (ids.length === 0) return found;
+    const { results } = await this.env.DB.prepare(
+      `SELECT ticket_id, actor_id FROM ticket_events
+        WHERE event_type = 'ACKNOWLEDGED' AND ticket_id IN (${ids.map(() => "?").join(",")})
+        ORDER BY created_at, id`,
+    )
+      .bind(...ids)
+      .all<{ ticket_id: string; actor_id: string | null }>();
+    for (const row of results) {
+      const who = ownOperator(grant, row.actor_id);
+      if (who) found.set(row.ticket_id, who);
+    }
+    return found;
   }
 
   /** The reference the person holds: a report's own id, else the conversation's. */
@@ -214,9 +246,18 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
         ...(status === "open" ? { queue: "OPEN" } : status ? { status } : {}),
       });
       if (!page.ok) return page;
+      const assignees = await this.assignees(
+        scoped.grant,
+        page.value.items.map((ticket) => ticket.id),
+      );
       return {
         ok: true,
-        value: { items: page.value.items.map(toSummary), total: page.value.total },
+        value: {
+          items: page.value.items.map((ticket) =>
+            toSummary(ticket, assignees.get(ticket.id) ?? null),
+          ),
+          total: page.value.total,
+        },
       };
     } catch (error) {
       return internalFailure("operator.listTickets", error);
@@ -269,9 +310,7 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
         },
         actor,
       );
-      return result.ok
-        ? { ok: true, value: toDetail(result.value, await this.receiptId(result.value.ticket)) }
-        : result;
+      return result.ok ? { ok: true, value: await this.view(result.value) } : result;
     } catch (error) {
       return internalFailure("operator.changeTicket", error);
     }
@@ -293,9 +332,7 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
       const ticket = await this.ticket(scoped.app, ticketId);
       if (!ticket) return notFound;
       const result = await this.tickets.note({ id: ticket.id, ...parsed.data }, actor);
-      return result.ok
-        ? { ok: true, value: toDetail(result.value, await this.receiptId(result.value.ticket)) }
-        : result;
+      return result.ok ? { ok: true, value: await this.view(result.value) } : result;
     } catch (error) {
       return internalFailure("operator.addNote", error);
     }
@@ -509,7 +546,17 @@ function toTemplate(template: ReplyTemplate): OperatorReplyTemplate {
   };
 }
 
-function toSummary(ticket: Ticket): OperatorTicketSummary {
+/** An actor recorded as `<caller>:<operator id>` by this binding, as the
+ * project knows it; anything recorded by someone else stays hidden. */
+function ownOperator(
+  grant: ProjectOperatorProps,
+  actorId: string | null | undefined,
+): string | null {
+  const prefix = `${grant.caller}:`;
+  return actorId?.startsWith(prefix) ? actorId.slice(prefix.length) || null : null;
+}
+
+function toSummary(ticket: Ticket, assignee: string | null): OperatorTicketSummary {
   return {
     id: ticket.id,
     number: ticket.ticket_number,
@@ -523,15 +570,21 @@ function toSummary(ticket: Ticket): OperatorTicketSummary {
     slaState: ticket.sla_state,
     nextAction: ticket.next_action,
     nextActionAt: ticket.next_action_at,
+    assignee,
     createdAt: ticket.created_at,
     updatedAt: ticket.updated_at,
   };
 }
 
-function toDetail(detail: TicketDetail, receiptId: string | null): OperatorTicketDetail {
+function toDetail(
+  detail: TicketDetail,
+  receiptId: string | null,
+  assignee: string | null,
+  by: (actorId: string | null) => string | null,
+): OperatorTicketDetail {
   const { ticket } = detail;
   return {
-    ...toSummary(ticket),
+    ...toSummary(ticket, assignee),
     receiptId,
     revision: ticket.revision,
     acknowledgedAt: ticket.acknowledged_at,
@@ -558,6 +611,7 @@ function toDetail(detail: TicketDetail, receiptId: string | null): OperatorTicke
             kind: "event" as const,
             id: item.value.id,
             type: item.value.event_type,
+            by: by(item.value.actor_id),
             createdAt: item.value.created_at,
           },
     ),

@@ -210,6 +210,10 @@ export interface OperatorTicketSummary {
   slaState: "OK" | "AT_RISK" | "BREACHED";
   nextAction: string | null;
   nextActionAt: string | null;
+  /** Who took the ticket on: the `OperatorRef.id` of this project's console
+   * that last moved it to `ACKNOWLEDGED`. `null` until then, or when it was
+   * acknowledged from somewhere else. */
+  assignee: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -224,7 +228,15 @@ export type OperatorTimelineItem =
       body: string;
       createdAt: string;
     }
-  | { kind: "event"; id: string; type: string; createdAt: string };
+  | {
+      kind: "event";
+      id: string;
+      type: string;
+      /** The `OperatorRef.id` that did it, when it was this project's console;
+       * `null` for the platform, the person, or anyone else. */
+      by: string | null;
+      createdAt: string;
+    };
 
 export interface OperatorTicketDetail extends OperatorTicketSummary {
   /** What the person was given as their reference: the report's id for a
