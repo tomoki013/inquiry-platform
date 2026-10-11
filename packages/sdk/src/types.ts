@@ -80,8 +80,12 @@ export interface ReportSubmission {
 }
 
 export interface ContactReceipt {
-  /** Human-facing number, safe to show the person as a reference. */
+  /** The operator's number. Sequential: shows how many tickets exist, so
+   * show the person `receiptId` instead. */
   ticketNumber: string | null;
+  /** Opaque reference for the person who wrote in. A reply quoting
+   * `受付ID: <receiptId>` from their address joins this conversation. */
+  receiptId: string;
   status: PublicTicketStatus;
   duplicate: boolean;
 }
@@ -223,6 +227,9 @@ export type OperatorTimelineItem =
   | { kind: "event"; id: string; type: string; createdAt: string };
 
 export interface OperatorTicketDetail extends OperatorTicketSummary {
+  /** What the person was given as their reference: the report's id for a
+   * report, otherwise the conversation's. Opaque, unlike `number`. */
+  receiptId: string | null;
   /** Optimistic lock: a change names the revision it was based on. */
   revision: number;
   acknowledgedAt: string | null;

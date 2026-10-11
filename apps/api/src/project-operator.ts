@@ -172,7 +172,19 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
 
   private async detail(id: string, offset = 0): Promise<Result<OperatorTicketDetail>> {
     const detail = await this.tickets.detail(id, offset);
-    return detail.ok ? { ok: true, value: toDetail(detail.value) } : detail;
+    if (!detail.ok) return detail;
+    return { ok: true, value: toDetail(detail.value, await this.receiptId(detail.value.ticket)) };
+  }
+
+  /** The reference the person holds: a report's own id, else the conversation's. */
+  private async receiptId(ticket: Ticket): Promise<string | null> {
+    if (ticket.report_id) {
+      const row = await this.env.DB.prepare("SELECT external_report_id FROM reports WHERE id = ?")
+        .bind(ticket.report_id)
+        .first<{ external_report_id: string }>();
+      return row?.external_report_id ?? null;
+    }
+    return ticket.thread_id;
   }
 
   async project(projectSlug: string): Promise<Result<OperatorProject>> {
@@ -257,7 +269,9 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
         },
         actor,
       );
-      return result.ok ? { ok: true, value: toDetail(result.value) } : result;
+      return result.ok
+        ? { ok: true, value: toDetail(result.value, await this.receiptId(result.value.ticket)) }
+        : result;
     } catch (error) {
       return internalFailure("operator.changeTicket", error);
     }
@@ -279,7 +293,9 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
       const ticket = await this.ticket(scoped.app, ticketId);
       if (!ticket) return notFound;
       const result = await this.tickets.note({ id: ticket.id, ...parsed.data }, actor);
-      return result.ok ? { ok: true, value: toDetail(result.value) } : result;
+      return result.ok
+        ? { ok: true, value: toDetail(result.value, await this.receiptId(result.value.ticket)) }
+        : result;
     } catch (error) {
       return internalFailure("operator.addNote", error);
     }
@@ -512,10 +528,11 @@ function toSummary(ticket: Ticket): OperatorTicketSummary {
   };
 }
 
-function toDetail(detail: TicketDetail): OperatorTicketDetail {
+function toDetail(detail: TicketDetail, receiptId: string | null): OperatorTicketDetail {
   const { ticket } = detail;
   return {
     ...toSummary(ticket),
+    receiptId,
     revision: ticket.revision,
     acknowledgedAt: ticket.acknowledged_at,
     resolvedAt: ticket.resolved_at,

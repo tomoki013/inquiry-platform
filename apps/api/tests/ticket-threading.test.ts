@@ -1,6 +1,6 @@
 import type { IngestInboundEmailResult } from "@inquiry-platform/core";
 import { beforeEach, describe, expect, it } from "vitest";
-import { ticketNumbersFromReply } from "../src/domain/ticket-threading";
+import { receiptIdsFromReply, ticketNumbersFromReply } from "../src/domain/ticket-threading";
 import { expectOk, type Harness, harness, seedApp } from "./harness";
 
 /*
@@ -80,5 +80,41 @@ describe("a reply that names its ticket", () => {
     );
     expect(other.newThread).toBe(true);
     expect(other.threadId).not.toBe(first.threadId);
+  });
+});
+
+describe("a reply that quotes its receipt ID", () => {
+  it("reads a receipt ID from a tagged subject or an exact body line", () => {
+    const id = "3f2b6c1e-8a4d-4f7b-9c2e-1d5a6b7c8d9e";
+    expect(receiptIdsFromReply(`Re: [受付ID:${id}]`, "")).toEqual([id]);
+    expect(receiptIdsFromReply("Re: x", `追記\n> 受付ID: ${id}\n`)).toEqual([id]);
+    expect(receiptIdsFromReply("Re: x", `前の ${id} の件`)).toEqual([]);
+  });
+
+  it("joins the conversation it names, from the same address only", async () => {
+    const first = await open();
+    const reply = expectOk<IngestInboundEmailResult>(
+      (await h.support.ingestInboundEmail(
+        mail({
+          subject: "Re: 受付",
+          bodyText: `追加です\n\n> 受付ID: ${first.threadId}`,
+          messageId: "<r1@example.com>",
+        }),
+        { type: "email" },
+      )) as never,
+    );
+    expect(reply.threadId).toBe(first.threadId);
+    const stranger = expectOk<IngestInboundEmailResult>(
+      (await h.support.ingestInboundEmail(
+        mail({
+          from: "stranger@example.com",
+          subject: "Re: 受付",
+          bodyText: `受付ID: ${first.threadId}`,
+          messageId: "<r2@example.com>",
+        }),
+        { type: "email" },
+      )) as never,
+    );
+    expect(stranger.threadId).not.toBe(first.threadId);
   });
 });

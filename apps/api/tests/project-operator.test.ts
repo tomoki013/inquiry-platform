@@ -328,6 +328,16 @@ describe("ProjectOperator: the project's own reply templates", () => {
   });
 });
 
+describe("ProjectOperator: the person's reference", () => {
+  it("gives the conversation's id as the receipt ID, not the sequential number", async () => {
+    const own = await contact("orbit", "o-9", "a@example.com");
+    const client = createProjectOperatorClient(operator(orbitConsole).api, "orbit");
+    const detail = await client.getTicket(own.number);
+    expect(detail.ok && detail.value.receiptId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(detail.ok && detail.value.receiptId).not.toBe(own.number);
+  });
+});
+
 describe("createProjectOperatorClient", () => {
   it("answers UNAVAILABLE without a binding instead of throwing", async () => {
     const client = createProjectOperatorClient(undefined, "orbit");
