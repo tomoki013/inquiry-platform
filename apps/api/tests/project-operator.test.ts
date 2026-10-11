@@ -328,6 +328,47 @@ describe("ProjectOperator: the project's own reply templates", () => {
   });
 });
 
+describe("ProjectOperator: who took a ticket on", () => {
+  it("names the console operator who acknowledged it, in the list, the detail and the timeline", async () => {
+    const own = await contact("orbit", "o-a", "a@example.com");
+    const client = createProjectOperatorClient(operator(orbitConsole).api, "orbit");
+    const before = await client.getTicket(own.id);
+    expect(before.ok && before.value.assignee).toBeNull();
+    const revision = before.ok ? before.value.revision : -1;
+    await client.changeTicket(own.id, { revision, status: "ACKNOWLEDGED" }, person);
+
+    const listed = await client.listTickets();
+    expect(listed.ok && listed.value.items.find((t) => t.id === own.id)?.assignee).toBe("sub-1234");
+    const detail = await client.getTicket(own.id);
+    expect(detail.ok && detail.value.assignee).toBe("sub-1234");
+    const acknowledged =
+      detail.ok &&
+      detail.value.timeline.find((item) => item.kind === "event" && item.type === "ACKNOWLEDGED");
+    expect(acknowledged).toMatchObject({ by: "sub-1234" });
+    const created =
+      detail.ok &&
+      detail.value.timeline.find((item) => item.kind === "event" && item.type === "TICKET_CREATED");
+    expect(created).toMatchObject({ by: null });
+  });
+
+  it("does not reveal an actor recorded by another caller", async () => {
+    const own = await contact("orbit", "o-b", "a@example.com");
+    const first = createProjectOperatorClient(operator(orbitConsole).api, "orbit");
+    const before = await first.getTicket(own.id);
+    await first.changeTicket(
+      own.id,
+      { revision: before.ok ? before.value.revision : -1, status: "ACKNOWLEDGED" },
+      person,
+    );
+    const other = createProjectOperatorClient(
+      operator({ caller: "other-console", projects: ["orbit"] }).api,
+      "orbit",
+    );
+    const seen = await other.getTicket(own.id);
+    expect(seen.ok && seen.value.assignee).toBeNull();
+  });
+});
+
 describe("ProjectOperator: the person's reference", () => {
   it("gives the conversation's id as the receipt ID, not the sequential number", async () => {
     const own = await contact("orbit", "o-9", "a@example.com");
