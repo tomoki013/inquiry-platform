@@ -127,6 +127,16 @@ Project が自分の管理画面で自分のチケットを扱う入口。`apps/
 - 誰が管理画面を使えるかは Project の認証が決める。基盤の gateway・Access・role には何も足さない。
 - 通知のリンクは `app_mail_settings.ticket_url_template`（seed の `mailSettings[].ticketUrlTemplate`）で Project の管理画面へ向ける。未設定ならデプロイ全体の `OPERATOR_TICKET_URL_TEMPLATE`。
 
+### AdminCore の scope
+
+1 つのデプロイを複数の運営画面で分けて使うとき、gateway の `ADMIN_CORE` binding に `props: { scope: { services: [slug, …] } }` を書く。App の service は App と同じ slug（migration 0006 とトリガ）。`scope` が無ければ従来どおりデプロイ全体。`apps/api/src/domain/scope.ts`。
+
+- 一覧・件数・ダッシュボード・Ticket マスタ・監査ログは scope の service だけ。問い合わせは `app_id`、無ければ `default_service_id`、無ければ `unassigned` で判定する（Ticket のトリガと同じ規則）。`system` の監査行は含めない。
+- ID で指す操作（閲覧・変更・メモ・返信・下書き・定型文の適用・添付の取得・結合・関連付け・App の変更）は対象が scope 外なら `NOT_FOUND`。Ticket を scope 外の service へ移す・scope 外と結合する・問い合わせを scope 外の App に付け替えることもできない。
+- デプロイ全体の設定（App の追加、Ticket マスタ、共通の定型文・署名）は `FORBIDDEN`。共通の定型文は読める。受付（`createReport`・`createSupportThread`・受信メール・添付の upload）は scope 付き binding からは呼べない。
+- `scope` が不正な形なら何も見えない（全許可にはしない）。slug が未登録なら単にその分が空。
+- 通知（メール・Push）は scope と無関係にデプロイ単位のまま。
+
 標準機能は API gateway/Core が唯一の実装である。利用者は `GET /api` の descriptor と SDK を使い、標準 path を Project 側で再実装しない。追加機能は標準 path と衝突しない独自 namespace / Worker に分離する。UI が標準機能を隠すことはできても、サーバー側の認証・認可・検証・状態遷移を置き換えることはできない。
 
 ## 決定事項

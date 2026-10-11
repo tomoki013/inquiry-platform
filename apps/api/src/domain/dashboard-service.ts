@@ -5,6 +5,7 @@ import type { AuditRepository } from "../db/audit";
 import type { ReportRepository } from "../db/reports";
 import type { SupportRepository } from "../db/support";
 import { internalFailure } from "./failures";
+import { Scope } from "./scope";
 
 /**
  * The front page.
@@ -22,16 +23,16 @@ export class DashboardService {
     private readonly audit: AuditRepository,
   ) {}
 
-  async summary(): Promise<Result<DashboardSummary>> {
+  async summary(scope: Scope = Scope.all): Promise<Result<DashboardSummary>> {
     try {
       const [openReports, reviewingReports, openSupport, totalSupport, apps, recentActivity] =
         await Promise.all([
-          this.reports.countByStatus("open"),
-          this.reports.countByStatus("reviewing"),
-          this.support.countOpen(),
-          this.support.countAll(),
-          this.apps.listSummaries(false),
-          this.audit.list({ limit: 12, offset: 0 }),
+          this.reports.countByStatus("open", scope),
+          this.reports.countByStatus("reviewing", scope),
+          this.support.countOpen(scope),
+          this.support.countAll(scope),
+          this.apps.listSummaries(false).then((all) => all.filter((app) => scope.has(app.id))),
+          this.audit.list({ limit: 12, offset: 0 }, scope),
         ]);
 
       return ok({

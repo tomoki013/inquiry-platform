@@ -30,6 +30,7 @@ import { ModerationRegistry } from "./moderation";
 import type { NotificationHook } from "./notification-service";
 import type { ReplyService } from "./reply-service";
 import { reportMailSubject } from "./report-threading";
+import { Scope } from "./scope";
 
 /**
  * Moderation, as far as the platform is concerned.
@@ -293,11 +294,11 @@ export class ReportService {
     for (const row of results) await this.sendReceipt(row.id);
   }
 
-  async list(raw: unknown): Promise<Result<ReportListPage>> {
+  async list(raw: unknown, scope: Scope = Scope.all): Promise<Result<ReportListPage>> {
     const parsed = listReportsInputSchema.safeParse(raw ?? {});
     if (!parsed.success) return validationFailure(parsed.error);
     try {
-      return ok(await this.reports.list(parsed.data));
+      return ok(await this.reports.list(parsed.data, scope));
     } catch (error) {
       return internalFailure("report.list", error);
     }

@@ -37,6 +37,21 @@ export const projectOperatorPropsSchema = z.object({
   projects: z.array(slug).min(1).max(50),
 }) satisfies z.ZodType<ProjectOperatorProps>;
 
+/**
+ * An `AdminCore` binding's optional scope, from the deployment's binding
+ * `props`. With `scope`, the caller sees and changes only the tickets, reports,
+ * threads, apps and audit rows of these services — an app's service shares the
+ * app's slug — and deployment-wide settings become read-only. Without it, the
+ * whole deployment, as before.
+ */
+export const adminCorePropsSchema = z.object({
+  scope: z
+    .object({ services: z.array(slug).min(1).max(100) })
+    .strict()
+    .optional(),
+});
+export type AdminCoreProps = z.infer<typeof adminCorePropsSchema>;
+
 export const contactSubmissionSchema = z.object({
   projectSlug: slug.optional(),
   idempotencyKey: z.string().trim().min(1).max(200),

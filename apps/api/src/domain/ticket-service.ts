@@ -31,6 +31,7 @@ import { z } from "zod";
 import { SupportRepository } from "../db/support";
 import { internalFailure, notFound, validationFailure } from "./failures";
 import { ModerationRegistry } from "./moderation";
+import { Scope } from "./scope";
 
 // SQL computes SLA before filtering/pagination, so no tickets disappear between pages.
 function clockExpression(column: string, minutes: string, threshold: number) {
@@ -109,13 +110,18 @@ export class TicketService {
       return internalFailure("ticket.source", e);
     }
   }
-  async list(raw: unknown): Promise<Result<TicketPage>> {
+  async list(raw: unknown, scope: Scope = Scope.all): Promise<Result<TicketPage>> {
     const parsed = ticketListSchema.safeParse(raw ?? {});
     if (!parsed.success) return validationFailure(parsed.error);
     const input = parsed.data,
       at = nowIso(),
       where: string[] = [parsed.data.query ? "1=1" : "merged_into IS NULL"],
       values: unknown[] = [];
+    const scoped = scope.where("service_id");
+    if (scoped) {
+      where.push(scoped.sql);
+      values.push(...scoped.values);
+    }
     for (const key of [
       "status",
       "priority",
@@ -263,7 +269,7 @@ export class TicketService {
       return internalFailure("ticket.detail", e);
     }
   }
-  async masters(): Promise<Result<TicketMasters>> {
+  async masters(scope: Scope = Scope.all): Promise<Result<TicketMasters>> {
     try {
       const tables = [
         "services",
@@ -278,9 +284,13 @@ export class TicketService {
       const sla = await this.db
         .prepare("SELECT * FROM ticket_sla_settings ORDER BY priority")
         .all<SlaGoal & { priority: TicketPriority }>();
+      const services = (rows[0]?.results ?? []) as unknown as TicketMaster[];
+      const components = (rows[1]?.results ?? []) as unknown as (TicketMaster & {
+        service_id: string;
+      })[];
       return ok({
-        services: rows[0]?.results as unknown as TicketMaster[],
-        components: rows[1]?.results as unknown as TicketMaster[],
+        services: services.filter((service) => scope.has(service.id)),
+        components: components.filter((component) => scope.has(component.service_id)),
         categories: rows[2]?.results as unknown as TicketMaster[],
         groups: rows[3]?.results as unknown as TicketMaster[],
         assignees: rows[4]?.results as unknown as TicketMaster[],
@@ -673,27 +683,29 @@ export class TicketService {
       return internalFailure("ticket.merge", e);
     }
   }
-  async dashboard(): Promise<Result<TicketDashboard>> {
+  async dashboard(scope: Scope = Scope.all): Promise<Result<TicketDashboard>> {
     try {
+      const scoped = scope.where("service_id");
       const at = nowIso(),
-        sql = `FROM (${SELECT}) q WHERE merged_into IS NULL AND status NOT IN ('RESOLVED','CLOSED')`;
+        sql = `FROM (${SELECT}) q WHERE merged_into IS NULL AND status NOT IN ('RESOLVED','CLOSED')${scoped ? ` AND ${scoped.sql}` : ""}`,
+        only = scoped?.values ?? [];
       const counts = await this.db
         .prepare(
           `SELECT COUNT(*) AS open,SUM(acknowledged_at IS NULL) AS unacknowledged,SUM(priority IN ('P1','P2')) AS urgent,SUM(sla_state<>'OK') AS slaRisk,SUM(next_action_at<?) AS overdue,SUM(status='WAITING_CUSTOMER') AS waitingCustomer ${sql}`,
         )
-        .bind(at, ...clockBindings(at))
+        .bind(at, ...clockBindings(at), ...only)
         .first<Record<string, number>>();
       const queue = await this.db
         .prepare(
           `SELECT * ${sql} ORDER BY priority,CASE sla_state WHEN 'BREACHED' THEN 0 WHEN 'AT_RISK' THEN 1 ELSE 2 END,created_at LIMIT 10`,
         )
-        .bind(...clockBindings(at))
+        .bind(...clockBindings(at), ...only)
         .all<Ticket>();
       const attention = await this.db
         .prepare(
           `SELECT * ${sql} AND (sla_state<>'OK' OR next_action_at<? OR assignee_id IS NULL OR (status IN ('WAITING_CUSTOMER','WAITING_INTERNAL') AND updated_at<?)) ORDER BY priority,created_at LIMIT 10`,
         )
-        .bind(...clockBindings(at), at, new Date(Date.now() - 3 * 86400000).toISOString())
+        .bind(...clockBindings(at), ...only, at, new Date(Date.now() - 3 * 86400000).toISOString())
         .all<Ticket>();
       return ok({
         open: counts?.open ?? 0,

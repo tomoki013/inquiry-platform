@@ -11,6 +11,7 @@ import type {
   SupportThreadSummary,
 } from "@inquiry-platform/core";
 import { newId, nowIso } from "@inquiry-platform/core";
+import { Scope, THREAD_SERVICE } from "../domain/scope";
 
 interface ThreadRow {
   report_id: string | null;
@@ -251,11 +252,19 @@ export class SupportRepository {
       .bind(appId, nowIso(), threadId);
   }
 
-  async list(input: ListSupportThreadsInput): Promise<SupportThreadListPage> {
+  async list(
+    input: ListSupportThreadsInput,
+    scope: Scope = Scope.all,
+  ): Promise<SupportThreadListPage> {
     const where: string[] = [
       "NOT EXISTS (SELECT 1 FROM support_thread_redirects x WHERE x.source_thread_id=t.id)",
     ];
     const values: unknown[] = [];
+    const scoped = scope.where(THREAD_SERVICE);
+    if (scoped) {
+      where.push(scoped.sql);
+      values.push(...scoped.values);
+    }
     if (input.appId) {
       where.push("t.app_id = ?");
       values.push(input.appId);
@@ -370,20 +379,24 @@ export class SupportRepository {
     };
   }
 
-  async countOpen(): Promise<number> {
+  async countOpen(scope: Scope = Scope.all): Promise<number> {
+    const scoped = scope.where(THREAD_SERVICE);
     const row = await this.db
       .prepare(
-        "SELECT COUNT(*) AS total FROM support_threads WHERE status IN ('open','pending_user') AND id NOT IN (SELECT source_thread_id FROM support_thread_redirects)",
+        `SELECT COUNT(*) AS total FROM support_threads t WHERE t.status IN ('open','pending_user') AND t.id NOT IN (SELECT source_thread_id FROM support_thread_redirects)${scoped ? ` AND ${scoped.sql}` : ""}`,
       )
+      .bind(...(scoped?.values ?? []))
       .first<{ total: number }>();
     return row?.total ?? 0;
   }
 
-  async countAll(): Promise<number> {
+  async countAll(scope: Scope = Scope.all): Promise<number> {
+    const scoped = scope.where(THREAD_SERVICE);
     const row = await this.db
       .prepare(
-        "SELECT COUNT(*) AS total FROM support_threads WHERE id NOT IN (SELECT source_thread_id FROM support_thread_redirects)",
+        `SELECT COUNT(*) AS total FROM support_threads t WHERE t.id NOT IN (SELECT source_thread_id FROM support_thread_redirects)${scoped ? ` AND ${scoped.sql}` : ""}`,
       )
+      .bind(...(scoped?.values ?? []))
       .first<{ total: number }>();
     return row?.total ?? 0;
   }

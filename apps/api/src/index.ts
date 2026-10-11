@@ -24,6 +24,7 @@ import type {
 } from "@inquiry-platform/core";
 import {
   ATTACHMENT_FILENAME_HEADER,
+  fail,
   listAuditInputSchema,
   newId,
   ok,
@@ -31,9 +32,10 @@ import {
 import { dispositionFor, FileStore } from "./db/files";
 import { ReportRepository } from "./db/reports";
 import { SupportRepository } from "./db/support";
-import { internalFailure, validationFailure } from "./domain/failures";
+import { internalFailure, notFound, validationFailure } from "./domain/failures";
 import { sha256Hex } from "./domain/identity";
 import { expireReportEvidence } from "./domain/report-retention";
+import { Scope } from "./domain/scope";
 import { TicketService } from "./domain/ticket-service";
 import type { AdminCoreEnv } from "./env";
 import { putReportEvidence } from "./evidence";
@@ -56,6 +58,12 @@ import { buildServices } from "./services";
  *   binding intact and a caller has to be able to branch on *why*.
  * - **`fetch()`**, for bytes. A ten-megabyte photo cannot be an RPC argument
  *   and must not be base64 in JSON.
+ *
+ * A binding may carry a scope in its `props` (`adminCorePropsSchema`): a
+ * console that operates some of the deployment's services. Every method that
+ * names a record checks it belongs to the scope and answers NOT_FOUND when it
+ * does not; every list and count is filtered; deployment-wide settings are
+ * read-only. A binding without a scope sees everything, as before.
  */
 export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements AdminCoreApi {
   private cached?: ReturnType<typeof buildServices>;
@@ -65,7 +73,50 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
     return this.cached;
   }
 
+  private resolved?: Promise<Scope>;
+
+  /** This binding's scope, from its props — once per invocation. */
+  private scope(): Promise<Scope> {
+    this.resolved ??= Scope.resolve(this.env.DB, (this.ctx as { props?: unknown }).props);
+    return this.resolved;
+  }
+
+  /** Runs `work` only when `allowed`; otherwise the record does not exist. */
+  private async within<T>(
+    allowed: Promise<boolean>,
+    what: string,
+    work: () => Promise<Result<T>>,
+  ): Promise<Result<T>> {
+    try {
+      if (!(await allowed)) return notFound(what);
+    } catch (error) {
+      return internalFailure("scope.check", error);
+    }
+    return work();
+  }
+
+  private ticketIn(ref: unknown) {
+    return this.scope().then((s) => typeof ref === "string" && s.ticket(this.env.DB, ref));
+  }
+  private reportIn(id: unknown) {
+    return this.scope().then((s) => typeof id === "string" && s.report(this.env.DB, id));
+  }
+  private threadIn(id: unknown) {
+    return this.scope().then((s) => typeof id === "string" && s.thread(this.env.DB, id));
+  }
+  private appIn(id: unknown) {
+    return this.scope().then((s) => typeof id === "string" && s.has(id));
+  }
+  /** A deployment-wide setting: changeable only without a scope. */
+  private async unscoped<T>(work: () => Promise<Result<T>>): Promise<Result<T>> {
+    if ((await this.scope()).limited) {
+      return fail("FORBIDDEN", "この管理画面からは変更できない共通設定です。");
+    }
+    return work();
+  }
+
   async ticketReplyContext(id: string): Promise<Result<SupportThreadDetail>> {
+    if (!(await this.ticketIn(id))) return notFound("Ticket");
     try {
       const ticket = await this.tickets.row(id);
       if (!ticket?.thread_id)
@@ -92,69 +143,100 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
   private get tickets() {
     return new TicketService(this.env.DB, this.services.moderation);
   }
-  listTickets(input: unknown) {
-    return this.tickets.list(input);
+  async listTickets(input: unknown) {
+    return this.tickets.list(input, await this.scope());
   }
   getTicket(id: string, offset = 0) {
-    return this.tickets.detail(id, offset);
+    return this.within(this.ticketIn(id), "Ticket", () => this.tickets.detail(id, offset));
   }
-  ticketSource(kind: string, id: string) {
-    return this.tickets.source(kind, id);
+  async ticketSource(kind: string, id: string) {
+    const found = await this.tickets.source(kind, id);
+    if (found.ok && !(await this.ticketIn(found.value.id)))
+      return notFound<{ id: string }>("Ticket");
+    return found;
   }
   createTicket(input: unknown, actor: ActorRef) {
-    return this.tickets.create(input, actor);
+    const service = (input as { service_id?: unknown } | null)?.service_id;
+    return this.within(this.appIn(service), "サービス", () => this.tickets.create(input, actor));
   }
   changeTicket(input: unknown, actor: ActorRef) {
-    return this.tickets.change(input, actor);
+    const change = (input ?? {}) as { id?: unknown; service_id?: unknown };
+    const allowed = Promise.all([
+      this.ticketIn(change.id),
+      change.service_id === undefined ? true : this.appIn(change.service_id),
+    ]).then(([ticket, service]) => ticket && service);
+    return this.within(allowed, "Ticket", () => this.tickets.change(input, actor));
   }
   acknowledgeTicket(id: string, actor: ActorRef) {
-    return this.tickets.ack(id, actor);
+    return this.within(this.ticketIn(id), "Ticket", () => this.tickets.ack(id, actor));
   }
   addTicketNote(input: unknown, actor: ActorRef) {
-    return this.tickets.note(input, actor);
+    const id = (input as { id?: unknown } | null)?.id;
+    return this.within(this.ticketIn(id), "Ticket", () => this.tickets.note(input, actor));
   }
   relateTickets(input: unknown, actor: ActorRef) {
-    return this.tickets.relation(input, actor);
+    return this.within(this.bothTickets(input), "Ticket", () =>
+      this.tickets.relation(input, actor),
+    );
   }
   mergeTickets(input: unknown, actor: ActorRef) {
-    return this.tickets.merge(input, actor);
+    return this.within(this.bothTickets(input), "Ticket", () => this.tickets.merge(input, actor));
   }
-  ticketMasters() {
-    return this.tickets.masters();
+  private bothTickets(input: unknown) {
+    const pair = (input ?? {}) as { id?: unknown; target_id?: unknown };
+    return Promise.all([this.ticketIn(pair.id), this.ticketIn(pair.target_id)]).then(
+      ([a, b]) => a && b,
+    );
+  }
+  async ticketMasters() {
+    return this.tickets.masters(await this.scope());
   }
   saveTicketMaster(input: unknown, actor: ActorRef) {
-    return this.tickets.saveMaster(input, actor);
+    return this.unscoped(() => this.tickets.saveMaster(input, actor));
   }
-  ticketDashboard() {
-    return this.tickets.dashboard();
+  async ticketDashboard() {
+    return this.tickets.dashboard(await this.scope());
   }
 
   prepareReportDecision(input: unknown, actor: ActorRef) {
-    return this.services.reports.prepareDecision(input, actor);
+    return this.within(this.reportIn(reportIdOf(input)), "通報", () =>
+      this.services.reports.prepareDecision(input, actor),
+    );
   }
   completeReportDecision(input: unknown, actor: ActorRef) {
-    return this.services.reports.completeDecision(input, actor);
+    return this.within(this.reportIn(reportIdOf(input)), "通報", () =>
+      this.services.reports.completeDecision(input, actor),
+    );
   }
 
   // ---- Reports ----------------------------------------------------------
 
+  // Intake, for mail-ingress and the projects' public APIs; never a scoped console.
   createReport(input: unknown, actor: ActorRef): Promise<Result<CreateReportResult>> {
-    return this.services.reports.create(input, actor);
+    return this.unscoped(() => this.services.reports.create(input, actor));
   }
-  listReports(input: unknown): Promise<Result<ReportListPage>> {
-    return this.services.reports.list(input);
+  async listReports(input: unknown): Promise<Result<ReportListPage>> {
+    return this.services.reports.list(input, await this.scope());
   }
   getReport(reportId: string): Promise<Result<ReportDetail>> {
-    return this.services.reports.detail(reportId);
+    return this.within(this.reportIn(reportId), "通報", () =>
+      this.services.reports.detail(reportId),
+    );
   }
   changeReportStatus(input: unknown, actor: ActorRef): Promise<Result<ReportDetail>> {
-    return this.services.reports.changeStatus(input, actor);
+    return this.within(this.reportIn(reportIdOf(input)), "通報", () =>
+      this.services.reports.changeStatus(input, actor),
+    );
   }
   addReportNote(input: unknown, actor: ActorRef): Promise<Result<ReportDetail>> {
-    return this.services.reports.addNote(input, actor);
+    return this.within(this.reportIn(reportIdOf(input)), "通報", () =>
+      this.services.reports.addNote(input, actor),
+    );
   }
   updateReportResolution(input: unknown, actor: ActorRef): Promise<Result<ReportDetail>> {
-    return this.services.reports.updateResolution(input, actor);
+    return this.within(this.reportIn(reportIdOf(input)), "通報", () =>
+      this.services.reports.updateResolution(input, actor),
+    );
   }
 
   // ---- Support ----------------------------------------------------------
@@ -163,33 +245,50 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
     input: unknown,
     actor: ActorRef,
   ): Promise<Result<IngestInboundEmailResult>> {
-    await this.services.reply.refreshMessageIds();
-    return this.services.support.ingestInboundEmail(input, actor);
+    return this.unscoped(async () => {
+      await this.services.reply.refreshMessageIds();
+      return this.services.support.ingestInboundEmail(input, actor);
+    });
   }
   createSupportThread(input: unknown, actor: ActorRef): Promise<Result<SupportThreadDetail>> {
-    return this.services.support.createThread(input, actor);
+    return this.unscoped(() => this.services.support.createThread(input, actor));
   }
   addSupportMessage(input: unknown, actor: ActorRef): Promise<Result<SupportThreadDetail>> {
-    return this.services.support.addMessage(input, actor);
+    return this.unscoped(() => this.services.support.addMessage(input, actor));
   }
-  listSupportThreads(input: unknown): Promise<Result<SupportThreadListPage>> {
-    return this.services.support.list(input);
+  async listSupportThreads(input: unknown): Promise<Result<SupportThreadListPage>> {
+    return this.services.support.list(input, await this.scope());
   }
   getSupportThread(threadId: string): Promise<Result<SupportThreadDetail>> {
-    return this.services.support.detail(threadId);
+    return this.within(this.threadIn(threadId), "問い合わせ", () =>
+      this.services.support.detail(threadId),
+    );
   }
   setSupportStatus(input: unknown, actor: ActorRef): Promise<Result<SupportThreadDetail>> {
-    return this.services.support.setStatus(input, actor);
+    return this.within(this.threadIn(threadIdOf(input)), "問い合わせ", () =>
+      this.services.support.setStatus(input, actor),
+    );
   }
   assignSupportApp(input: unknown, actor: ActorRef): Promise<Result<SupportThreadDetail>> {
-    return this.services.support.assignApp(input, actor);
+    const appId = (input as { appId?: unknown } | null)?.appId;
+    const allowed = Promise.all([
+      this.threadIn(threadIdOf(input)),
+      // Unlinking files the thread under the default service, which may be
+      // outside the scope too.
+      this.scope().then((s) => !s.limited || (typeof appId === "string" && s.has(appId))),
+    ]).then(([thread, app]) => thread && app);
+    return this.within(allowed, "問い合わせ", () => this.services.support.assignApp(input, actor));
   }
   /** Routed to the service that has no mail provider. See `SupportService`. */
   addInternalNote(input: unknown, actor: ActorRef): Promise<Result<SupportThreadDetail>> {
-    return this.services.support.addInternalNote(input, actor);
+    return this.within(this.threadIn(threadIdOf(input)), "問い合わせ", () =>
+      this.services.support.addInternalNote(input, actor),
+    );
   }
   sendSupportReply(input: unknown, actor: ActorRef): Promise<Result<SupportThreadDetail>> {
-    return this.services.reply.send(input, actor);
+    return this.within(this.threadIn(threadIdOf(input)), "問い合わせ", () =>
+      this.services.reply.send(input, actor),
+    );
   }
   mailProviderConfigured(): Promise<boolean> {
     return Promise.resolve(this.services.reply.mailConfigured);
@@ -198,68 +297,128 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
   // ---- Drafts and templates ---------------------------------------------
 
   getSupportDraft(threadId: string): Promise<Result<SupportDraft | null>> {
-    return this.services.reply.getDraft(threadId);
+    return this.within(this.threadIn(threadId), "問い合わせ", () =>
+      this.services.reply.getDraft(threadId),
+    );
   }
   saveSupportDraft(input: unknown): Promise<Result<SupportDraft>> {
-    return this.services.reply.saveDraft(input);
+    return this.within(this.threadIn(threadIdOf(input)), "問い合わせ", () =>
+      this.services.reply.saveDraft(input),
+    );
   }
   deleteSupportDraft(threadId: string): Promise<Result<null>> {
-    return this.services.reply.deleteDraft(threadId);
+    return this.within(this.threadIn(threadId), "問い合わせ", () =>
+      this.services.reply.deleteDraft(threadId),
+    );
   }
-  listReplyTemplates(input: unknown): Promise<Result<ReplyTemplate[]>> {
-    return this.services.reply.listTemplates(input);
+  async listReplyTemplates(input: unknown): Promise<Result<ReplyTemplate[]>> {
+    const scope = await this.scope();
+    const listed = await this.services.reply.listTemplates(input);
+    if (!listed.ok || !scope.limited) return listed;
+    return ok(listed.value.filter((t) => t.appId === undefined || scope.has(t.appId)));
   }
   getReplyTemplate(templateId: string): Promise<Result<ReplyTemplate>> {
-    return this.services.reply.getTemplate(templateId);
+    return this.within(this.templateIn(templateId, false), "定型文", () =>
+      this.services.reply.getTemplate(templateId),
+    );
   }
   createReplyTemplate(input: unknown, actor: ActorRef): Promise<Result<ReplyTemplate>> {
-    return this.services.reply.createTemplate(input, actor);
+    const appId = (input as { appId?: unknown } | null)?.appId;
+    return this.within(this.ownApp(appId), "アプリ", () =>
+      this.services.reply.createTemplate(input, actor),
+    );
   }
   updateReplyTemplate(
     templateId: string,
     input: unknown,
     actor: ActorRef,
   ): Promise<Result<ReplyTemplate>> {
-    return this.services.reply.updateTemplate(templateId, input, actor);
+    const appId = (input as { appId?: unknown } | null)?.appId;
+    const allowed = Promise.all([
+      this.templateIn(templateId, true),
+      appId === undefined ? true : this.ownApp(appId),
+    ]).then(([template, app]) => template && app);
+    return this.within(allowed, "定型文", () =>
+      this.services.reply.updateTemplate(templateId, input, actor),
+    );
   }
   deactivateReplyTemplate(templateId: string, actor: ActorRef): Promise<Result<ReplyTemplate>> {
-    return this.services.reply.deactivateTemplate(templateId, actor);
+    return this.within(this.templateIn(templateId, true), "定型文", () =>
+      this.services.reply.deactivateTemplate(templateId, actor),
+    );
   }
   applyReplyTemplate(input: unknown): Promise<Result<AppliedTemplate>> {
-    return this.services.reply.applyTemplate(input);
+    const templateId = (input as { templateId?: unknown } | null)?.templateId;
+    const allowed = Promise.all([
+      this.threadIn(threadIdOf(input)),
+      typeof templateId === "string" ? this.templateIn(templateId, false) : false,
+    ]).then(([thread, template]) => thread && template);
+    return this.within(allowed, "問い合わせ", () => this.services.reply.applyTemplate(input));
   }
-  listAppMailSettings(): Promise<Result<AppMailSettings[]>> {
-    return this.services.reply.listSettings();
+  async listAppMailSettings(): Promise<Result<AppMailSettings[]>> {
+    const scope = await this.scope();
+    const listed = await this.services.reply.listSettings();
+    if (!listed.ok || !scope.limited) return listed;
+    return ok(listed.value.filter((row) => row.appId === undefined || scope.has(row.appId)));
   }
   setAppMailSettings(input: unknown, actor: ActorRef): Promise<Result<AppMailSettings>> {
-    return this.services.reply.setSettings(input, actor);
+    const appId = (input as { appId?: unknown } | null)?.appId;
+    return this.within(this.ownApp(appId), "アプリ", () =>
+      this.services.reply.setSettings(input, actor),
+    );
+  }
+  private templateIn(templateId: string, write: boolean) {
+    return this.scope().then((s) => s.template(this.env.DB, templateId, write));
+  }
+  /** An app of this scope; `null`/absent (deployment-wide) only without one. */
+  private ownApp(appId: unknown) {
+    return this.scope().then((s) =>
+      appId === null || appId === undefined
+        ? !s.limited
+        : typeof appId === "string" && s.has(appId),
+    );
   }
 
   // ---- Apps -------------------------------------------------------------
 
-  listApps(input: unknown): Promise<Result<AppSummary[]>> {
-    return this.services.apps.list(input);
+  async listApps(input: unknown): Promise<Result<AppSummary[]>> {
+    const scope = await this.scope();
+    const listed = await this.services.apps.list(input);
+    if (!listed.ok || !scope.limited) return listed;
+    return ok(listed.value.filter((app) => scope.has(app.id)));
   }
   getApp(appId: string): Promise<Result<AppDetail>> {
-    return this.services.apps.detail(appId);
+    return this.within(this.appIn(appId), "アプリ", () => this.services.apps.detail(appId));
   }
+  /** A new app would fall outside every scope, so only an unscoped console adds one. */
   createApp(input: unknown, actor: ActorRef): Promise<Result<AppDetail>> {
-    return this.services.apps.create(input, actor);
+    return this.unscoped(() => this.services.apps.create(input, actor));
   }
   updateApp(appId: string, input: unknown, actor: ActorRef): Promise<Result<AppDetail>> {
-    return this.services.apps.update(appId, input, actor);
+    return this.within(this.appIn(appId), "アプリ", () =>
+      this.services.apps.update(appId, input, actor),
+    );
   }
   archiveApp(appId: string, actor: ActorRef): Promise<Result<AppDetail>> {
-    return this.services.apps.setArchived(appId, true, actor);
+    return this.within(this.appIn(appId), "アプリ", () =>
+      this.services.apps.setArchived(appId, true, actor),
+    );
   }
   restoreApp(appId: string, actor: ActorRef): Promise<Result<AppDetail>> {
-    return this.services.apps.setArchived(appId, false, actor);
+    return this.within(this.appIn(appId), "アプリ", () =>
+      this.services.apps.setArchived(appId, false, actor),
+    );
   }
   addAppLink(input: unknown, actor: ActorRef): Promise<Result<AppDetail>> {
-    return this.services.apps.addLink(input, actor);
+    const appId = (input as { appId?: unknown } | null)?.appId;
+    return this.within(this.appIn(appId), "アプリ", () => this.services.apps.addLink(input, actor));
   }
   removeAppLink(linkId: string, actor: ActorRef): Promise<Result<AppDetail>> {
-    return this.services.apps.removeLink(linkId, actor);
+    return this.within(
+      this.scope().then((s) => s.link(this.env.DB, linkId)),
+      "リンク",
+      () => this.services.apps.removeLink(linkId, actor),
+    );
   }
 
   // ---- Notifications ----------------------------------------------------
@@ -294,14 +453,14 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
     const parsed = listAuditInputSchema.safeParse(input ?? {});
     if (!parsed.success) return validationFailure(parsed.error);
     try {
-      return ok(await this.services.audit.list(parsed.data));
+      return ok(await this.services.audit.list(parsed.data, await this.scope()));
     } catch (error) {
       return internalFailure("audit.list", error);
     }
   }
 
-  getDashboard(): Promise<Result<DashboardSummary>> {
-    return this.services.dashboard.summary();
+  async getDashboard(): Promise<Result<DashboardSummary>> {
+    return this.services.dashboard.summary(await this.scope());
   }
 
   /**
@@ -326,6 +485,11 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
     const reports = new ReportRepository(this.env.DB);
     const support = new SupportRepository(this.env.DB);
 
+    // Uploads come from intake and mail-ingress; a scoped console only reads.
+    if (request.method !== "GET" && (await this.scope()).limited) {
+      return json({ error: "NOT_FOUND" }, 404);
+    }
+
     const reportUpload = /^\/internal\/reports\/([^/]+)\/attachments$/.exec(url.pathname);
     if (reportUpload && request.method === "PUT") {
       return await putReportEvidence(
@@ -339,6 +503,10 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
       url.pathname,
     );
     if (reportDownload && request.method === "GET") {
+      const scope = await this.scope();
+      if (!(await scope.report(this.env.DB, decodeURIComponent(reportDownload[1] as string)))) {
+        return json({ error: "NOT_FOUND" }, 404);
+      }
       const attachment = await reports.findAttachment(
         decodeURIComponent(reportDownload[1] as string),
         decodeURIComponent(reportDownload[2] as string),
@@ -389,6 +557,10 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
       url.pathname,
     );
     if (supportDownload && request.method === "GET") {
+      const scope = await this.scope();
+      if (!(await scope.message(this.env.DB, decodeURIComponent(supportDownload[1] as string)))) {
+        return json({ error: "NOT_FOUND" }, 404);
+      }
       const attachment = await support.findAttachment(
         decodeURIComponent(supportDownload[1] as string),
         decodeURIComponent(supportDownload[2] as string),
@@ -407,6 +579,14 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
     }
     return json({ error: "NOT_FOUND" }, 404);
   }
+}
+
+function reportIdOf(input: unknown): unknown {
+  return (input as { reportId?: unknown } | null)?.reportId;
+}
+
+function threadIdOf(input: unknown): unknown {
+  return (input as { threadId?: unknown } | null)?.threadId;
 }
 
 async function stream(

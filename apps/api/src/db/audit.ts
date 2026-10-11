@@ -6,6 +6,7 @@ import type {
   ListAuditInput,
 } from "@inquiry-platform/core";
 import { assertSafeAuditMetadata, newId, nowIso } from "@inquiry-platform/core";
+import { Scope, THREAD_SERVICE } from "../domain/scope";
 
 export interface AuditWrite {
   actor: ActorRef;
@@ -58,9 +59,23 @@ export class AuditRepository {
       );
   }
 
-  async list(input: ListAuditInput): Promise<AuditEntry[]> {
+  async list(input: ListAuditInput, scope: Scope = Scope.all): Promise<AuditEntry[]> {
     const where: string[] = [];
     const values: unknown[] = [];
+    // A scoped caller sees the rows about its own apps, reports and threads;
+    // deployment-wide (`system`) rows belong to nobody's scope.
+    const apps = scope.where("target_id");
+    if (apps) {
+      const reports = scope.where("app_id");
+      const threads = scope.where(THREAD_SERVICE);
+      where.push(`(
+        (target_type = 'app' AND ${apps.sql})
+        OR (target_type = 'report' AND target_id IN (SELECT id FROM reports WHERE ${reports?.sql}))
+        OR (target_type = 'support_thread'
+            AND target_id IN (SELECT t.id FROM support_threads t WHERE ${threads?.sql}))
+      )`);
+      values.push(...apps.values, ...(reports?.values ?? []), ...(threads?.values ?? []));
+    }
 
     if (input.targetType) {
       where.push("target_type = ?");

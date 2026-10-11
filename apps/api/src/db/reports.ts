@@ -11,6 +11,7 @@ import type {
   ReportSummary,
 } from "@inquiry-platform/core";
 import { newId, nowIso } from "@inquiry-platform/core";
+import { Scope } from "../domain/scope";
 
 interface ReportRow {
   id: string;
@@ -220,9 +221,14 @@ export class ReportRepository {
    * of a mail, and a prefix scan over a growing table is a slow answer to a
    * question nobody asked.
    */
-  async list(input: ListReportsInput): Promise<ReportListPage> {
+  async list(input: ListReportsInput, scope: Scope = Scope.all): Promise<ReportListPage> {
     const where: string[] = [];
     const values: unknown[] = [];
+    const scoped = scope.where("r.app_id");
+    if (scoped) {
+      where.push(scoped.sql);
+      values.push(...scoped.values);
+    }
 
     if (input.appId) {
       where.push("r.app_id = ?");
@@ -347,10 +353,13 @@ export class ReportRepository {
     };
   }
 
-  async countByStatus(status: ReportStatus): Promise<number> {
+  async countByStatus(status: ReportStatus, scope: Scope = Scope.all): Promise<number> {
+    const scoped = scope.where("app_id");
     const row = await this.db
-      .prepare("SELECT COUNT(*) AS total FROM reports WHERE status = ?")
-      .bind(status)
+      .prepare(
+        `SELECT COUNT(*) AS total FROM reports WHERE status = ?${scoped ? ` AND ${scoped.sql}` : ""}`,
+      )
+      .bind(status, ...(scoped?.values ?? []))
       .first<{ total: number }>();
     return row?.total ?? 0;
   }
