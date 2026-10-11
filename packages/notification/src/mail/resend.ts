@@ -28,6 +28,8 @@ export class ResendMailProvider implements MailProvider {
     private readonly fetcher: typeof fetch = (input, init) => fetch(input, init),
     /** The deployment's signature picture, if it has one. */
     private readonly logo?: MailLogo,
+    /** Sending-only project keys use signed delivery receipts for Message-ID. */
+    private readonly lookupMessageIds = true,
   ) {}
 
   sendTransactional(mail: BaseMail): Promise<MailResult> {
@@ -102,6 +104,7 @@ export class ResendMailProvider implements MailProvider {
   }
 
   async resolveMessageId(transportId: string): Promise<string | undefined> {
+    if (!this.lookupMessageIds) return undefined;
     try {
       const response = await this.fetcher(
         `https://api.resend.com/emails/${encodeURIComponent(transportId)}`,

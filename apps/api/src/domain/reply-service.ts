@@ -28,6 +28,7 @@ import type { AppRepository } from "../db/apps";
 import type { AuditRepository } from "../db/audit";
 import type { SupportRepository } from "../db/support";
 import type { ProjectMailSettings, TemplateRepository } from "../db/templates";
+import type { ProjectMailDelivery } from "../project-mail";
 import { internalFailure, notFound, validationFailure } from "./failures";
 import type { SupportService } from "./support-service";
 import { TicketService } from "./ticket-service";
@@ -43,6 +44,7 @@ export interface ReplyAddresses {
   legacySignatures: readonly string[];
   /** Project-scoped overrides from the platform's mail settings repository. */
   resolve?: (appId: string | undefined) => Promise<ProjectMailSettings>;
+  delivery?: (appId: string | undefined) => ProjectMailDelivery;
 }
 
 /**
@@ -76,12 +78,19 @@ export class ReplyService {
     return this.mail.configured;
   }
 
+  mailConfiguredForApp(appId: string): boolean {
+    return (this.addresses.delivery?.(appId)?.mail ?? this.mail).configured;
+  }
+
   private async addressesFor(appId: string | undefined) {
     const override = (await this.addresses.resolve?.(appId)) ?? {};
+    const delivery = this.addresses.delivery?.(appId);
     return {
       supportEmail: override.supportEmail ?? this.addresses.supportEmail,
       fromName: override.fromName ?? this.addresses.fromName,
-      defaultSignature: this.addresses.defaultSignature,
+      defaultSignature: delivery?.defaultSignature ?? this.addresses.defaultSignature,
+      defaultSupportUrl: delivery?.supportUrl ?? this.addresses.defaultSupportUrl,
+      mail: delivery?.mail ?? this.mail,
     };
   }
 
@@ -240,7 +249,9 @@ export class ReplyService {
         appName: app?.name ?? undefined,
         // Only a name the person typed. Never guessed from the address.
         userName: thread.requester_name ?? undefined,
-        supportUrl: app?.support_url ?? this.addresses.defaultSupportUrl,
+        supportUrl:
+          app?.support_url ??
+          (await this.addressesFor(thread.app_id ?? undefined)).defaultSupportUrl,
       });
 
       const body = await this.withoutSignature(thread.id, rendered);
@@ -301,6 +312,7 @@ export class ReplyService {
     let body = text;
     for (const signature of [
       configured,
+      (await this.addressesFor(thread?.app_id ?? undefined)).defaultSignature,
       this.addresses.defaultSignature,
       ...this.addresses.legacySignatures,
     ]) {
@@ -312,15 +324,17 @@ export class ReplyService {
   }
 
   async refreshMessageIds(threadId?: string): Promise<void> {
-    if (!this.mail.resolveMessageId) return;
     const { results } = await this.db
-      .prepare(`SELECT id, transport_id FROM support_messages
-      WHERE provider_message_id IS NULL AND transport_id IS NOT NULL
-      ${threadId ? "AND thread_id = ?" : ""} ORDER BY message_id_checked_at ASC, created_at DESC LIMIT 50`)
+      .prepare(`SELECT m.id, m.transport_id, t.app_id FROM support_messages m
+      JOIN support_threads t ON t.id=m.thread_id
+      WHERE m.provider_message_id IS NULL AND m.transport_id IS NOT NULL
+      ${threadId ? "AND m.thread_id = ?" : ""} ORDER BY m.message_id_checked_at ASC, m.created_at DESC LIMIT 50`)
       .bind(...(threadId ? [threadId] : []))
-      .all<{ id: string; transport_id: string }>();
+      .all<{ id: string; transport_id: string; app_id: string | null }>();
     for (const row of results) {
-      const messageId = await this.mail.resolveMessageId(row.transport_id);
+      const mail = this.addresses.delivery?.(row.app_id ?? undefined)?.mail ?? this.mail;
+      if (!mail.resolveMessageId) continue;
+      const messageId = await mail.resolveMessageId(row.transport_id);
       await this.db
         .prepare("UPDATE support_messages SET message_id_checked_at = ? WHERE id = ?")
         .bind(nowIso(), row.id)
@@ -398,13 +412,14 @@ export class ReplyService {
         );
       }
 
-      if (!this.mail.configured) {
+      const addresses = await this.addressesFor(thread.app_id ?? undefined);
+      const mail = addresses.mail;
+      if (!mail.configured) {
         return fail("MAIL_ERROR", "メール送信機能が設定されていません。");
       }
 
       await this.refreshMessageIds(input.threadId);
       const { references, inReplyTo } = await this.support.threadReferences(input.threadId);
-      const addresses = await this.addressesFor(thread.app_id ?? undefined);
       const from = `${addresses.fromName} <${addresses.supportEmail}>`;
       // The subject is resolved here, from the thread and — for a thread that
       // has no subject of its own — the template the operator inserted. The
@@ -434,7 +449,7 @@ export class ReplyService {
       const receiptLine = linkedReport ? `受付ID: ${linkedReport.external_report_id}` : undefined;
       const reportFooter = receiptLine && !body.includes(receiptLine) ? `\n\n${receiptLine}` : "";
       const text = `${body}${reportFooter}\n\n${signature}`;
-      const sent = await this.mail.sendSupportReply({
+      const sent = await mail.sendSupportReply({
         to: thread.requester_email,
         from,
         replyTo: addresses.supportEmail,
@@ -452,7 +467,7 @@ export class ReplyService {
             event: "support.reply_failed",
             threadId: input.threadId,
             code: sent.code,
-            provider: this.mail.name,
+            provider: mail.name,
             // The provider's own summary of what went wrong. Every adapter
             // builds this out of a status code or an error name, never out of
             // a response body — so it says why a send failed without quoting

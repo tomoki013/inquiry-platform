@@ -26,6 +26,7 @@ import { ReplyService } from "../src/domain/reply-service";
 import { ReportService } from "../src/domain/report-service";
 import { SupportService } from "../src/domain/support-service";
 import type { AdminCoreEnv } from "../src/env";
+import type { ProjectMailDelivery } from "../src/project-mail";
 
 export const testEnv = env as unknown as AdminCoreEnv;
 
@@ -235,6 +236,7 @@ export async function harness(
     push?: FakePushTransport;
     /** Unset means "no mail channel", like an environment without the Secret. */
     notifyEmail?: string;
+    delivery?: (appId: string | undefined) => ProjectMailDelivery;
   } = {},
 ): Promise<Harness> {
   await migrate();
@@ -262,9 +264,11 @@ export async function harness(
       resolve: async (appId) => {
         const settings = await templateRepo.mailSettings(appId);
         return {
+          mail: options.delivery?.(appId).mail,
           notifyEmail: settings.notificationEmail ?? options.notifyEmail,
           from: `${settings.fromName ?? "Example Support"} <${settings.noreplyEmail ?? "notification@example.com"}>`,
           ...(settings.ticketUrlTemplate ? { ticketUrlTemplate: settings.ticketUrlTemplate } : {}),
+          ...(settings.notifyByEmail === false ? { emailEnabled: false } : {}),
         };
       },
     },
@@ -290,6 +294,7 @@ export async function harness(
       defaultSignature: TEST_BRANDING.defaultSignature,
       legacySignatures: TEST_BRANDING.legacySignatures,
       resolve: (appId) => templateRepo.mailSettings(appId),
+      delivery: options.delivery,
     },
   );
 

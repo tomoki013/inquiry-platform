@@ -106,16 +106,19 @@ if (seed.signature !== undefined) {
   );
 }
 
+const flag = (value: boolean | undefined): string =>
+  value === undefined ? "NULL" : value ? "1" : "0";
+
 for (const settings of seed.mailSettings ?? []) {
   const scope = settings.appSlug
     ? `(SELECT id FROM apps WHERE slug = ${text(settings.appSlug)})`
     : "NULL";
   const whereScope = settings.appSlug ? `app_id = ${scope}` : "app_id IS NULL";
   lines.push(
-    `UPDATE app_mail_settings SET support_email = ${text(settings.supportEmail)}, from_name = ${text(settings.fromName)}, noreply_email = ${text(settings.noreplyEmail)}, notification_email = ${text(settings.notificationEmail)}, ticket_url_template = ${text(settings.ticketUrlTemplate)}, updated_at = ${text(now)}`,
+    `UPDATE app_mail_settings SET support_email = ${text(settings.supportEmail)}, from_name = ${text(settings.fromName)}, noreply_email = ${text(settings.noreplyEmail)}, notification_email = ${text(settings.notificationEmail)}, ticket_url_template = ${text(settings.ticketUrlTemplate)}, notify_by_email = ${flag(settings.notifyByEmail)}, updated_at = ${text(now)}`,
     ` WHERE ${whereScope};`,
-    `INSERT INTO app_mail_settings (app_id, signature_text, support_email, from_name, noreply_email, notification_email, ticket_url_template, updated_at)`,
-    `SELECT ${scope}, '', ${text(settings.supportEmail)}, ${text(settings.fromName)}, ${text(settings.noreplyEmail)}, ${text(settings.notificationEmail)}, ${text(settings.ticketUrlTemplate)}, ${text(now)}`,
+    `INSERT INTO app_mail_settings (app_id, signature_text, support_email, from_name, noreply_email, notification_email, ticket_url_template, notify_by_email, updated_at)`,
+    `SELECT ${scope}, '', ${text(settings.supportEmail)}, ${text(settings.fromName)}, ${text(settings.noreplyEmail)}, ${text(settings.notificationEmail)}, ${text(settings.ticketUrlTemplate)}, ${flag(settings.notifyByEmail)}, ${text(now)}`,
     ` WHERE ${settings.appSlug ? `EXISTS (SELECT 1 FROM apps WHERE slug = ${text(settings.appSlug)}) AND ` : ""}NOT EXISTS (SELECT 1 FROM app_mail_settings WHERE ${whereScope});`,
     "",
   );

@@ -1,6 +1,6 @@
 # デプロイ
 
-最終更新: 2026-09-27。
+最終更新: 2026-10-10。
 
 このリポジトリは特定の環境を持たない。`apps/*/wrangler.jsonc` はローカル開発とテストのための参照設定で、名前・ID・アドレスはすべてプレースホルダ。自分の Cloudflare アカウントに立てるときは、実際の値を持った設定を**自分のリポジトリ**に置き、release tag を固定してこのリポジトリをデプロイする。
 
@@ -26,11 +26,46 @@
 | `admin.jsonc` の `vars` | `ACCESS_TEAM_DOMAIN`、`ACCESS_AUD`、`ADMIN_ORIGIN`（cookie 認証する利用者クライアントの Origin）、`DEFAULT_ADMIN_ROLE`（任意で `ADMIN_ROLES`） |
 
 `seed.ts` の `mailSettings` で Project ごとの `supportEmail` / `noreplyEmail` /
-`notificationEmail` / `fromName` / `ticketUrlTemplate`（通知リンクの行き先、v0.3.1+）を指定できます。未設定の項目は `api.jsonc` の既存値へ
+`notificationEmail` / `fromName` / `ticketUrlTemplate`（通知リンクの行き先、v0.3.1+）/
+`notifyByEmail`（`false` でその Project の新着通知メールを止める。Push は届く。v0.3.3+、migration
+`0013`）を指定できます。未設定の項目は `api.jsonc` の既存値へ
 フォールバックします。`mail-ingress.jsonc` の `APP_MAIL_ROUTES` は受信アドレスから
 Project slug と転送先を解決する JSON 配列です。
 
 `BRANDING` の項目は `packages/core/src/branding.ts` を参照（すべて任意。未設定なら中立な既定値）。UI のアイコンや画面は設定しない。利用者の UI は別途用意する。
+
+### Project ごとの送信キーとブランド（v0.3.2+）
+
+共通 API を使いながら送信契約を分けるには、Core の `vars.PROJECT_MAIL_PROVIDERS`
+に **Project id** をキーとする設定を追加する。slug やブラウザ入力で Secret を
+選ばせない。例:
+
+```json
+{
+  "project-id": {
+    "apiKeyBinding": "MAIL_API_KEY_PROJECT",
+    "defaultSignature": "Example Support\nhttps://project.example.com",
+    "supportUrl": "https://project.example.com/contact",
+    "logo": { "url": "https://project.example.com/logo.png", "alt": "Example" }
+  }
+}
+```
+
+`MAIL_API_KEY_PROJECT` は Core の Worker Secret に登録する。キーを vars、D1、
+seed、SDK、リポジトリへ保存しない。設定した Project は専用キーが未登録でも
+共有 `MAIL_API_KEY` や共有ロゴへ戻らず、送信だけを拒否して下書きを残す。
+設定のない Project は従来どおり。送信元・通知先は引き続き `app_mail_settings`
+から解決し、既存の Ticket と返信履歴を移動する必要はない。
+
+送信専用キーではメールの取得 API を呼べないため、Project のバックエンドで
+署名検証した `email.sent` の `email_id` と `message_id` だけを、既存の Intake
+binding の `fetch` で `POST /internal/projects/<slug>/mail-receipts` へ渡す。
+binding の `props.projects` と保存済みの outbound message の Project が一致する
+場合だけ記録する。本文・宛先は渡さない。送信確定より receipt が先に届く場合は
+404 になるので、バックエンドは webhook を再試行させる。重複は成功、異なる
+Message-ID による上書きは 409。これで受信返信のスレッド照合を維持する。
+メール取得も許可された専用キーを使う場合だけ `lookupMessageIds: true` を設定
+できる。未設定の共有プロバイダは従来の取得処理を維持する。
 
 ## 2. コマンド
 

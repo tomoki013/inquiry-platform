@@ -24,6 +24,9 @@ export interface AdminCoreEnv {
   /** Resend, or whatever provider replaces it. Absent means replies are
    * disabled and everything else still works. */
   MAIL_API_KEY?: string;
+  /** Project id → dedicated Secret binding, signature and optional logo.
+   * Configured routes refuse mail when their own Secret is missing. */
+  PROJECT_MAIL_PROVIDERS?: unknown;
 
   /**
    * Legacy operator-client origin. Used only as a fallback when

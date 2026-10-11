@@ -127,23 +127,23 @@ describe("email()", () => {
     const { env, ingest } = makeEnv({
       APP_MAIL_ROUTES: JSON.stringify([
         {
-          address: "support@zakkary.app",
-          projectSlug: "zakkary",
-          forwardEmail: "zakkary001@gmail.com",
+          address: "support@app-one.example.com",
+          projectSlug: "app-one",
+          forwardEmail: "app-one-owner@example.com",
         },
       ]),
     });
     const projectMessage = new FakeMessage(
       "someone@example.com",
-      "support@zakkary.app",
-      RAW.replaceAll("support@example.com", "support@zakkary.app"),
+      "support@app-one.example.com",
+      RAW.replaceAll("support@example.com", "support@app-one.example.com"),
     );
 
     await worker.email(projectMessage as never, env, ctx);
 
-    expect(projectMessage.forwardedTo).toEqual(["zakkary001@gmail.com"]);
+    expect(projectMessage.forwardedTo).toEqual(["app-one-owner@example.com"]);
     expect((ingest.mock.calls[0]?.[0] as Record<string, unknown> | undefined)?.appSlug).toBe(
-      "zakkary",
+      "app-one",
     );
   });
 
