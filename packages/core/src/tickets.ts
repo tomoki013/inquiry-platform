@@ -172,6 +172,8 @@ export interface Ticket {
   sla_state: SlaState;
   report_id: string | null;
   thread_id: string | null;
+  /** Added to operator list/detail queries from the linked support thread. */
+  operator_source?: "email" | "web_form" | "internal" | "report";
 }
 export interface TicketMessage {
   id: string;
@@ -247,6 +249,11 @@ export const ticketListSchema = z.object({
   status: z.enum(ticketStatuses).optional(),
   priority: z.enum(ticketPriorities).optional(),
   type: z.enum(ticketTypes).optional(),
+  sources: z
+    .array(z.enum(["email", "web_form", "internal", "report"]))
+    .min(1)
+    .max(4)
+    .optional(),
   service_id: id.optional(),
   component_id: id.optional(),
   category_id: id.optional(),

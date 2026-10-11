@@ -14,7 +14,11 @@ import type {
   Ticket,
   TicketDetail,
 } from "@inquiry-platform/core";
-import { projectOperatorPropsSchema, ticketTransitions } from "@inquiry-platform/core";
+import {
+  projectOperatorPropsSchema,
+  ticketTransitions,
+  toPublicType,
+} from "@inquiry-platform/core";
 import { z } from "zod";
 import { AppRepository, type AppRow } from "./db/apps";
 import { internalFailure, validationFailure } from "./domain/failures";
@@ -45,6 +49,11 @@ const querySchema = z
   .object({
     status: z.string().optional(),
     query: z.string().trim().max(200).optional(),
+    sources: z
+      .array(z.enum(["email", "web_form", "internal", "report"]))
+      .min(1)
+      .max(4)
+      .optional(),
     limit: z.number().int().min(1).max(100).optional(),
     offset: z.number().int().min(0).max(100000).optional(),
   })
@@ -327,6 +336,8 @@ function toSummary(ticket: Ticket): OperatorTicketSummary {
     id: ticket.id,
     number: ticket.ticket_number,
     status: ticket.status,
+    type: toPublicType(ticket.type),
+    source: ticket.operator_source ?? (ticket.report_id ? "report" : "internal"),
     resolution: ticket.resolution,
     priority: ticket.priority,
     subject: ticket.subject,

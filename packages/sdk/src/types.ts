@@ -187,11 +187,17 @@ export type OperatorResolution =
   | "USER_WITHDREW"
   | "OTHER";
 
+/** Where a project ticket first entered the platform. Reports have no support
+ * thread, so they use their own source label. */
+export type OperatorTicketSource = "email" | "web_form" | "internal" | "report";
+
 export interface OperatorTicketSummary {
   id: string;
   /** Human-facing, e.g. `TK-000123`. */
   number: string;
   status: OperatorTicketStatus;
+  type: PublicTicketType;
+  source: OperatorTicketSource;
   resolution: string | null;
   priority: string;
   subject: string;
@@ -239,6 +245,9 @@ export interface OperatorTicketQuery {
   /** `open` is every status that still needs something. */
   status?: OperatorTicketStatus | "open";
   query?: string;
+  /** Filter before pagination so a project can keep its inbox to selected
+   * intake channels without skipping older tickets from those channels. */
+  sources?: OperatorTicketSource[];
   limit?: number;
   offset?: number;
 }
