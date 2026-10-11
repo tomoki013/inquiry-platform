@@ -23,6 +23,7 @@ import type { SupportRepository } from "../db/support";
 import { internalFailure, notFound, validationFailure } from "./failures";
 import type { NotificationHook } from "./notification-service";
 import { findReportReplyThread } from "./report-threading";
+import { Scope } from "./scope";
 
 /**
  * Support threads, messages and internal notes.
@@ -279,11 +280,11 @@ export class SupportService {
     }
   }
 
-  async list(raw: unknown): Promise<Result<SupportThreadListPage>> {
+  async list(raw: unknown, scope: Scope = Scope.all): Promise<Result<SupportThreadListPage>> {
     const parsed = listSupportThreadsInputSchema.safeParse(raw ?? {});
     if (!parsed.success) return validationFailure(parsed.error);
     try {
-      return ok(await this.support.list(parsed.data));
+      return ok(await this.support.list(parsed.data, scope));
     } catch (error) {
       return internalFailure("support.list", error);
     }

@@ -40,6 +40,10 @@
       "binding": "ADMIN_CORE",
       "service": "inquiry-core",
       "entrypoint": "AdminCore"
+      // A gateway that serves a console for some of the deployment's services
+      // names them here; Core then filters every list and refuses every other
+      // record (docs/architecture/overview.md, "AdminCore の scope"):
+      //   "props": { "scope": { "services": ["example-app", "general"] } }
     }
   ]
 }
