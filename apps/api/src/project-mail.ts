@@ -11,12 +11,19 @@ const configSchema = z.object({
   supportUrl: z.url({ protocol: /^https$/ }).optional(),
   logo: z.object({ url: z.url({ protocol: /^https$/ }), alt: z.string().max(80) }).optional(),
   lookupMessageIds: z.boolean().default(false),
+  /** Key of one of this project's reply templates to write its report
+   * receipts with, instead of the platform's generic wording. */
+  reportReceiptTemplate: z
+    .string()
+    .regex(/^[a-z0-9]+(?:_[a-z0-9]+)*$/)
+    .optional(),
 });
 
 export interface ProjectMailDelivery {
   mail: MailProvider;
   defaultSignature?: string;
   supportUrl?: string;
+  reportReceiptTemplate?: string;
 }
 
 /** Deployment-owned routing by immutable project id. Credentials live only in
@@ -48,6 +55,7 @@ export function projectMailResolver(
       // Missing or invalid routes have no deployment branding fallback.
       defaultSignature: parsed.success ? parsed.data.defaultSignature : "",
       supportUrl: parsed.success ? parsed.data.supportUrl : undefined,
+      reportReceiptTemplate: parsed.success ? parsed.data.reportReceiptTemplate : undefined,
     };
     cache.set(appId, delivery);
     return delivery;

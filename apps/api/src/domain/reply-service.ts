@@ -233,6 +233,29 @@ export class ReplyService {
     }
   }
 
+  /**
+   * A project's own report receipt, when its mail route names a template for
+   * it: the template must be active and belong to that project, and render
+   * with nothing left to fill (`{{reportId}}` is the receipt ID). Anything
+   * else answers `null`, and the caller sends the generic receipt — a receipt
+   * is never withheld over its wording.
+   */
+  async projectReportReceipt(threadId: string, reportId: string): Promise<string | null> {
+    const thread = await this.support.findThread(threadId);
+    const appId = thread?.app_id ?? undefined;
+    const key = appId ? this.addresses.delivery?.(appId)?.reportReceiptTemplate : undefined;
+    if (!thread || !appId || !key) return null;
+    const template = await this.templates.findByKey(key);
+    if (!template?.isActive || template.appId !== appId) return null;
+    const app = await this.apps.findById(appId);
+    const rendered = renderTemplate(template.body, {
+      appName: app?.name ?? undefined,
+      userName: thread.requester_name ?? undefined,
+      supportUrl: app?.support_url ?? (await this.addressesFor(appId)).defaultSupportUrl,
+    }).replace(/\{\{\s*reportId\s*\}\}/g, reportId);
+    return unresolvedVariables(rendered).length === 0 && rendered.trim() ? rendered : null;
+  }
+
   /** Render only the editable body. Every outgoing mail gets its signature at send time. */
   async applyTemplate(raw: unknown): Promise<Result<AppliedTemplate>> {
     const parsed = applyTemplateInputSchema.safeParse(raw);
