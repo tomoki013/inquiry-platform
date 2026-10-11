@@ -24,6 +24,7 @@ import { internalFailure, notFound, validationFailure } from "./failures";
 import type { NotificationHook } from "./notification-service";
 import { findReportReplyThread } from "./report-threading";
 import { Scope } from "./scope";
+import { findTicketReplyThread } from "./ticket-threading";
 
 /**
  * Support threads, messages and internal notes.
@@ -82,7 +83,8 @@ export class SupportService {
       const appId = input.appSlug ? (await this.apps.findBySlug(input.appSlug))?.id : undefined;
       const existingThreadId =
         (await this.support.findThreadByHeaders(input.inReplyTo, input.references)) ??
-        (await findReportReplyThread(this.db, input));
+        (await findReportReplyThread(this.db, input)) ??
+        (await findTicketReplyThread(this.db, { ...input, ...(appId ? { appId } : {}) }));
 
       const threadId = existingThreadId ?? newId();
       const messageId = newId();
