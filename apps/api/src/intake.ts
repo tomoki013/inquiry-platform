@@ -99,7 +99,11 @@ export class Intake extends WorkerEntrypoint<AdminCoreEnv> implements IntakeApi 
         if ((existing.value.appSlug ?? undefined) !== projectSlug) return taken;
         return {
           ok: true,
-          value: { ...(await this.receipt("support", existing.value.id)), duplicate: true },
+          value: {
+            ...(await this.receipt("support", existing.value.id)),
+            receiptId: existing.value.id,
+            duplicate: true,
+          },
         };
       }
 
@@ -119,7 +123,11 @@ export class Intake extends WorkerEntrypoint<AdminCoreEnv> implements IntakeApi 
       if (!created.ok) return created;
       return {
         ok: true,
-        value: { ...(await this.receipt("support", created.value.id)), duplicate: false },
+        value: {
+          ...(await this.receipt("support", created.value.id)),
+          receiptId: created.value.id,
+          duplicate: false,
+        },
       };
     } catch (error) {
       return internalFailure("intake.submitContact", error);

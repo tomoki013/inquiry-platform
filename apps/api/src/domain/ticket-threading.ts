@@ -46,3 +46,39 @@ export async function findTicketReplyThread(
   if (!row || (input.appId && row.app_id !== input.appId)) return null;
   return row.id;
 }
+
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+
+/** `[受付ID:…]` in the subject, or an exact `受付ID: …` line — a quoted receipt. */
+export function receiptIdsFromReply(subject: string, body: string): string[] {
+  const tagged = [...subject.matchAll(new RegExp(`\\[受付ID[:：]\\s*(${UUID})\\]`, "gi"))];
+  const found = tagged.length
+    ? tagged
+    : [
+        ...body.matchAll(
+          new RegExp(`(?:^|\\n)[ \\t>]*受付ID[ \\t]*[:：][ \\t]*(${UUID})[ \\t]*(?=\\r?$)`, "gim"),
+        ),
+      ];
+  return [...new Set(found.map((m) => (m[1] ?? "").toLowerCase()).filter(Boolean))];
+}
+
+/**
+ * The conversation a receipt ID names, when the reply comes from the address
+ * that opened it and was sent to the same project. Reports have their own
+ * receipt IDs and are matched before this (`report-threading.ts`).
+ */
+export async function findReceiptReplyThread(
+  db: D1Database,
+  input: { from: string; subject: string; bodyText: string; appId?: string },
+): Promise<string | null> {
+  const ids = receiptIdsFromReply(input.subject, input.bodyText);
+  if (ids.length !== 1) return null;
+  const row = await db
+    .prepare(
+      "SELECT id, app_id FROM support_threads WHERE lower(id) = ? AND lower(requester_email) = ? LIMIT 1",
+    )
+    .bind(ids[0], input.from.trim().toLowerCase())
+    .first<{ id: string; app_id: string | null }>();
+  if (!row || (input.appId && row.app_id !== input.appId)) return null;
+  return row.id;
+}
