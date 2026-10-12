@@ -140,15 +140,31 @@ export class InboundJobs {
         await this.env.PRIVATE_FILES.delete(item.key);
         continue;
       }
+      const expired = Date.now() - Date.parse(meta.createdAt) > RETENTION;
+      let serviceId: string | undefined;
+      if (!row) {
+        try {
+          serviceId = await this.service(meta.projectSlug ?? "");
+        } catch (error) {
+          if (!(error instanceof DeliveryError)) throw error;
+          // A removed project must neither block other originals nor keep its
+          // own raw mail forever. Expired records use the default service.
+          if (!expired) {
+            console.log(JSON.stringify({ event: "mail.orphan_project_unavailable" }));
+            continue;
+          }
+          serviceId = await this.service("");
+        }
+      }
       if (!row)
         await this.jobs
-          .statement(id, await this.service(meta.projectSlug ?? ""), "inbound_email", {
+          .statement(id, serviceId!, "inbound_email", {
             key: item.key,
             to: meta.to,
             projectSlug: meta.projectSlug ?? "",
           })
           .run();
-      if (Date.now() - Date.parse(meta.createdAt) > RETENTION) {
+      if (expired) {
         await this.env.DB.prepare(
           "UPDATE delivery_jobs SET state='failed',last_error='MAIL_EXPIRED',payload='{}',lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND state<>'completed'",
         )
