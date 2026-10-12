@@ -10,6 +10,9 @@ import { admin, type Harness, harness, testEnv } from "./harness";
 let h: Harness;
 beforeEach(async () => {
   h = await harness();
+  const leftovers = await testEnv.PRIVATE_FILES.list({ prefix: "inbound-jobs/" });
+  if (leftovers.objects.length)
+    await testEnv.PRIVATE_FILES.delete(leftovers.objects.map((row) => row.key));
 });
 const raw = new TextEncoder().encode(
   [
