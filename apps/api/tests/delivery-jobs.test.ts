@@ -311,3 +311,47 @@ it("expires an orphan without exposing its raw content or allowing a destructive
     error: { code: "CONFLICT" },
   });
 });
+
+it("does not let a removed project block orphan recovery or the retention deadline", async () => {
+  const jobs = new DeliveryJobs(h.db, async () => {});
+  const inbound = new InboundJobs(testEnv, jobs, h.support, new SupportRepository(h.db));
+  await expect(
+    inbound.store(
+      new Request("https://internal.invalid/internal/mail-ingress/raw", {
+        method: "PUT",
+        headers: { "X-Mail-To": "support@example.com", "X-Mail-Project": "removed" },
+        body: raw,
+      }),
+    ),
+  ).rejects.toThrow("PROJECT_UNAVAILABLE");
+  const [orphan] = (await testEnv.PRIVATE_FILES.list({ prefix: "inbound-jobs/" })).objects;
+  if (!orphan) throw new Error("raw original missing");
+  await inbound.store(
+    new Request("https://internal.invalid/internal/mail-ingress/raw", {
+      method: "PUT",
+      headers: { "X-Mail-To": "another@example.com" },
+      body: raw,
+    }),
+  );
+  await inbound.reconcile();
+  expect(
+    (
+      await h.db
+        .prepare("SELECT count(*) AS n FROM delivery_jobs WHERE kind='inbound_email'")
+        .first()
+    )?.n,
+  ).toBe(1);
+  const meta = (await testEnv.PRIVATE_FILES.head(orphan.key))!.customMetadata;
+  await testEnv.PRIVATE_FILES.put(orphan.key, raw, {
+    customMetadata: { ...meta, createdAt: "2020-01-01T00:00:00.000Z" },
+  });
+  await inbound.reconcile();
+  expect(await testEnv.PRIVATE_FILES.head(orphan.key)).toBeNull();
+  expect(
+    (
+      await h.db
+        .prepare("SELECT count(*) AS n FROM delivery_jobs WHERE last_error='MAIL_EXPIRED'")
+        .first()
+    )?.n,
+  ).toBe(1);
+});
