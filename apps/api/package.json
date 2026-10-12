@@ -19,7 +19,8 @@
     "@inquiry-platform/core": "workspace:*",
     "@inquiry-platform/notification": "workspace:*",
     "hono": "^4.13.5",
-    "zod": "^4.4.2"
+    "zod": "^4.4.2",
+    "@inquiry-platform/mail-parser": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.18.7",

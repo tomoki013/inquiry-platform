@@ -472,7 +472,25 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
    * all, and adding a shared secret between two Workers in one account would be
    * a second thing to rotate for no additional guarantee.
    */
+  async listDeliveryJobs() {
+    return this.services.jobs.list(await this.scope());
+  }
+  async retryDeliveryJob(id: string, actor: ActorRef) {
+    const result = await this.services.jobs.retry(id, await this.scope(), actor);
+    if (result.ok) this.ctx.waitUntil(this.services.jobs.run(id));
+    return result;
+  }
+
   async scheduled(): Promise<void> {
+    await this.services.inbound
+      .reconcile()
+      .catch(() => console.log(JSON.stringify({ event: "delivery.reconcile_failed" })));
+    await this.services.jobs
+      .drain()
+      .catch(() => console.log(JSON.stringify({ event: "delivery.drain_failed" })));
+    await this.services.jobs
+      .purge()
+      .catch(() => console.log(JSON.stringify({ event: "delivery.purge_failed" })));
     await this.services.reports.retryReceipts();
     await this.services.reply.refreshMessageIds();
     await expireReportEvidence(this.env);
@@ -521,6 +539,16 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
         attachment.content_type,
         attachment.original_filename,
       );
+    }
+
+    if (url.pathname === "/internal/mail-ingress/raw" && request.method === "PUT") {
+      try {
+        const response = await this.services.inbound.store(request);
+        if (response.ok) this.ctx.waitUntil(this.services.jobs.drain());
+        return response;
+      } catch {
+        return json({ error: "MAIL_QUEUE_UNAVAILABLE" }, 503);
+      }
     }
 
     const supportUpload = /^\/internal\/support\/messages\/([^/]+)\/attachments$/.exec(

@@ -22,6 +22,9 @@ export const THREAD_SERVICE =
  */
 export class Scope {
   static readonly all = new Scope(null);
+  static service(id: string): Scope {
+    return new Scope(new Set([id]));
+  }
 
   private constructor(private readonly ids: ReadonlySet<string> | null) {}
 

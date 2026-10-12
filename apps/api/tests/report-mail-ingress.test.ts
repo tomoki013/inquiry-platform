@@ -2,7 +2,10 @@ import type { IngestInboundEmailResult, Result } from "@inquiry-platform/core";
 import { beforeEach, expect, it } from "vitest";
 import type { MailIngressEnv } from "../../mail-ingress/src/index";
 import ingress from "../../mail-ingress/src/index";
-import { appActor, type Harness, harness, seedApp } from "./harness";
+import { SupportRepository } from "../src/db/support";
+import { DeliveryJobs } from "../src/domain/delivery-jobs";
+import { InboundJobs } from "../src/domain/inbound-jobs";
+import { appActor, type Harness, harness, seedApp, testEnv } from "./harness";
 
 let h: Harness;
 const reportId = "11111111-1111-4111-8111-111111111111";
@@ -53,17 +56,24 @@ async function receive(
   ].join("\r\n");
   const bytes = new TextEncoder().encode(raw);
   const results: Array<Result<IngestInboundEmailResult>> = [];
+  const ingest = h.support.ingestInboundEmail.bind(h.support);
+  h.support.ingestInboundEmail = async (input, actor) => {
+    const result = await ingest(input, actor);
+    results.push(result);
+    return result;
+  };
+  let inbound!: InboundJobs;
+  const jobs = new DeliveryJobs(h.db, (row) => inbound.process(row));
+  inbound = new InboundJobs(testEnv, jobs, h.support, new SupportRepository(h.db));
   const env = {
+    PRIVATE_FILES: testEnv.PRIVATE_FILES,
     SUPPORT_EMAIL: "support@example.com",
     MAX_STORED_BYTES: "5242880",
     ADMIN_CORE: {
-      ingestInboundEmail: async (input: unknown) => {
-        const result = await h.support.ingestInboundEmail(input, {
-          type: "email",
-          id: "test-ingress",
-        });
-        results.push(result);
-        return result;
+      fetch: async (url: string, init: RequestInit) => {
+        const response = await inbound.store(new Request(url, init));
+        await jobs.drain();
+        return response;
       },
     },
   } as unknown as MailIngressEnv;

@@ -10,6 +10,8 @@ import { SupportRepository } from "./db/support";
 import { TemplateRepository } from "./db/templates";
 import { AppService } from "./domain/app-service";
 import { DashboardService } from "./domain/dashboard-service";
+import { DeliveryError, DeliveryJobs } from "./domain/delivery-jobs";
+import { InboundJobs } from "./domain/inbound-jobs";
 import { ModerationRegistry } from "./domain/moderation";
 import { NotificationService, type TicketCreatedRef } from "./domain/notification-service";
 import { ReplyService } from "./domain/reply-service";
@@ -71,9 +73,38 @@ export function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknow
       },
     },
   );
-  const notify = (ref: TicketCreatedRef) => schedule(notifications.ticketCreated(ref));
+  let inbound: InboundJobs;
+  const jobs = new DeliveryJobs(env.DB, async (row) => {
+    if (row.kind === "inbound_email") return inbound.process(row);
+    const payload = JSON.parse(row.payload);
+    if (row.kind === "failure_alert") {
+      const original = await env.DB.prepare(
+        "SELECT id,service_id,kind,generation FROM delivery_jobs WHERE id=? AND generation=? AND last_error IS NOT NULL AND state<>'completed'",
+      )
+        .bind(payload.jobId, payload.generation)
+        .first<{ id: string; service_id: string; kind: string; generation: number }>();
+      if (original && !(await notifications.failureAlert(original)))
+        throw new DeliveryError("ALERT_DELIVERY_FAILED");
+      return;
+    }
+    const channel = row.kind === "notification_email" ? "email" : "push";
+    const outcome = await notifications.ticketCreated({
+      ...payload,
+      deliveryJobId: row.id,
+      channels: { email: channel === "email", push: channel === "push" },
+    });
+    if (outcome.email === "unconfigured" && (await notifications.emailExpected(row.service_id)))
+      throw new DeliveryError("MAIL_UNCONFIGURED");
+    if (outcome.email === "failed" || outcome.push.failed)
+      throw new DeliveryError("NOTIFICATION_FAILED");
+  });
+  const notify = Object.assign((ref: TicketCreatedRef) => schedule(jobs.enqueueNotification(ref)), {
+    statements: (ref: TicketCreatedRef) => jobs.notificationStatements(ref),
+  });
 
   const supportService = new SupportService(env.DB, support, apps, audit, notify);
+
+  inbound = new InboundJobs(env, jobs, supportService, support);
 
   const replyService = new ReplyService(
     env.DB,
@@ -96,6 +127,8 @@ export function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknow
 
   return {
     branding,
+    jobs,
+    inbound,
     moderation,
     apps: new AppService(env.DB, apps, audit),
     reports: new ReportService(

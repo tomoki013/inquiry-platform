@@ -16,6 +16,7 @@ export const standardApiCapabilities = [
   "reply-drafts-and-templates",
   "projects",
   "notifications",
+  "delivery-jobs",
   "activity",
   "dashboard",
 ] as const;

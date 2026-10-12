@@ -40,6 +40,8 @@ Project → Intake.submitContact / Intake.submitReport
 
 ## セキュリティ
 
+v0.8.0から配送失敗をD1に保持し、自動再試行と手動復旧を行う。設定と保持期限は[配送・受信処理の復旧](delivery-jobs.md)を参照。
+
 - 通知には Ticket 番号・種別・Project 名・リンクだけを載せる。
 - `endpoint` / `p256dh` / `auth` は API response と監査 metadata に返さない。
 - 他人の購読は list に出ず、revoke も `NOT_FOUND` とする。

@@ -1,3 +1,4 @@
+import type { OperatorDeliveryJob, OperatorDeliveryPage } from "./deliveries";
 /**
  * The contract between a project and the platform.
  *
@@ -351,6 +352,12 @@ export interface OperatorReply {
  * `NOT_FOUND` exactly as a missing one does.
  */
 export interface ProjectOperatorApi {
+  listDeliveryJobs(projectSlug: string): Promise<IntakeResult<OperatorDeliveryPage>>;
+  retryDeliveryJob(
+    projectSlug: string,
+    jobId: string,
+    operator: OperatorRef,
+  ): Promise<IntakeResult<OperatorDeliveryJob>>;
   project(projectSlug: string): Promise<IntakeResult<OperatorProject>>;
   listTickets(
     projectSlug: string,

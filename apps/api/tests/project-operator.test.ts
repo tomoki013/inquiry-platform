@@ -24,6 +24,8 @@ function operator(props: ProjectOperatorProps | Record<string, unknown> | undefi
   Object.defineProperty(ctx, "props", { value: props });
   const entry = new ProjectOperator(ctx, testEnv as never);
   const api: ProjectOperatorApi = {
+    listDeliveryJobs: (slug) => entry.listDeliveryJobs(slug),
+    retryDeliveryJob: (slug, id, operator) => entry.retryDeliveryJob(slug, id, operator),
     project: entry.project.bind(entry),
     listTickets: entry.listTickets.bind(entry),
     getTicket: entry.getTicket.bind(entry),
@@ -41,6 +43,38 @@ function operator(props: ProjectOperatorProps | Record<string, unknown> | undefi
 
 const orbitConsole: ProjectOperatorProps = { caller: "orbit-api", projects: ["orbit"] };
 const person = { id: "sub-1234" };
+
+it("scopes failure lists and manual retries through the actual project entrypoint", async () => {
+  const at = new Date().toISOString();
+  for (const slug of ["orbit", "prism"]) {
+    const app = await testEnv.DB.prepare("SELECT id FROM apps WHERE slug=?")
+      .bind(slug)
+      .first<{ id: string }>();
+    await testEnv.DB.prepare(
+      "INSERT INTO delivery_jobs(id,service_id,kind,state,payload,last_error,next_attempt_at,created_at,updated_at) VALUES(?,?,'notification_email','failed','{}','NOTIFICATION_FAILED',?,?,?)",
+    )
+      .bind(slug + "-failure", app!.id, at, at, at)
+      .run();
+  }
+  const { api, ctx } = operator(orbitConsole);
+  const own = createProjectOperatorClient(api, "orbit");
+  const list = await own.listDeliveryJobs();
+  expect(list.ok && list.value.items.map((row) => row.id)).toEqual(["orbit-failure"]);
+  expect(await own.retryDeliveryJob("prism-failure", person)).toMatchObject({
+    ok: false,
+    error: { code: "NOT_FOUND" },
+  });
+  expect(await own.retryDeliveryJob("orbit-failure", person)).toMatchObject({ ok: true });
+  await waitOnExecutionContext(ctx);
+  expect(await operator(undefined).api.listDeliveryJobs("orbit")).toMatchObject({
+    ok: false,
+    error: { code: "FORBIDDEN" },
+  });
+  const audit = await testEnv.DB.prepare(
+    "SELECT actor_type,actor_id FROM audit_logs WHERE action='delivery.retried'",
+  ).first();
+  expect(audit).toMatchObject({ actor_type: "app", actor_id: "orbit-api:sub-1234" });
+});
 
 async function contact(projectSlug: string, key: string, email?: string, name?: string) {
   const ctx = createExecutionContext();

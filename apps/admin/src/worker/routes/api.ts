@@ -27,6 +27,11 @@ export function registerApiRoutes(app: AdminApi): void {
     c.json({ ok: true, data: platformApiDescriptor, requestId: requestId(c) }),
   );
 
+  app.get("/api/deliveries", async (c) => respond(c, await c.env.ADMIN_CORE.listDeliveryJobs()));
+  app.post("/api/deliveries/:id/retry", async (c) =>
+    respond(c, await c.env.ADMIN_CORE.retryDeliveryJob(c.req.param("id"), actor(c))),
+  );
+
   app.get("/api/tickets", async (c) =>
     respond(c, await c.env.ADMIN_CORE.listTickets({ ...c.req.query() })),
   );

@@ -202,13 +202,7 @@ describe("audit trail across every Ticket mutation", () => {
     );
   });
 
-  /*
-   * Master-data changes are audited, but the row says only which record was
-   * touched — not what it said before or after. The audit (§8-5) asks for
-   * from/to like the ticket field changes carry. Marked `fails` until that is
-   * implemented; flip to `it` in the same change.
-   */
-  it.fails("keeps the previous and new value when master data is edited", async () => {
+  it("keeps the previous and new value when master data is edited", async () => {
     const h = await harness();
     const tickets = new TicketService(h.db, h.moderation);
     value(

@@ -28,6 +28,7 @@ import {
 import { z } from "zod";
 import { AppRepository, type AppRow } from "./db/apps";
 import { internalFailure, validationFailure } from "./domain/failures";
+import { Scope } from "./domain/scope";
 import { TicketService } from "./domain/ticket-service";
 import type { AdminCoreEnv } from "./env";
 import { buildServices } from "./services";
@@ -376,6 +377,21 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
     } catch (error) {
       return internalFailure("operator.reply", error);
     }
+  }
+
+  async listDeliveryJobs(projectSlug: string) {
+    const scoped = await this.scope(projectSlug);
+    if (!scoped.ok) return scoped;
+    return this.services.jobs.list(Scope.service(scoped.app.id));
+  }
+  async retryDeliveryJob(projectSlug: string, jobId: string, operator: OperatorRef) {
+    const scoped = await this.scope(projectSlug);
+    if (!scoped.ok) return scoped;
+    const actor = this.actor(scoped.grant, operator);
+    if (!actor) return forbidden;
+    const result = await this.services.jobs.retry(jobId, Scope.service(scoped.app.id), actor);
+    if (result.ok) this.ctx.waitUntil(this.services.jobs.run(jobId));
+    return result;
   }
 
   async setSignature(

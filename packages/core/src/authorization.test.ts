@@ -31,6 +31,8 @@ describe("can", () => {
 describe("permissionFor", () => {
   it.each([
     ["GET", "/api/tickets", "tickets:read"],
+    ["GET", "/api/deliveries", "tickets:read"],
+    ["POST", "/api/deliveries/job/retry", "tickets:operate"],
     ["GET", "/api/apps", "tickets:read"],
     ["PATCH", "/api/tickets/t1", "tickets:operate"],
     ["POST", "/api/tickets/t1/notes", "tickets:operate"],

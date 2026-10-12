@@ -1,0 +1,13 @@
+{
+  "name": "@inquiry-platform/mail-parser",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./journal": "./src/journal.ts"
+  },
+  "dependencies": {
+    "postal-mime": "^2.4.5"
+  }
+}
