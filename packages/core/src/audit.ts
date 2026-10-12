@@ -22,7 +22,10 @@ export interface AuditEntry {
   action: string;
   targetType: AuditTargetType;
   targetId: string;
-  metadata: Record<string, string | number | boolean>;
+  metadata: Record<
+    string,
+    string | number | boolean | null | Record<string, string | number | boolean | null>
+  >;
   createdAt: string;
 }
 

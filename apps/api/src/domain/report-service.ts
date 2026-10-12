@@ -131,6 +131,7 @@ export class ReportService {
             contentType: input.contentType,
           },
         }),
+        ...(this.notify?.statements?.({ ticketId: threadId, category: "report" }) ?? []),
       ]);
 
       // The ticket is the thread's row: `ticket_report_insert` retyped it.

@@ -140,6 +140,14 @@ export class SupportService {
         }),
       );
 
+      if (!existingThreadId)
+        statements.push(
+          ...(this.notify?.statements?.({
+            ticketId: threadId,
+            category: "inquiry",
+            channels: { email: false },
+          }) ?? []),
+        );
       await this.db.batch(statements);
       // Push only: the operator already receives the mail itself, and a
       // second mail saying "there is mail" would be noise.
@@ -203,6 +211,7 @@ export class SupportService {
           targetId: threadId,
           metadata: { newThread: true, source: input.source, length: input.bodyText.length },
         }),
+        ...(this.notify?.statements?.({ ticketId: threadId, category: "inquiry" }) ?? []),
       ]);
 
       this.notify?.({ ticketId: threadId, category: "inquiry" });

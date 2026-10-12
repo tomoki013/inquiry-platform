@@ -11,5 +11,7 @@ allowBuilds:
 # bundled into a Worker. Remove once pool-workers and wrangler depend on a
 # miniflare that already ships these versions.
 overrides:
-  "miniflare>sharp": "^0.35.4"
+  "miniflare>sharp": "0.35.5"
   "miniflare>undici": "^7.29.0"
+  # GHSA-68fv-2mgg-jv7q: preserve the patched source-map parser in tools.
+  "source-map-js": "1.2.2"

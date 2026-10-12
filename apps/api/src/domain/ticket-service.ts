@@ -745,6 +745,9 @@ export class TicketService {
     if (i.kind === "assignee" && i.id === "self") i.id = actor.id ?? "admin";
     try {
       let statement: D1PreparedStatement;
+      let auditTable: string;
+      let auditKey = "id";
+      let auditValues: Record<string, unknown>;
       if (i.kind === "sla") {
         if (
           !ticketPriorities.some((priority) => priority === i.id) ||
@@ -753,6 +756,9 @@ export class TicketService {
           i.resolution === undefined
         )
           return fail("VALIDATION_ERROR", "SLA値を入力してください。");
+        auditTable = "ticket_sla_settings";
+        auditKey = "priority";
+        auditValues = { ack: i.ack, response: i.response, resolution: i.resolution };
         statement = this.db
           .prepare("UPDATE ticket_sla_settings SET ack=?,response=?,resolution=? WHERE priority=?")
           .bind(i.ack, i.response, i.resolution, i.id);
@@ -792,6 +798,8 @@ export class TicketService {
           if (!i.type) return fail("VALIDATION_ERROR", "Typeを選んでください。");
           fields.type = i.type;
         }
+        auditTable = table;
+        auditValues = fields;
         statement = this.db
           .prepare(
             `INSERT INTO ${table}(${Object.keys(fields).join(",")}) VALUES(${Object.keys(fields)
@@ -803,13 +811,25 @@ export class TicketService {
           )
           .bind(...Object.values(fields));
       }
+      // Capture the previous row inside the same serialized D1 batch as the
+      // mutation. A read before batch() could describe another writer's value.
+      const fields = Object.keys(auditValues);
+      const snapshot = fields.map((field) => `'${field}',${field}`).join(",");
       await this.db.batch([
-        statement,
         this.db
-          .prepare(
-            "INSERT INTO audit_logs VALUES(?, 'admin',?,'ticket.settings_updated','system',?,?,?)",
-          )
-          .bind(newId(), actor.id ?? "admin", i.id, JSON.stringify({ kind: i.kind }), nowIso()),
+          .prepare(`INSERT INTO audit_logs VALUES(?, 'admin',?,'ticket.settings_updated','system',?,
+          json_object('kind',?,'from',json((SELECT json_object(${snapshot}) FROM ${auditTable} WHERE ${auditKey}=?)),
+          'to',json(?)),?)`)
+          .bind(
+            newId(),
+            actor.id ?? "admin",
+            i.id,
+            i.kind,
+            i.id,
+            JSON.stringify(auditValues),
+            nowIso(),
+          ),
+        statement,
       ]);
       return this.masters();
     } catch (e) {

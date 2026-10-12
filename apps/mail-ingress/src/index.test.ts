@@ -60,6 +60,17 @@ const RAW = [
 ].join("\r\n");
 
 function makeEnv(overrides: Partial<MailIngressEnv> = {}) {
+  const objects = new Map<string, { bytes: Uint8Array; customMetadata: Record<string, string> }>();
+  const bucket = {
+    head: async (key: string) => objects.get(key) ?? null,
+    put: async (
+      key: string,
+      bytes: Uint8Array,
+      options: { customMetadata: Record<string, string> },
+    ) => {
+      objects.set(key, { bytes, customMetadata: options.customMetadata });
+    },
+  } as unknown as R2Bucket;
   const ingest = vi.fn().mockResolvedValue({
     ok: true,
     value: { threadId: "t1", messageId: "m1", duplicate: false, newThread: true },
@@ -67,12 +78,13 @@ function makeEnv(overrides: Partial<MailIngressEnv> = {}) {
   const fetchStub = vi.fn().mockResolvedValue(new Response(null, { status: 201 }));
   const env: MailIngressEnv = {
     ADMIN_CORE: { ingestInboundEmail: ingest, fetch: fetchStub } as unknown as AdminCoreStub,
+    PRIVATE_FILES: bucket,
     SUPPORT_EMAIL: "support@example.com",
     MAX_STORED_BYTES: "5242880",
     SUPPORT_FORWARD_EMAIL: "operator@example.com",
     ...overrides,
   };
-  return { env, ingest, fetchStub };
+  return { env, ingest, fetchStub, objects };
 }
 
 const ctx = {
@@ -107,24 +119,22 @@ describe("email()", () => {
     expect(message.events).toContain("raw");
   });
 
-  it("hands a parsed message to Admin Core and forwards it on", async () => {
-    const { env, ingest } = makeEnv();
+  it("queues the MIME original before parsing and forwards it on", async () => {
+    const { env, ingest, fetchStub } = makeEnv();
     await worker.email(message as never, env, ctx);
 
-    expect(ingest).toHaveBeenCalledTimes(1);
-    const [input, actor] = ingest.mock.calls[0] as [Record<string, unknown>, unknown];
-    expect(input.from).toBe("someone@example.com");
-    expect(input.subject).toBe("アプリで共有できません");
-    expect(input.bodyText).toBe("共有ボタンが動きません。");
-    expect(input.messageId).toBe("<first@example.com>");
-    expect(input.requesterName).toBe("Someone");
-    expect(actor).toEqual({ type: "email", id: "mail-ingress" });
+    expect(ingest).not.toHaveBeenCalled();
+    expect(fetchStub).toHaveBeenCalledTimes(1);
+    const [url, options] = fetchStub.mock.calls[0]!;
+    expect(url).toContain("/internal/mail-ingress/raw");
+    expect(options.headers["X-Mail-To"]).toBe("support@example.com");
+    expect(await new Response(options.body).text()).toBe(RAW);
 
     expect(message.forwardedTo).toEqual(["operator@example.com"]);
   });
 
   it("routes a project address into the matching project and inbox", async () => {
-    const { env, ingest } = makeEnv({
+    const { env, ingest, fetchStub } = makeEnv({
       APP_MAIL_ROUTES: JSON.stringify([
         {
           address: "support@app-one.example.com",
@@ -142,40 +152,40 @@ describe("email()", () => {
     await worker.email(projectMessage as never, env, ctx);
 
     expect(projectMessage.forwardedTo).toEqual(["app-one-owner@example.com"]);
-    expect((ingest.mock.calls[0]?.[0] as Record<string, unknown> | undefined)?.appSlug).toBe(
-      "app-one",
-    );
+    expect(fetchStub.mock.calls[0]![1].headers["X-Mail-Project"]).toBe("app-one");
   });
 
   /** The rule: the inbox that worked before Admin existed keeps working. */
   it("still forwards when Admin Core refuses the message", async () => {
-    const { env, ingest } = makeEnv();
-    ingest.mockResolvedValue({ ok: false, error: { code: "VALIDATION_ERROR", message: "x" } });
+    const { env, ingest, fetchStub } = makeEnv();
+    fetchStub.mockResolvedValue(new Response(null, { status: 503 }));
 
     await worker.email(message as never, env, ctx);
     expect(message.forwardedTo).toEqual(["operator@example.com"]);
   });
 
   it("still forwards when Admin Core throws", async () => {
-    const { env, ingest } = makeEnv();
-    ingest.mockRejectedValue(new Error("binding is down"));
+    const { env, ingest, fetchStub, objects } = makeEnv();
+    fetchStub.mockRejectedValue(new Error("binding is down"));
 
     await worker.email(message as never, env, ctx);
     expect(message.forwardedTo).toEqual(["operator@example.com"]);
+    expect(objects.size).toBe(1);
+    expect(new TextDecoder().decode([...objects.values()][0]!.bytes)).toBe(RAW);
   });
 
   it("keeps the stored copy when forwarding fails", async () => {
-    const { env, ingest } = makeEnv();
+    const { env, ingest, fetchStub } = makeEnv();
     message.forwardShouldFail = true;
 
     // Does not throw: an exception would make Cloudflare retry the delivery,
     // and the message is already recorded.
     await expect(worker.email(message as never, env, ctx)).resolves.toBeUndefined();
-    expect(ingest).toHaveBeenCalledTimes(1);
+    expect(fetchStub).toHaveBeenCalledTimes(1);
   });
 
   it("forwards but does not parse a message past the size ceiling", async () => {
-    const { env, ingest } = makeEnv({ MAX_STORED_BYTES: "10" });
+    const { env, ingest, fetchStub } = makeEnv({ MAX_STORED_BYTES: "10" });
     await worker.email(message as never, env, ctx);
 
     expect(ingest).not.toHaveBeenCalled();
@@ -183,14 +193,14 @@ describe("email()", () => {
   });
 
   it("does nothing dangerous when no forwarding address is configured", async () => {
-    const { env, ingest } = makeEnv({ SUPPORT_FORWARD_EMAIL: undefined });
+    const { env, ingest, fetchStub } = makeEnv({ SUPPORT_FORWARD_EMAIL: undefined });
     await worker.email(message as never, env, ctx);
 
-    expect(ingest).toHaveBeenCalledTimes(1);
+    expect(fetchStub).toHaveBeenCalledTimes(1);
     expect(message.forwardedTo).toEqual([]);
   });
 
-  it("does not re-upload attachments for a message it has already seen", async () => {
+  it("sends only the MIME job and never independently uploads attachments", async () => {
     const { env, ingest, fetchStub } = makeEnv();
     ingest.mockResolvedValue({
       ok: true,
@@ -198,11 +208,11 @@ describe("email()", () => {
     });
 
     await worker.email(message as never, env, ctx);
-    expect(fetchStub).not.toHaveBeenCalled();
+    expect(fetchStub).toHaveBeenCalledTimes(1);
   });
 
-  it("skips a message with no usable sender", async () => {
-    const { env, ingest } = makeEnv();
+  it("persists an unparseable message so Core can show and retry its failure", async () => {
+    const { env, ingest, fetchStub } = makeEnv();
     const headerless = new FakeMessage("", "support@example.com", "not an email");
     await worker.email(headerless as never, env, ctx);
 
@@ -224,6 +234,6 @@ describe("logging", () => {
     expect(written).not.toContain("someone@example.com");
     expect(written).not.toContain("共有ボタン");
     expect(written).not.toContain("アプリで共有できません");
-    expect(written).toContain("mail.stored");
+    expect(written).toContain("mail.queued");
   });
 });

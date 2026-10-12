@@ -1,11 +1,6 @@
 import type { AdminCoreStub } from "@inquiry-platform/core";
-import {
-  ATTACHMENT_FILENAME_HEADER,
-  INTERNAL_ORIGIN,
-  INTERNAL_PATHS,
-  MAX_ATTACHMENT_BYTES,
-} from "@inquiry-platform/core";
-import { parseInboundEmail } from "./parse";
+import { INTERNAL_ORIGIN } from "@inquiry-platform/core";
+import { persistInboundMail, readInboundBytes } from "@inquiry-platform/mail-parser/journal";
 
 /**
  * The deployment's support address (`SUPPORT_EMAIL`), and anything else Email Routing points here.
@@ -25,6 +20,8 @@ import { parseInboundEmail } from "./parse";
  */
 export interface MailIngressEnv {
   ADMIN_CORE: AdminCoreStub;
+  /** The same private bucket as Core, so its outage cannot lose the original. */
+  PRIVATE_FILES: R2Bucket;
   SUPPORT_EMAIL: string;
   MAX_STORED_BYTES: string;
   /** The operator's own address. A Secret — it is personal, and it is the one
@@ -85,7 +82,7 @@ export default {
 async function store(
   message: InboundMessage,
   env: MailIngressEnv,
-  ctx: ExecutionContext,
+  _ctx: ExecutionContext,
   projectSlug?: string,
 ): Promise<"stored" | "skipped"> {
   const limit = Number(env.MAX_STORED_BYTES) || 5 * 1024 * 1024;
@@ -96,64 +93,22 @@ async function store(
     return "skipped";
   }
 
-  const parsed = await parseInboundEmail(message.raw);
-  if (!parsed.from) {
-    log("mail.no_sender", {});
-    return "skipped";
-  }
-
-  const result = await env.ADMIN_CORE.ingestInboundEmail(
-    {
-      from: parsed.from,
-      to: message.to,
-      subject: parsed.subject,
-      bodyText: parsed.bodyText,
-      messageId: parsed.messageId,
-      inReplyTo: parsed.inReplyTo,
-      references: parsed.references,
-      requesterName: parsed.fromName,
-      appSlug: projectSlug,
+  const bytes = await readInboundBytes(message.raw);
+  await persistInboundMail(env.PRIVATE_FILES, bytes, message.to, projectSlug);
+  const response = await env.ADMIN_CORE.fetch(`${INTERNAL_ORIGIN}/internal/mail-ingress/raw`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "message/rfc822",
+      "X-Mail-To": message.to,
+      ...(projectSlug ? { "X-Mail-Project": projectSlug } : {}),
     },
-    { type: "email", id: "mail-ingress" },
-  );
-
-  if (!result.ok) {
-    log("mail.ingest_rejected", { code: result.error.code });
+    body: bytes,
+  });
+  if (!response.ok) {
+    log("mail.queue_failed", { status: response.status });
     return "skipped";
   }
-  if (result.value.duplicate) {
-    log("mail.duplicate", { threadId: result.value.threadId });
-    return "stored";
-  }
-
-  // Attachments are best-effort and run after the message is safely recorded.
-  // Losing a photo is bad; losing the question it was attached to is worse.
-  const uploads = parsed.attachments
-    .filter((attachment) => attachment.bytes.byteLength > 0)
-    .filter((attachment) => attachment.bytes.byteLength <= MAX_ATTACHMENT_BYTES)
-    .map(async (attachment) => {
-      const response = await env.ADMIN_CORE.fetch(
-        `${INTERNAL_ORIGIN}${INTERNAL_PATHS.supportAttachment(result.value.messageId)}`,
-        {
-          method: "PUT",
-          headers: {
-            "Content-Type": attachment.contentType,
-            "Content-Length": String(attachment.bytes.byteLength),
-            ...(attachment.filename ? { [ATTACHMENT_FILENAME_HEADER]: attachment.filename } : {}),
-          },
-          body: attachment.bytes,
-        },
-      );
-      if (!response.ok) log("mail.attachment_failed", { status: response.status });
-    });
-
-  if (uploads.length > 0) ctx.waitUntil(Promise.allSettled(uploads));
-
-  log("mail.stored", {
-    threadId: result.value.threadId,
-    newThread: result.value.newThread,
-    attachments: uploads.length,
-  });
+  log("mail.queued", {});
   return "stored";
 }
 

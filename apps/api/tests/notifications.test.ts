@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DeliveryJobs } from "../src/domain/delivery-jobs";
 import {
   admin,
   appActor,
@@ -260,6 +261,55 @@ describe("ticket notifications carry a reference, never content", () => {
 });
 
 describe("notification failure is not ticket failure", () => {
+  it("retries only push recipients whose earlier delivery failed", async () => {
+    const h = await harness();
+    const appId = await seedApp(h);
+    await subscribe(h, "https://push.example/fine");
+    await subscribe(h, "https://push.example/busy");
+    const { threadId } = await inquiry(h);
+    h.push.sent = [];
+    const jobs = new DeliveryJobs(h.db, async () => {});
+    await jobs.statement("push-retry", appId, "notification_push", {}).run();
+    h.push.answers.set("https://push.example/busy", {
+      ok: false,
+      gone: false,
+      status: 503,
+      reason: "rejected",
+    });
+    const ref = {
+      ticketId: threadId,
+      category: "inquiry" as const,
+      deliveryJobId: "push-retry",
+      channels: { email: false, push: true },
+    };
+    expect((await h.notifications.ticketCreated(ref)).push.failed).toBe(1);
+    h.push.answers.delete("https://push.example/busy");
+    expect((await h.notifications.ticketCreated(ref)).push.failed).toBe(0);
+    expect(h.push.sent.filter((row) => row.endpoint.endsWith("/fine"))).toHaveLength(1);
+    expect(h.push.sent.filter((row) => row.endpoint.endsWith("/busy"))).toHaveLength(2);
+  });
+
+  it("alerts only with a kind, project and console link", async () => {
+    const h = await harness({ notifyEmail: "operator@example.com" });
+    const appId = await seedApp(h);
+    expect(
+      await h.notifications.failureAlert({
+        id: "private-job-id",
+        service_id: appId,
+        kind: "inbound_email",
+        generation: 0,
+      }),
+    ).toBe(true);
+    const mail = h.mail.sent.at(-1)!;
+    expect(mail.text.split("\n")).toEqual([
+      "種別: inbound_email",
+      "対象アプリ: orbit",
+      "リンク: https://operator.example.com",
+    ]);
+    expect(mail.subject).toBe("処理の失敗");
+    expect(mail.text).not.toContain("private-job-id");
+    for (const secret of secrets) expect(mail.text).not.toContain(secret);
+  });
   it("creates the ticket and still pushes when the mail provider refuses", async () => {
     const mail = new FakeMailProvider();
     mail.failNext = true;

@@ -24,12 +24,13 @@
 
   "services": [
     {
-      // The only thing this Worker can reach. No D1, no R2.
+      // D1 stays in Core. Raw mail is journaled directly to the shared bucket.
       "binding": "ADMIN_CORE",
       "service": "inquiry-core",
       "entrypoint": "AdminCore"
     }
-  ]
+  ],
+  "r2_buckets": [{ "binding": "PRIVATE_FILES", "bucket_name": "inquiry-private-files" }]
 
   // SUPPORT_FORWARD_EMAIL is a Secret, not a var: it is the operator's personal
   // address and does not belong in git. Set with:

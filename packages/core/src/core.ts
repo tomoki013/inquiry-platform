@@ -1,3 +1,4 @@
+import type { OperatorDeliveryJob, OperatorDeliveryPage } from "@inquiry-platform/sdk";
 import type {
   AppDetail,
   AppSummary,
@@ -85,6 +86,8 @@ export interface AdminIdentity {
  * than throws — see `errors.ts` for why.
  */
 export interface AdminCoreApi {
+  listDeliveryJobs(): Promise<Result<OperatorDeliveryPage>>;
+  retryDeliveryJob(id: string, actor: ActorRef): Promise<Result<OperatorDeliveryJob>>;
   ticketReplyContext(id: string): Promise<Result<SupportThreadDetail>>;
   listTickets(input: unknown): Promise<Result<TicketPage>>;
   getTicket(id: string, offset?: number): Promise<Result<TicketDetail>>;

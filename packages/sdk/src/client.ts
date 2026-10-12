@@ -1,3 +1,4 @@
+import type { OperatorDeliveryJob, OperatorDeliveryPage } from "./deliveries";
 import type {
   ContactReceipt,
   ContactSubmission,
@@ -94,6 +95,11 @@ export function createInquiryClient(binding: IntakeBinding | undefined): Inquiry
 
 /** A project's handle on its own tickets, bound to one project slug. */
 export interface ProjectOperatorClient {
+  listDeliveryJobs(): Promise<IntakeResult<OperatorDeliveryPage>>;
+  retryDeliveryJob(
+    jobId: string,
+    operator: OperatorRef,
+  ): Promise<IntakeResult<OperatorDeliveryJob>>;
   project(): Promise<IntakeResult<OperatorProject>>;
   listTickets(query?: OperatorTicketQuery): Promise<IntakeResult<OperatorTicketPage>>;
   getTicket(ref: string, offset?: number): Promise<IntakeResult<OperatorTicketDetail>>;
@@ -149,6 +155,9 @@ export function createProjectOperatorClient(
   ): Promise<IntakeResult<T>> => (binding ? await run(binding) : unavailable);
   return {
     project: () => call((api) => api.project(projectSlug)),
+    listDeliveryJobs: () => call((api) => api.listDeliveryJobs(projectSlug)),
+    retryDeliveryJob: (jobId, operator) =>
+      call((api) => api.retryDeliveryJob(projectSlug, jobId, operator)),
     listTickets: (query) => call((api) => api.listTickets(projectSlug, query)),
     getTicket: (ref, offset) => call((api) => api.getTicket(projectSlug, ref, offset)),
     changeTicket: (ticketId, change, operator) =>

@@ -37,6 +37,7 @@ import { internalFailure, notFound, validationFailure } from "./failures";
  */
 export interface TicketCreatedRef {
   ticketId: string;
+  deliveryJobId?: string;
   category: TicketNotificationCategory;
   /** Both on by default. Inbound mail turns email off: the operator already
    * has the mail itself. */
@@ -52,7 +53,9 @@ export interface TicketCreatedRef {
  * production this is `ctx.waitUntil`; in tests it collects the promises so
  * they can be awaited.
  */
-export type NotificationHook = (ref: TicketCreatedRef) => void;
+export type NotificationHook = ((ref: TicketCreatedRef) => void) & {
+  statements?: (ref: TicketCreatedRef) => D1PreparedStatement[];
+};
 
 export interface NotificationConfig {
   /** Where the operator alert goes. A Secret. Unset means no mail channel. */
@@ -167,13 +170,15 @@ export class NotificationService {
       event = await this.eventFor(ref);
     } catch (error) {
       internalFailure("notification.lookup", error);
+      outcome.email = "failed";
+      outcome.push.failed = 1;
     }
     if (!event) return outcome;
 
     const channels = { email: true, push: true, ...ref.channels };
     const [email, push] = await Promise.all([
       channels.email ? this.sendEmail(event) : Promise.resolve("disabled" as const),
-      channels.push ? this.sendPush(event) : Promise.resolve(outcome.push),
+      channels.push ? this.sendPush(event, ref.deliveryJobId) : Promise.resolve(outcome.push),
     ]);
     outcome.email = email;
     outcome.push = push;
@@ -241,7 +246,50 @@ export class NotificationService {
     }
   }
 
-  private async sendPush(event: TicketNotificationEvent): Promise<NotificationOutcome["push"]> {
+  async emailExpected(appId: string): Promise<boolean> {
+    const config = await this.resolved({ appId } as TicketNotificationEvent);
+    return (
+      config.emailEnabled !== false &&
+      Boolean(config.notifyEmail) &&
+      (await this.repo.emailWanted())
+    );
+  }
+  async failureAlert(job: {
+    id: string;
+    service_id: string;
+    kind: string;
+    generation: number;
+  }): Promise<boolean> {
+    const event = { appId: job.service_id } as TicketNotificationEvent;
+    const config = await this.resolved(event);
+    if (config.emailEnabled === false || !config.notifyEmail) return true;
+    const mail = config.mail ?? this.mail;
+    if (!mail.configured) return false;
+    const project = await this.db
+      .prepare("SELECT name FROM services WHERE id=?")
+      .bind(job.service_id)
+      .first<{ name: string }>();
+    const link = new URL(
+      (config.ticketUrlTemplate ?? this.config.ticketUrlTemplate).replaceAll("{ticketNumber}", ""),
+    ).origin;
+    const result = await mail.sendAdminNotification({
+      to: config.notifyEmail,
+      from: config.from,
+      subject: "処理の失敗",
+      text: [
+        `種別: ${job.kind}`,
+        `対象アプリ: ${project?.name ?? "Support"}`,
+        `リンク: ${link}`,
+      ].join("\n"),
+      idempotencyKey: `delivery-alert-${job.id}-${job.generation}`,
+    });
+    return result.ok;
+  }
+
+  private async sendPush(
+    event: TicketNotificationEvent,
+    jobId?: string,
+  ): Promise<NotificationOutcome["push"]> {
     const counts = { attempted: 0, delivered: 0, revoked: 0, failed: 0 };
     if (!this.push.vapid) return counts;
     let targets: DeliverableSubscription[];
@@ -251,6 +299,7 @@ export class NotificationService {
       );
     } catch (error) {
       internalFailure("notification.push_lookup", error);
+      counts.failed = 1;
       return counts;
     }
     let template = this.config.ticketUrlTemplate;
@@ -258,11 +307,21 @@ export class NotificationService {
       template = (await this.resolved(event)).ticketUrlTemplate ?? template;
     } catch (error) {
       internalFailure("notification.push_link", error);
+      counts.failed = 1;
+      return counts;
     }
     const payload = JSON.stringify(renderPushPayload(event, template));
     const at = nowIso();
     await Promise.all(
       targets.map(async (row) => {
+        if (
+          jobId &&
+          (await this.db
+            .prepare("SELECT 1 FROM delivery_progress WHERE job_id=? AND target_id=?")
+            .bind(jobId, row.id)
+            .first())
+        )
+          return;
         counts.attempted += 1;
         let result: PushDeliveryResult;
         try {
@@ -274,6 +333,11 @@ export class NotificationService {
           result = { ok: false, gone: false, reason: "transport" };
         }
         try {
+          if (jobId && (result.ok || result.gone))
+            await this.db
+              .prepare("INSERT OR IGNORE INTO delivery_progress VALUES(?,?)")
+              .bind(jobId, row.id)
+              .run();
           if (result.ok) {
             counts.delivered += 1;
             await this.repo.markUsed(row.id, at);
@@ -293,6 +357,7 @@ export class NotificationService {
             counts.failed += 1;
           }
         } catch (error) {
+          counts.failed += 1;
           internalFailure("notification.push_record", error);
         }
       }),

@@ -76,6 +76,8 @@ Message-ID による上書きは 409。これで受信返信のスレッド照�
 
 ## 2. コマンド
 
+v0.8.0以降はmail-ingressにもCoreと同じprivate bucketを`PRIVATE_FILES`でbindする。D1はCoreだけが保持する。[配送・受信処理の復旧](delivery-jobs.md)を参照。
+
 固定した tag を clone して依存を入れ、`scripts/deploy.mjs` にデプロイ側のディレクトリを渡す。
 
 ```bash

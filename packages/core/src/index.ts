@@ -8,6 +8,8 @@ export type {
   IntakeBinding,
   IntakeProps,
   OperatorAppliedTemplate,
+  OperatorDeliveryJob,
+  OperatorDeliveryPage,
   OperatorProject,
   OperatorRef,
   OperatorReply,
