@@ -4,6 +4,7 @@ import { ReportRepository } from "./db/reports";
 import { sha256Hex } from "./domain/identity";
 import type { AdminCoreEnv } from "./env";
 import { json, readBounded } from "./http";
+import { ProjectRegistry } from "./storage/database";
 
 /**
  * Stores one piece of report evidence in the private bucket.
@@ -19,8 +20,11 @@ export async function putReportEvidence(
   request: Request,
 ): Promise<Response> {
   const files = new FileStore(env.PRIVATE_FILES);
-  const reports = new ReportRepository(env.DB);
-  if (!(await reports.findRow(reportId))) return json({ error: "NOT_FOUND" }, 404);
+  const database = await new ProjectRegistry(env.DB).forRecord("report", reportId);
+  if (!database) return json({ error: "NOT_FOUND" }, 404);
+  const reports = new ReportRepository(database);
+  const report = await reports.findRow(reportId);
+  if (!report) return json({ error: "NOT_FOUND" }, 404);
   const body = await readBounded(request);
   if (!body) return json({ error: "TOO_LARGE" }, 413);
 
@@ -35,12 +39,12 @@ export async function putReportEvidence(
   const existing = await reports.findAttachment(reportId, attachmentId);
   if (existing)
     return json({ attachmentId, sha256: existing.sha256, byteSize: existing.byte_size }, 200);
-  const key = FileStore.reportKey(reportId, attachmentId);
+  const key = `projects/${encodeURIComponent(report.app_id)}/moderation/${encodeURIComponent(reportId)}/${attachmentId}`;
   const contentType = request.headers.get("Content-Type") ?? "application/octet-stream";
   const filename = request.headers.get(ATTACHMENT_FILENAME_HEADER) ?? undefined;
   const stored = await files.put(key, body, contentType);
 
-  await env.DB.batch([
+  await database.batch([
     reports.attachmentStatement({
       id: attachmentId,
       reportId,

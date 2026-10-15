@@ -41,6 +41,8 @@ function usage() {
   console.error(
     [
       "Usage: deploy.mjs <deployment-dir> <command>",
+      "  storage <prepare|copy|verify|cutover|tables> <slug> <p_prefix> [table] [batch-size] (offline SQL)",
+      "  storage seal                            generate the final storage fence (offline SQL)",
       "  check                                   wrangler deploy --dry-run for every Worker",
       "  migrate                                 apply D1 migrations (remote)",
       "  seed [--dry-run]                        apply <deployment-dir>/seed.ts (remote)",
@@ -80,6 +82,21 @@ function deploy(app, onlyCheck) {
 }
 
 switch (command) {
+  case "storage": {
+    // Offline generation only. stdout is SQL and may be redirected into the
+    // deployment's version-controlled migration directory.
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--experimental-strip-types",
+        "apps/api/scripts/project-storage.ts",
+        ...args.filter((arg) => arg !== "--dry-run").slice(2),
+      ],
+      { cwd: root, stdio: "inherit" },
+    );
+    if (result.status !== 0) process.exit(result.status ?? 1);
+    break;
+  }
   case "check":
     for (const app of APPS) deploy(app, true);
     break;

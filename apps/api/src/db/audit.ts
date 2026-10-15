@@ -36,7 +36,7 @@ export class AuditRepository {
    * without its change — or a change without its audit row — is worse than
    * either failing.
    */
-  statement(write: AuditWrite): D1PreparedStatement {
+  statement(write: AuditWrite, ifChanged = false): D1PreparedStatement {
     const metadata = write.metadata ?? {};
     // Throws rather than sanitising: a call site trying to log a message body
     // is a bug to fix, not a value to quietly drop.
@@ -45,7 +45,7 @@ export class AuditRepository {
       .prepare(
         `INSERT INTO audit_logs
            (id, actor_type, actor_id, action, target_type, target_id, metadata_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         SELECT ?, ?, ?, ?, ?, ?, ?, ? ${ifChanged ? "WHERE changes()>0" : ""}`,
       )
       .bind(
         newId(),

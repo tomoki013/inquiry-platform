@@ -30,6 +30,7 @@ import type { SupportRepository } from "../db/support";
 import type { ProjectMailSettings, TemplateRepository } from "../db/templates";
 import type { ProjectMailDelivery } from "../project-mail";
 import { internalFailure, notFound, validationFailure } from "./failures";
+import { sha256Hex } from "./identity";
 import type { SupportService } from "./support-service";
 import { TicketService } from "./ticket-service";
 
@@ -265,7 +266,8 @@ export class ReplyService {
       const thread = await this.support.findThread(parsed.data.threadId);
       if (!thread) return notFound("問い合わせ");
       const template = await this.templates.find(parsed.data.templateId);
-      if (!template) return notFound("定型文");
+      if (!template || (template.appId && template.appId !== thread.app_id))
+        return notFound("定型文");
 
       const app = thread.app_id ? await this.apps.findById(thread.app_id) : null;
       const rendered = renderTemplate(template.body, {
@@ -449,6 +451,7 @@ export class ReplyService {
       // request carried that template's id and never its text, so a tampered
       // one still cannot choose what a reply says it is about.
       const template = input.templateId ? await this.templates.find(input.templateId) : undefined;
+      if (template?.appId && template.appId !== thread.app_id) return notFound("定型文");
       const subject = options.initialMessage
         ? thread.subject
         : replySubjectFor(
@@ -472,6 +475,37 @@ export class ReplyService {
       const receiptLine = linkedReport ? `受付ID: ${linkedReport.external_report_id}` : undefined;
       const reportFooter = receiptLine && !body.includes(receiptLine) ? `\n\n${receiptLine}` : "";
       const text = `${body}${reportFooter}\n\n${signature}`;
+      const existingAttempt = await this.db
+        .prepare(
+          "SELECT thread_id,provider_key FROM support_reply_attempts WHERE idempotency_key=?",
+        )
+        .bind(input.idempotencyKey)
+        .first<{ thread_id: string; provider_key: string }>();
+      if (existingAttempt && existingAttempt.thread_id !== input.threadId)
+        return fail("CONFLICT", "この送信キーは別の問い合わせで使われています。");
+      const partitioned = await this.db
+        .prepare(
+          "SELECT 1 FROM project_storage WHERE project_id=COALESCE(?,(SELECT value FROM platform_settings WHERE key='default_service_id'),'unassigned') AND state='active'",
+        )
+        .bind(thread.app_id)
+        .first();
+      const proposedKey = partitioned
+        ? `reply-${await sha256Hex(new TextEncoder().encode(`${thread.app_id ?? "unassigned"}:${input.threadId}:${input.idempotencyKey}`))}`
+        : input.idempotencyKey;
+      await this.db
+        .prepare(
+          "INSERT OR IGNORE INTO support_reply_attempts(idempotency_key,thread_id,provider_key,created_at) VALUES(?,?,?,?)",
+        )
+        .bind(input.idempotencyKey, input.threadId, proposedKey, nowIso())
+        .run();
+      const attempt = await this.db
+        .prepare(
+          "SELECT thread_id,provider_key FROM support_reply_attempts WHERE idempotency_key=?",
+        )
+        .bind(input.idempotencyKey)
+        .first<{ thread_id: string; provider_key: string }>();
+      if (!attempt || attempt.thread_id !== input.threadId)
+        return fail("CONFLICT", "送信キーの競合を検出しました。");
       const sent = await mail.sendSupportReply({
         to: thread.requester_email,
         from,
@@ -481,7 +515,7 @@ export class ReplyService {
         signatureText: signature,
         inReplyTo,
         references,
-        idempotencyKey: input.idempotencyKey,
+        idempotencyKey: attempt.provider_key,
       });
 
       if (!sent.ok) {

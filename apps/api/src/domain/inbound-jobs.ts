@@ -6,7 +6,7 @@ import {
   readInboundBytes,
 } from "@inquiry-platform/mail-parser/journal";
 import { FileStore } from "../db/files";
-import type { SupportRepository } from "../db/support";
+import { SupportRepository } from "../db/support";
 import type { AdminCoreEnv } from "../env";
 import { json } from "../http";
 import { DeliveryError, type DeliveryJobs, type JobRow } from "./delivery-jobs";
@@ -21,6 +21,12 @@ export class InboundJobs {
     private readonly jobs: DeliveryJobs,
     private readonly support: SupportService,
     private readonly repo: SupportRepository,
+    private readonly attachmentDb?: (messageId: string) => Promise<D1Database | null>,
+    private readonly attachmentKey?: (
+      messageId: string,
+      threadId: string,
+      attachmentId: string,
+    ) => Promise<string>,
   ) {}
   private async service(projectSlug: string): Promise<string> {
     if (projectSlug) {
@@ -92,18 +98,25 @@ export class InboundJobs {
       { type: "email", id: "mail-ingress" },
     );
     if (!result.ok) throw new DeliveryError("MAIL_INGEST_FAILED");
+    const attachmentDb = this.attachmentDb
+      ? await this.attachmentDb(result.value.messageId)
+      : this.env.DB;
+    if (!attachmentDb) throw new DeliveryError("PROJECT_UNAVAILABLE");
+    const repo = this.attachmentDb ? new SupportRepository(attachmentDb) : this.repo;
     const files = new FileStore(this.env.PRIVATE_FILES);
     for (const [index, attachment] of parsed.attachments.entries()) {
       if (!attachment.bytes.byteLength || attachment.bytes.byteLength > MAX_ATTACHMENT_BYTES)
         continue;
       const id = await sha256Hex(new TextEncoder().encode(`${row.id}:${index}`));
       if (
-        await this.env.DB.prepare("SELECT 1 FROM support_attachments WHERE id=?").bind(id).first()
+        await attachmentDb.prepare("SELECT 1 FROM support_attachments WHERE id=?").bind(id).first()
       )
         continue;
-      const key = FileStore.supportKey(result.value.threadId, result.value.messageId, id);
+      const key = this.attachmentKey
+        ? await this.attachmentKey(result.value.messageId, result.value.threadId, id)
+        : FileStore.supportKey(result.value.threadId, result.value.messageId, id);
       const stored = await files.put(key, attachment.bytes, attachment.contentType);
-      await this.repo
+      await repo
         .attachmentStatement({
           id,
           messageId: result.value.messageId,
@@ -156,9 +169,9 @@ export class InboundJobs {
           serviceId = await this.service("");
         }
       }
-      if (!row)
+      if (!row && serviceId)
         await this.jobs
-          .statement(id, serviceId!, "inbound_email", {
+          .statement(id, serviceId, "inbound_email", {
             key: item.key,
             to: meta.to,
             projectSlug: meta.projectSlug ?? "",

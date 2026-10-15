@@ -392,7 +392,7 @@ it("requires signed moderation instead of closing a report with a label", async 
   ).toBe(false);
 });
 
-it("lets a project without a moderation adapter close a report with a label", async () => {
+it("requires the moderation domain to close even an unsigned report", async () => {
   const h = await harness();
   await seedApp(h, "prism");
   const tickets = new TicketService(h.db, h.moderation);
@@ -419,7 +419,10 @@ it("lets a project without a moderation adapter close a report with a label", as
         admin,
       )
     ).ok,
-  ).toBe(true);
+  ).toBe(false);
+  expect(
+    await h.reports.changeStatus({ reportId: report.reportId, to: "closed" }, admin),
+  ).toMatchObject({ ok: true, value: { status: "closed" } });
 });
 
 it("maps every legacy support status without changing the source records", async () => {

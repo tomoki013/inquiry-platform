@@ -29,7 +29,6 @@ import { z } from "zod";
 import { AppRepository, type AppRow } from "./db/apps";
 import { internalFailure, validationFailure } from "./domain/failures";
 import { Scope } from "./domain/scope";
-import { TicketService } from "./domain/ticket-service";
 import type { AdminCoreEnv } from "./env";
 import { buildServices } from "./services";
 
@@ -125,12 +124,16 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
   private cached?: ReturnType<typeof buildServices>;
 
   private get services() {
-    this.cached ??= buildServices(this.env, (work) => this.ctx.waitUntil(work));
+    this.cached ??= buildServices(
+      this.env,
+      (work) => this.ctx.waitUntil(work),
+      Scope.resolve(this.env.DB, { scope: { services: this.grant()?.projects ?? [] } }),
+    );
     return this.cached;
   }
 
   private get tickets() {
-    return new TicketService(this.env.DB, this.services.moderation);
+    return this.services.tickets;
   }
 
   private grant(): ProjectOperatorProps | null {
@@ -148,7 +151,7 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
     if (!grant || typeof projectSlug !== "string" || !grant.projects.includes(projectSlug)) {
       return forbidden;
     }
-    const app = await new AppRepository(this.env.DB).findBySlug(projectSlug);
+    const app = await new AppRepository(this.services.db).findBySlug(projectSlug);
     return app ? { ok: true, grant, app } : notFound;
   }
 
@@ -163,7 +166,8 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
     if (typeof ref !== "string" || ref.length === 0 || ref.length > 200) return null;
     let row = await this.tickets.row(ref);
     if (!row && TICKET_NUMBER.test(ref)) {
-      const found = await this.env.DB.prepare("SELECT id FROM tickets WHERE ticket_number = ?")
+      const found = await this.services.db
+        .prepare("SELECT id FROM tickets WHERE ticket_number = ?")
         .bind(ref)
         .first<{ id: string }>();
       row = found ? await this.tickets.row(found.id) : null;
@@ -195,11 +199,12 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
   ): Promise<Map<string, string>> {
     const found = new Map<string, string>();
     if (ids.length === 0) return found;
-    const { results } = await this.env.DB.prepare(
-      `SELECT ticket_id, actor_id FROM ticket_events
+    const { results } = await this.services.db
+      .prepare(
+        `SELECT ticket_id, actor_id FROM ticket_events
         WHERE event_type = 'ACKNOWLEDGED' AND ticket_id IN (${ids.map(() => "?").join(",")})
         ORDER BY created_at, id`,
-    )
+      )
       .bind(...ids)
       .all<{ ticket_id: string; actor_id: string | null }>();
     for (const row of results) {
@@ -212,7 +217,8 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
   /** The reference the person holds: a report's own id, else the conversation's. */
   private async receiptId(ticket: Ticket): Promise<string | null> {
     if (ticket.report_id) {
-      const row = await this.env.DB.prepare("SELECT external_report_id FROM reports WHERE id = ?")
+      const row = await this.services.db
+        .prepare("SELECT external_report_id FROM reports WHERE id = ?")
         .bind(ticket.report_id)
         .first<{ external_report_id: string }>();
       return row?.external_report_id ?? null;
@@ -606,7 +612,12 @@ function toDetail(
     acknowledgedAt: ticket.acknowledged_at,
     resolvedAt: ticket.resolved_at,
     closedAt: ticket.closed_at,
-    allowedStatuses: [...(ticketTransitions[ticket.status] ?? [])],
+    allowedStatuses: [...(ticketTransitions[ticket.status] ?? [])].filter(
+      (status) =>
+        !ticket.report_id ||
+        (!["RESOLVED", "CLOSED"].includes(status) &&
+          !["RESOLVED", "CLOSED"].includes(ticket.status)),
+    ),
     canReply: ticket.thread_id !== null && ticket.requester_email !== null,
     timeline: detail.timeline.map((item) =>
       item.kind === "message"

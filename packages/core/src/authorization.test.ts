@@ -33,11 +33,11 @@ describe("permissionFor", () => {
     ["GET", "/api/tickets", "tickets:read"],
     ["GET", "/api/deliveries", "tickets:read"],
     ["POST", "/api/deliveries/job/retry", "tickets:operate"],
-    ["GET", "/api/apps", "tickets:read"],
+    ["GET", "/api/apps", "self:notifications"],
     ["PATCH", "/api/tickets/t1", "tickets:operate"],
     ["POST", "/api/tickets/t1/notes", "tickets:operate"],
-    ["POST", "/api/support/threads/s1/reply", "tickets:operate"],
-    ["POST", "/api/reports/r1/decision/prepare", "tickets:operate"],
+    ["POST", "/api/support/threads/s1/reply", "support:reply"],
+    ["POST", "/api/reports/r1/decision/prepare", "moderation:decide"],
     ["POST", "/api/tickets/masters", "platform:configure"],
     ["POST", "/api/apps", "platform:configure"],
     ["PATCH", "/api/apps/a1", "platform:configure"],
@@ -61,4 +61,16 @@ describe("permissionFor", () => {
     expect(permissionFor("OPTIONS", "/api/tickets")).toBeNull();
     expect(permissionFor("TRACE", "/api/notifications")).toBeNull();
   });
+});
+
+it("separates support operation, moderation review and irreversible decisions", () => {
+  expect(can("operator", "support:reply")).toBe(true);
+  expect(can("operator", "moderation:review")).toBe(true);
+  expect(can("operator", "moderation:decide")).toBe(false);
+  expect(can("support", "moderation:read")).toBe(false);
+  expect(can("moderator", "support:reply")).toBe(false);
+  expect(can("moderator", "moderation:decide")).toBe(true);
+  expect(permissionFor("GET", "/api/activity")).toBe("audit:read");
+  expect(permissionFor("POST", "/api/reports/r1/review")).toBe("moderation:review");
+  expect(permissionFor("POST", "/api/reports/r1/resolution")).toBe("moderation:decide");
 });

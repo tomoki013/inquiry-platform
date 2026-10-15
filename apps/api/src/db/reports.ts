@@ -35,6 +35,7 @@ interface ReportRow {
   app_slug: string;
   app_name: string;
   support_thread_id: string | null;
+  moderation_revision: number;
 }
 
 interface EventRow {
@@ -136,12 +137,13 @@ export class ReportRepository {
     toStatus?: ReportStatus;
     actorId?: string;
     note?: string;
+    ifChanged?: boolean;
   }): D1PreparedStatement {
     return this.db
       .prepare(
         `INSERT INTO report_events
            (id, report_id, event_type, from_status, to_status, actor_id, note, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         SELECT ?, ?, ?, ?, ?, ?, ?, ? ${event.ifChanged ? "WHERE changes()>0" : ""}`,
       )
       .bind(
         newId(),
@@ -155,15 +157,29 @@ export class ReportRepository {
       );
   }
 
-  statusStatement(id: string, to: ReportStatus): D1PreparedStatement {
+  statusStatement(
+    id: string,
+    to: ReportStatus,
+    expected?: { status: string; moderation_revision: number; updated_at: string },
+  ): D1PreparedStatement {
     const at = nowIso();
     // `resolved_at` is set when the report leaves the queue and cleared when it
     // comes back, so "when was this finished" never answers about a report that
     // is open again.
     const resolved = to === "closed" || to === "actioned";
     return this.db
-      .prepare("UPDATE reports SET status = ?, updated_at = ?, resolved_at = ? WHERE id = ?")
-      .bind(to, at, resolved ? at : null, id);
+      .prepare(
+        `UPDATE reports SET status = ?, updated_at = ?, resolved_at = ? WHERE id = ? ${expected ? "AND status=? AND moderation_revision=? AND updated_at=? AND NOT EXISTS(SELECT 1 FROM report_operations WHERE report_id=reports.id AND lease_token IS NOT NULL AND lease_until>?)" : ""}`,
+      )
+      .bind(
+        to,
+        at,
+        resolved ? at : null,
+        id,
+        ...(expected
+          ? [expected.status, expected.moderation_revision, expected.updated_at, at]
+          : []),
+      );
   }
 
   resolutionStatement(id: string, code: string, note: string | undefined): D1PreparedStatement {

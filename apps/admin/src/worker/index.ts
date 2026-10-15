@@ -3,7 +3,7 @@ import { can, permissionFor } from "@inquiry-platform/core";
 import { Hono } from "hono";
 import type { AdminWebEnv } from "./env";
 import { failure } from "./http";
-import { resolveIdentity } from "./identity";
+import { coreFor, resolveIdentity } from "./identity";
 import { type AdminApi, registerApiRoutes } from "./routes/api";
 import { requireSafeMutation, securityHeaders } from "./security";
 
@@ -16,7 +16,10 @@ import { requireSafeMutation, securityHeaders } from "./security";
  * no R2. Everything it can do, it does by asking.
  */
 export function createApp() {
-  const app = new Hono<{ Bindings: AdminWebEnv; Variables: { identity: AdminIdentity } }>();
+  const app = new Hono<{
+    Bindings: AdminWebEnv;
+    Variables: { identity: AdminIdentity; core: AdminWebEnv["ADMIN_CORE"] };
+  }>();
 
   app.use("*", securityHeaders);
 
@@ -31,6 +34,14 @@ export function createApp() {
       // detail to whoever is asking.
       return failure(c, { code: "UNAUTHORIZED", message: "サインインが必要です。" }, 401);
     }
+    const core = coreFor(identity, c.env);
+    if (!core)
+      return failure(
+        c,
+        { code: "FORBIDDEN", message: "この管理画面の対象Projectが設定されていません。" },
+        403,
+      );
+    c.set("core", core);
     c.set("identity", identity);
     return await next();
   });
@@ -48,6 +59,21 @@ export function createApp() {
     if (!permission || !can(c.get("identity").role, permission)) {
       return failure(c, { code: "FORBIDDEN", message: "この操作の権限がありません。" }, 403);
     }
+    // A report's reply thread is transport, not Support data. A support-only
+    // role must not reach moderation details by naming that thread directly.
+    const match = /^\/api\/support\/threads\/([^/]+)/.exec(new URL(c.req.url).pathname);
+    if (match?.[1] && !can(c.get("identity").role, "moderation:read")) {
+      const thread = await c.get("core").getSupportThread(decodeURIComponent(match[1]));
+      if (thread.ok && thread.value.reportId)
+        return failure(c, { code: "NOT_FOUND", message: "対象が見つかりません。" }, 404);
+    }
+    // Attachments have no domain label in the old URL. Restrict that legacy
+    // surface to identities allowed to read both domains.
+    if (
+      /^\/api\/support\/messages\//.test(new URL(c.req.url).pathname) &&
+      !can(c.get("identity").role, "moderation:read")
+    )
+      return failure(c, { code: "FORBIDDEN", message: "この操作の権限がありません。" }, 403);
     return await next();
   });
 

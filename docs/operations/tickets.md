@@ -82,3 +82,11 @@ The existing support reply/draft/template and authenticated attachment routes re
 5. If a new client needs rollback, disable operator mutations while investigating. Retain additive tables/triggers and deploy a corrected Worker. Do not drop new tables or blindly restore the pre-migration export after new messages have arrived; that would discard later data. Restoring old API routes also requires reconciliation of lifecycle edits, so prefer a forward fix.
 
 The initial release intentionally excludes automation, AI replies, on-call scheduling, complex SLA calendars and incident-specific root-cause forms. INCIDENT tickets, relations and manual follow-up are available on the shared core.
+
+## ドメイン分離後の操作
+
+通報の最終判定・再審査はReport APIを使う。一般TicketのRESOLVED/CLOSEDや処理結果の変更では通報を判定できない。
+`POST /api/reports/:id/review` は審査権限、status/resolution/decisionは判定権限を必要とする。
+署名必須Projectではprepare → 署名 → completeを使う。失敗は同じ操作IDで再試行する。
+メールの会話を再開しても通報の処理結果は変わらない。通報のSLAはSupportの違反計算から外れる。
+TicketのProject移管・異なるProjectとの結合は通常APIで行わず、専用のデータ移行としてレビューする。

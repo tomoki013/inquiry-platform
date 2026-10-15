@@ -24,6 +24,10 @@
 
 `apps/*/wrangler.jsonc` はローカル開発とテスト用の参照設定で、値はすべてプレースホルダ。実際のデプロイは各自の設定ファイルで行う（[デプロイ](docs/operations/deployment.md)）。
 
+一つの共有D1内で、各ProjectのSupport・Moderationを専用テーブルセットへ分離する。
+Repositoryのコードは共通化し、管理一覧は読み取り専用の集約で扱う。移行は旧データを残して段階適用する。
+[現状調査・設計](docs/architecture/storage-redesign.md)と[移行・新Project追加手順](docs/operations/project-storage.md)を参照。
+
 ## 使い方
 
 ```bash

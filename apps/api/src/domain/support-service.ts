@@ -81,6 +81,7 @@ export class SupportService {
 
       const at = input.receivedAt ?? nowIso();
       const appId = input.appSlug ? (await this.apps.findBySlug(input.appSlug))?.id : undefined;
+      if (input.appSlug && !appId) return notFound("Project");
       const existingThreadId =
         (await this.support.findThreadByHeaders(input.inReplyTo, input.references)) ??
         (await findReportReplyThread(this.db, input)) ??
@@ -178,6 +179,7 @@ export class SupportService {
       }
 
       const appId = input.appSlug ? (await this.apps.findBySlug(input.appSlug))?.id : undefined;
+      if (input.appSlug && !appId) return notFound("Project");
       const at = input.createdAt ?? nowIso();
       const threadId = newId();
       const messageId = newId();
@@ -217,6 +219,14 @@ export class SupportService {
       this.notify?.({ ticketId: threadId, category: "inquiry" });
       return await this.detail(threadId);
     } catch (error) {
+      if (input.providerMessageId) {
+        const seen = await this.support.messageExists(input.providerMessageId).catch(() => null);
+        if (seen) {
+          const existing = await this.support.findThread(seen.thread_id);
+          const app = input.appSlug ? await this.apps.findBySlug(input.appSlug) : null;
+          if (existing && existing.app_id === (app?.id ?? null)) return this.detail(seen.thread_id);
+        }
+      }
       return internalFailure("support.createThread", error);
     }
   }
@@ -346,6 +356,17 @@ export class SupportService {
       const thread = await this.support.findThread(input.threadId);
       if (!thread) return notFound("問い合わせ");
       if (input.appId && !(await this.apps.findById(input.appId))) return notFound("アプリ");
+      const storage = await this.db
+        .prepare(
+          "SELECT 1 FROM project_storage WHERE project_id IN (COALESCE(?,(SELECT value FROM platform_settings WHERE key='default_service_id'),'unassigned'),?)",
+        )
+        .bind(thread.app_id, input.appId ?? null)
+        .first();
+      if (storage && (thread.app_id ?? undefined) !== input.appId)
+        return {
+          ok: false,
+          error: { code: "CONFLICT", message: "Project を跨ぐ移管は専用の移行手順が必要です。" },
+        };
 
       await this.db.batch([
         this.support.assignAppStatement(input.threadId, input.appId),

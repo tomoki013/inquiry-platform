@@ -1,11 +1,16 @@
 import type { AdminIdentity } from "@inquiry-platform/core";
-import { INTERNAL_ORIGIN, INTERNAL_PATHS, platformApiDescriptor } from "@inquiry-platform/core";
+import {
+  INTERNAL_ORIGIN,
+  INTERNAL_PATHS,
+  permissionsForRole,
+  platformApiDescriptor,
+} from "@inquiry-platform/core";
 import type { Hono } from "hono";
 import type { AdminWebEnv } from "../env";
 import { failure, requestId, respond } from "../http";
 import { actorFor } from "../identity";
 
-type Variables = { identity: AdminIdentity };
+type Variables = { identity: AdminIdentity; core: AdminWebEnv["ADMIN_CORE"] };
 export type AdminApi = Hono<{ Bindings: AdminWebEnv; Variables: Variables }>;
 
 /**
@@ -27,69 +32,65 @@ export function registerApiRoutes(app: AdminApi): void {
     c.json({ ok: true, data: platformApiDescriptor, requestId: requestId(c) }),
   );
 
-  app.get("/api/deliveries", async (c) => respond(c, await c.env.ADMIN_CORE.listDeliveryJobs()));
+  app.get("/api/deliveries", async (c) => respond(c, await c.get("core").listDeliveryJobs()));
   app.post("/api/deliveries/:id/retry", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.retryDeliveryJob(c.req.param("id"), actor(c))),
+    respond(c, await c.get("core").retryDeliveryJob(c.req.param("id"), actor(c))),
   );
 
   app.get("/api/tickets", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.listTickets({ ...c.req.query() })),
+    respond(c, await c.get("core").listTickets({ ...c.req.query() })),
   );
-  app.get("/api/tickets/masters", async (c) => respond(c, await c.env.ADMIN_CORE.ticketMasters()));
+  app.get("/api/tickets/masters", async (c) => respond(c, await c.get("core").ticketMasters()));
   app.post("/api/tickets/masters", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.saveTicketMaster(await body(c), actor(c))),
+    respond(c, await c.get("core").saveTicketMaster(await body(c), actor(c))),
   );
-  app.get("/api/tickets/dashboard", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.ticketDashboard()),
-  );
+  app.get("/api/tickets/dashboard", async (c) => respond(c, await c.get("core").ticketDashboard()));
   app.get("/api/tickets/source/:kind/:id", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.ticketSource(c.req.param("kind"), c.req.param("id"))),
+    respond(c, await c.get("core").ticketSource(c.req.param("kind"), c.req.param("id"))),
   );
   app.get("/api/tickets/:id/reply-context", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.ticketReplyContext(c.req.param("id"))),
+    respond(c, await c.get("core").ticketReplyContext(c.req.param("id"))),
   );
   app.get("/api/tickets/:id", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.getTicket(c.req.param("id"), numberParam(c.req.query("offset"), 0)),
+      await c.get("core").getTicket(c.req.param("id"), numberParam(c.req.query("offset"), 0)),
     ),
   );
   app.post("/api/tickets", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.createTicket(await body(c), actor(c))),
+    respond(c, await c.get("core").createTicket(await body(c), actor(c))),
   );
   app.patch("/api/tickets/:id", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.changeTicket({ ...(await body(c)), id: c.req.param("id") }, actor(c)),
+      await c.get("core").changeTicket({ ...(await body(c)), id: c.req.param("id") }, actor(c)),
     ),
   );
   app.post("/api/tickets/:id/ack", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.acknowledgeTicket(c.req.param("id"), actor(c))),
+    respond(c, await c.get("core").acknowledgeTicket(c.req.param("id"), actor(c))),
   );
   app.post("/api/tickets/:id/notes", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.addTicketNote({ ...(await body(c)), id: c.req.param("id") }, actor(c)),
+      await c.get("core").addTicketNote({ ...(await body(c)), id: c.req.param("id") }, actor(c)),
     ),
   );
   app.post("/api/tickets/:id/relations", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.relateTickets({ ...(await body(c)), id: c.req.param("id") }, actor(c)),
+      await c.get("core").relateTickets({ ...(await body(c)), id: c.req.param("id") }, actor(c)),
     ),
   );
   app.post("/api/tickets/:id/merge", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.mergeTickets({ ...(await body(c)), id: c.req.param("id") }, actor(c)),
+      await c.get("core").mergeTickets({ ...(await body(c)), id: c.req.param("id") }, actor(c)),
     ),
   );
 
-  // Legacy read/transport endpoints remain; lifecycle edits must use Ticket Core.
+  // Support lifecycle compatibility endpoints remain disabled. Moderation
+  // has its own lifecycle and is handled below.
   for (const path of [
-    "/api/reports/:id/status",
-    "/api/reports/:id/resolution",
-    "/api/reports/:id/notes",
     "/api/support/threads/:id/status",
     "/api/support/threads/:id/app",
     "/api/support/threads/:id/notes",
@@ -107,22 +108,23 @@ export function registerApiRoutes(app: AdminApi): void {
       data: {
         email: identity.email,
         role: identity.role,
+        permissions: permissionsForRole(identity.role),
         // Drives the composer: with no provider the send button is disabled and
         // says why, and everything else on the screen still works.
-        mailConfigured: await c.env.ADMIN_CORE.mailProviderConfigured(),
+        mailConfigured: await c.get("core").mailProviderConfigured(),
         // What the console calls itself and whom it replies as. From the
         // deployment's branding, via Core.
-        profile: await c.env.ADMIN_CORE.consoleProfile(),
+        profile: await c.get("core").consoleProfile(),
       },
     });
   });
 
-  app.get("/api/dashboard", async (c) => respond(c, await c.env.ADMIN_CORE.getDashboard()));
+  app.get("/api/dashboard", async (c) => respond(c, await c.get("core").getDashboard()));
 
   app.get("/api/activity", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.listActivity({
+      await c.get("core").listActivity({
         appId: c.req.query("appId"),
         targetType: c.req.query("targetType") as never,
         targetId: c.req.query("targetId"),
@@ -136,7 +138,7 @@ export function registerApiRoutes(app: AdminApi): void {
   app.get("/api/reports", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.listReports({
+      await c.get("core").listReports({
         appId: c.req.query("appId"),
         status: c.req.query("status") as never,
         reasonCode: c.req.query("reasonCode"),
@@ -148,56 +150,63 @@ export function registerApiRoutes(app: AdminApi): void {
     ),
   );
 
+  app.post("/api/reports/:id/review", async (c) =>
+    respond(
+      c,
+      await c
+        .get("core")
+        .changeReportStatus({ reportId: c.req.param("id"), to: "reviewing" }, actor(c)),
+    ),
+  );
+
   app.post("/api/reports/:id/decision/prepare", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.prepareReportDecision(
-        { ...(await body(c)), reportId: c.req.param("id") },
-        actor(c),
-      ),
+      await c
+        .get("core")
+        .prepareReportDecision({ ...(await body(c)), reportId: c.req.param("id") }, actor(c)),
     ),
   );
   app.post("/api/reports/:id/decision/complete", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.completeReportDecision(
-        { ...(await body(c)), reportId: c.req.param("id") },
-        actor(c),
-      ),
+      await c
+        .get("core")
+        .completeReportDecision({ ...(await body(c)), reportId: c.req.param("id") }, actor(c)),
     ),
   );
 
   app.get("/api/reports/:id", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.getReport(c.req.param("id"))),
+    respond(c, await c.get("core").getReport(c.req.param("id"))),
   );
 
   app.post("/api/reports/:id/status", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.changeReportStatus(
-        { ...(await body(c)), reportId: c.req.param("id") } as never,
-        actor(c),
-      ),
+      await c
+        .get("core")
+        .changeReportStatus({ ...(await body(c)), reportId: c.req.param("id") } as never, actor(c)),
     ),
   );
 
   app.post("/api/reports/:id/notes", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.addReportNote(
-        { ...(await body(c)), reportId: c.req.param("id") } as never,
-        actor(c),
-      ),
+      await c
+        .get("core")
+        .addReportNote({ ...(await body(c)), reportId: c.req.param("id") } as never, actor(c)),
     ),
   );
 
   app.post("/api/reports/:id/resolution", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.updateReportResolution(
-        { ...(await body(c)), reportId: c.req.param("id") } as never,
-        actor(c),
-      ),
+      await c
+        .get("core")
+        .updateReportResolution(
+          { ...(await body(c)), reportId: c.req.param("id") } as never,
+          actor(c),
+        ),
     ),
   );
 
@@ -211,7 +220,7 @@ export function registerApiRoutes(app: AdminApi): void {
    */
   app.get("/api/reports/:id/attachments/:attachmentId", async (c) =>
     proxyAttachment(
-      c.env,
+      c.get("core"),
       INTERNAL_PATHS.reportAttachment(c.req.param("id"), c.req.param("attachmentId")),
     ),
   );
@@ -220,7 +229,7 @@ export function registerApiRoutes(app: AdminApi): void {
   app.get("/api/support/threads", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.listSupportThreads({
+      await c.get("core").listSupportThreads({
         appId: c.req.query("appId"),
         status: c.req.query("status") as never,
         query: c.req.query("query"),
@@ -231,26 +240,24 @@ export function registerApiRoutes(app: AdminApi): void {
   );
 
   app.get("/api/support/threads/:id", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.getSupportThread(c.req.param("id"))),
+    respond(c, await c.get("core").getSupportThread(c.req.param("id"))),
   );
 
   app.post("/api/support/threads/:id/status", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.setSupportStatus(
-        { ...(await body(c)), threadId: c.req.param("id") } as never,
-        actor(c),
-      ),
+      await c
+        .get("core")
+        .setSupportStatus({ ...(await body(c)), threadId: c.req.param("id") } as never, actor(c)),
     ),
   );
 
   app.post("/api/support/threads/:id/app", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.assignSupportApp(
-        { ...(await body(c)), threadId: c.req.param("id") } as never,
-        actor(c),
-      ),
+      await c
+        .get("core")
+        .assignSupportApp({ ...(await body(c)), threadId: c.req.param("id") } as never, actor(c)),
     ),
   );
 
@@ -259,10 +266,9 @@ export function registerApiRoutes(app: AdminApi): void {
   app.post("/api/support/threads/:id/notes", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.addInternalNote(
-        { ...(await body(c)), threadId: c.req.param("id") } as never,
-        actor(c),
-      ),
+      await c
+        .get("core")
+        .addInternalNote({ ...(await body(c)), threadId: c.req.param("id") } as never, actor(c)),
     ),
   );
 
@@ -276,21 +282,20 @@ export function registerApiRoutes(app: AdminApi): void {
   app.post("/api/support/threads/:id/reply", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.sendSupportReply(
-        { ...(await body(c)), threadId: c.req.param("id") } as never,
-        actor(c),
-      ),
+      await c
+        .get("core")
+        .sendSupportReply({ ...(await body(c)), threadId: c.req.param("id") } as never, actor(c)),
     ),
   );
 
   app.get("/api/support/threads/:id/draft", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.getSupportDraft(c.req.param("id"))),
+    respond(c, await c.get("core").getSupportDraft(c.req.param("id"))),
   );
 
   app.put("/api/support/threads/:id/draft", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.saveSupportDraft({
+      await c.get("core").saveSupportDraft({
         ...(await body(c)),
         threadId: c.req.param("id"),
       } as never),
@@ -298,13 +303,13 @@ export function registerApiRoutes(app: AdminApi): void {
   );
 
   app.delete("/api/support/threads/:id/draft", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.deleteSupportDraft(c.req.param("id"))),
+    respond(c, await c.get("core").deleteSupportDraft(c.req.param("id"))),
   );
 
   app.post("/api/support/threads/:id/apply-template", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.applyReplyTemplate({
+      await c.get("core").applyReplyTemplate({
         ...(await body(c)),
         threadId: c.req.param("id"),
       } as never),
@@ -313,7 +318,7 @@ export function registerApiRoutes(app: AdminApi): void {
 
   app.get("/api/support/messages/:messageId/attachments/:attachmentId", async (c) =>
     proxyAttachment(
-      c.env,
+      c.get("core"),
       INTERNAL_PATHS.supportAttachment(c.req.param("messageId"), c.req.param("attachmentId")),
     ),
   );
@@ -322,7 +327,7 @@ export function registerApiRoutes(app: AdminApi): void {
   app.get("/api/support/templates", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.listReplyTemplates({
+      await c.get("core").listReplyTemplates({
         forAppId: c.req.query("forAppId"),
         includeInactive: c.req.query("includeInactive") === "true",
       }),
@@ -330,30 +335,28 @@ export function registerApiRoutes(app: AdminApi): void {
   );
 
   app.post("/api/support/templates", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.createReplyTemplate((await body(c)) as never, actor(c))),
+    respond(c, await c.get("core").createReplyTemplate((await body(c)) as never, actor(c))),
   );
 
   app.patch("/api/support/templates/:id", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.updateReplyTemplate(
-        c.req.param("id"),
-        (await body(c)) as never,
-        actor(c),
-      ),
+      await c
+        .get("core")
+        .updateReplyTemplate(c.req.param("id"), (await body(c)) as never, actor(c)),
     ),
   );
 
   app.post("/api/support/templates/:id/deactivate", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.deactivateReplyTemplate(c.req.param("id"), actor(c))),
+    respond(c, await c.get("core").deactivateReplyTemplate(c.req.param("id"), actor(c))),
   );
 
   app.get("/api/support/mail-settings", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.listAppMailSettings()),
+    respond(c, await c.get("core").listAppMailSettings()),
   );
 
   app.put("/api/support/mail-settings", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.setAppMailSettings((await body(c)) as never, actor(c))),
+    respond(c, await c.get("core").setAppMailSettings((await body(c)) as never, actor(c))),
   );
 
   // ---- notifications ----------------------------------------------------
@@ -362,15 +365,15 @@ export function registerApiRoutes(app: AdminApi): void {
   // takes the actor and looks up only that actor's rows. The browser never
   // receives an endpoint or a key back; it only ever sends its own.
   app.get("/api/notifications", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.notificationOverview(actor(c))),
+    respond(c, await c.get("core").notificationOverview(actor(c))),
   );
   app.put("/api/notifications/settings", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.saveNotificationSettings((await body(c)) as never, actor(c))),
+    respond(c, await c.get("core").saveNotificationSettings((await body(c)) as never, actor(c))),
   );
   app.post("/api/notifications/push/subscriptions", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.registerPushSubscription(
+      await c.get("core").registerPushSubscription(
         {
           ...(await body(c)),
           // From the request, so a body cannot claim to be a different device.
@@ -382,58 +385,55 @@ export function registerApiRoutes(app: AdminApi): void {
   );
   /** "This device": the browser names its own endpoint. */
   app.post("/api/notifications/push/unsubscribe", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.revokePushSubscription((await body(c)) as never, actor(c))),
+    respond(c, await c.get("core").revokePushSubscription((await body(c)) as never, actor(c))),
   );
   /** Another of the operator's devices, from the list. */
   app.delete("/api/notifications/push/subscriptions/:id", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.revokePushSubscription({ id: c.req.param("id") }, actor(c))),
+    respond(c, await c.get("core").revokePushSubscription({ id: c.req.param("id") }, actor(c))),
   );
 
   // ---- apps -------------------------------------------------------------
   app.get("/api/apps", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.listApps({
+      await c.get("core").listApps({
         includeArchived: c.req.query("includeArchived") === "true",
       }),
     ),
   );
 
   app.post("/api/apps", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.createApp((await body(c)) as never, actor(c))),
+    respond(c, await c.get("core").createApp((await body(c)) as never, actor(c))),
   );
 
-  app.get("/api/apps/:id", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.getApp(c.req.param("id"))),
-  );
+  app.get("/api/apps/:id", async (c) => respond(c, await c.get("core").getApp(c.req.param("id"))));
 
   app.patch("/api/apps/:id", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.updateApp(c.req.param("id"), (await body(c)) as never, actor(c)),
+      await c.get("core").updateApp(c.req.param("id"), (await body(c)) as never, actor(c)),
     ),
   );
 
   app.post("/api/apps/:id/archive", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.archiveApp(c.req.param("id"), actor(c))),
+    respond(c, await c.get("core").archiveApp(c.req.param("id"), actor(c))),
   );
 
   app.post("/api/apps/:id/restore", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.restoreApp(c.req.param("id"), actor(c))),
+    respond(c, await c.get("core").restoreApp(c.req.param("id"), actor(c))),
   );
 
   app.post("/api/apps/:id/links", async (c) =>
     respond(
       c,
-      await c.env.ADMIN_CORE.addAppLink(
-        { ...(await body(c)), appId: c.req.param("id") } as never,
-        actor(c),
-      ),
+      await c
+        .get("core")
+        .addAppLink({ ...(await body(c)), appId: c.req.param("id") } as never, actor(c)),
     ),
   );
 
   app.delete("/api/apps/links/:linkId", async (c) =>
-    respond(c, await c.env.ADMIN_CORE.removeAppLink(c.req.param("linkId"), actor(c))),
+    respond(c, await c.get("core").removeAppLink(c.req.param("linkId"), actor(c))),
   );
 
   app.all("/api/*", (c) =>
@@ -479,8 +479,8 @@ function numberParam(value: string | undefined, fallback: number): number {
  * decided which types are safe to render. Nothing here re-derives them from a
  * filename.
  */
-async function proxyAttachment(env: AdminWebEnv, path: string): Promise<Response> {
-  const upstream = await env.ADMIN_CORE.fetch(`${INTERNAL_ORIGIN}${path}`);
+async function proxyAttachment(core: AdminWebEnv["ADMIN_CORE"], path: string): Promise<Response> {
+  const upstream = await core.fetch(`${INTERNAL_ORIGIN}${path}`);
   if (!upstream.ok) {
     return new Response(JSON.stringify({ ok: false, error: { code: "NOT_FOUND" } }), {
       status: upstream.status,

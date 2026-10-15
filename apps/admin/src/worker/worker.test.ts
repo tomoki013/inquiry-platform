@@ -556,3 +556,73 @@ describe("authorization", () => {
     expect(response.status).toBe(403);
   });
 });
+
+describe("domain permissions", () => {
+  const ctx = { waitUntil: () => undefined } as unknown as ExecutionContext;
+  function request(path: string) {
+    return new Request(`https://admin.example.com${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", Origin: "https://admin.example.com" },
+      body: "{}",
+    });
+  }
+  it("refuses an operator's moderation decision before Core is called", async () => {
+    const core = { prepareReportDecision: vi.fn() } as unknown as AdminWebEnv["ADMIN_CORE"];
+    const response = await createApp().fetch(
+      request("/api/reports/r1/decision/prepare"),
+      env({
+        ENVIRONMENT: "local",
+        DEV_ADMIN_EMAIL: "dev@example.com",
+        DEFAULT_ADMIN_ROLE: "operator",
+        ADMIN_CORE: core,
+      }),
+      ctx,
+    );
+    expect(response.status).toBe(403);
+    expect(core.prepareReportDecision).not.toHaveBeenCalled();
+  });
+  it("hides a report's transport thread from support-only operators", async () => {
+    const core = {
+      getSupportThread: vi.fn(async () => ({ ok: true, value: { reportId: "r1" } })),
+    } as unknown as AdminWebEnv["ADMIN_CORE"];
+    const response = await createApp().fetch(
+      new Request("https://admin.example.com/api/support/threads/t1"),
+      env({
+        ENVIRONMENT: "local",
+        DEV_ADMIN_EMAIL: "dev@example.com",
+        DEFAULT_ADMIN_ROLE: "support",
+        ADMIN_CORE: core,
+      }),
+      ctx,
+    );
+    expect(response.status).toBe(404);
+  });
+});
+
+it("uses an identity's deployment-selected scoped binding and rejects an unmapped identity", async () => {
+  const selected = {
+    listTickets: vi.fn(async () => ({ ok: true, value: { items: [], total: 0 } })),
+  };
+  const ctx = { waitUntil: () => undefined } as unknown as ExecutionContext;
+  const settings = {
+    ...env({
+      ENVIRONMENT: "local",
+      DEV_ADMIN_EMAIL: "dev@example.com",
+      ADMIN_CORE_ROUTES: { "local:dev@example.com": "CORE_PROJECT" },
+    }),
+    CORE_PROJECT: selected,
+  };
+  const response = await createApp().fetch(
+    new Request("https://admin.example.com/api/tickets?service_id=other"),
+    settings,
+    ctx,
+  );
+  expect(response.status).toBe(200);
+  expect(selected.listTickets).toHaveBeenCalled();
+  const denied = await createApp().fetch(
+    new Request("https://admin.example.com/api/tickets"),
+    { ...settings, ADMIN_CORE_ROUTES: {} },
+    ctx,
+  );
+  expect(denied.status).toBe(403);
+});

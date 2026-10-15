@@ -108,6 +108,9 @@ export async function reset(): Promise<void> {
   const tables = [
     "delivery_progress",
     "delivery_jobs",
+    "project_storage_checks",
+    "project_record_ids",
+    "project_storage",
     "ticket_relations",
     "ticket_reports",
     "ticket_events",
@@ -122,6 +125,7 @@ export async function reset(): Promise<void> {
     "ticket_assignees",
     "support_thread_redirects",
     "support_reply_sends",
+    "support_reply_attempts",
     "support_drafts",
     "support_attachments",
     "support_messages",
@@ -233,6 +237,7 @@ export interface Harness {
 
 export async function harness(
   options: {
+    database?: D1Database;
     mail?: FakeMailProvider;
     moderation?: ModerationAdapter;
     push?: FakePushTransport;
@@ -241,8 +246,8 @@ export async function harness(
     delivery?: (appId: string | undefined) => ProjectMailDelivery;
   } = {},
 ): Promise<Harness> {
-  await migrate();
-  const db = testEnv.DB;
+  if (!options.database) await migrate();
+  const db = options.database ?? testEnv.DB;
   const appRepo = new AppRepository(db);
   const reportRepo = new ReportRepository(db);
   const supportRepo = new SupportRepository(db);

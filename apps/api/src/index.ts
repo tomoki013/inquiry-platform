@@ -36,11 +36,11 @@ import { internalFailure, notFound, validationFailure } from "./domain/failures"
 import { sha256Hex } from "./domain/identity";
 import { expireReportEvidence } from "./domain/report-retention";
 import { Scope } from "./domain/scope";
-import { TicketService } from "./domain/ticket-service";
 import type { AdminCoreEnv } from "./env";
 import { putReportEvidence } from "./evidence";
 import { json, readBounded } from "./http";
 import { buildServices } from "./services";
+import { namespacedSupportKey } from "./storage/files";
 
 /**
  * The platform API: every ticket, report, reply and audit row.
@@ -69,7 +69,7 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
   private cached?: ReturnType<typeof buildServices>;
 
   private get services() {
-    this.cached ??= buildServices(this.env, (work) => this.ctx.waitUntil(work));
+    this.cached ??= buildServices(this.env, (work) => this.ctx.waitUntil(work), this.scope());
     return this.cached;
   }
 
@@ -96,13 +96,13 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
   }
 
   private ticketIn(ref: unknown) {
-    return this.scope().then((s) => typeof ref === "string" && s.ticket(this.env.DB, ref));
+    return this.scope().then((s) => typeof ref === "string" && s.ticket(this.services.db, ref));
   }
   private reportIn(id: unknown) {
-    return this.scope().then((s) => typeof id === "string" && s.report(this.env.DB, id));
+    return this.scope().then((s) => typeof id === "string" && s.report(this.services.db, id));
   }
   private threadIn(id: unknown) {
-    return this.scope().then((s) => typeof id === "string" && s.thread(this.env.DB, id));
+    return this.scope().then((s) => typeof id === "string" && s.thread(this.services.db, id));
   }
   private appIn(id: unknown) {
     return this.scope().then((s) => typeof id === "string" && s.has(id));
@@ -121,7 +121,7 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
       const ticket = await this.tickets.row(id);
       if (!ticket?.thread_id)
         return { ok: false, error: { code: "NOT_FOUND", message: "メール会話がありません。" } };
-      const thread = await new SupportRepository(this.env.DB).detail(ticket.thread_id, false);
+      const thread = await new SupportRepository(this.services.db).detail(ticket.thread_id, false);
       if (!thread)
         return { ok: false, error: { code: "NOT_FOUND", message: "メール会話がありません。" } };
       return {
@@ -141,7 +141,7 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
     }
   }
   private get tickets() {
-    return new TicketService(this.env.DB, this.services.moderation);
+    return this.services.tickets;
   }
   async listTickets(input: unknown) {
     return this.tickets.list(input, await this.scope());
@@ -368,7 +368,7 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
     );
   }
   private templateIn(templateId: string, write: boolean) {
-    return this.scope().then((s) => s.template(this.env.DB, templateId, write));
+    return this.scope().then((s) => s.template(this.services.db, templateId, write));
   }
   /** An app of this scope; `null`/absent (deployment-wide) only without one. */
   private ownApp(appId: unknown) {
@@ -415,7 +415,7 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
   }
   removeAppLink(linkId: string, actor: ActorRef): Promise<Result<AppDetail>> {
     return this.within(
-      this.scope().then((s) => s.link(this.env.DB, linkId)),
+      this.scope().then((s) => s.link(this.services.db, linkId)),
       "リンク",
       () => this.services.apps.removeLink(linkId, actor),
     );
@@ -500,8 +500,23 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const files = new FileStore(this.env.PRIVATE_FILES);
-    const reports = new ReportRepository(this.env.DB);
-    const support = new SupportRepository(this.env.DB);
+    const ref = /\/internal\/reports\/([^/]+)/.exec(url.pathname)?.[1];
+    const message = /\/internal\/support\/messages\/([^/]+)/.exec(url.pathname)?.[1];
+    const ownerDb = ref
+      ? await this.services.registry.forRecord(
+          "report",
+          decodeURIComponent(ref),
+          await this.scope(),
+        )
+      : message
+        ? await this.services.registry.forRecord(
+            "message",
+            decodeURIComponent(message),
+            await this.scope(),
+          )
+        : null;
+    const reports = new ReportRepository(ownerDb ?? this.services.db);
+    const support = new SupportRepository(ownerDb ?? this.services.db);
 
     // Uploads come from intake and mail-ingress; a scoped console only reads.
     if (request.method !== "GET" && (await this.scope()).limited) {
@@ -522,7 +537,9 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
     );
     if (reportDownload && request.method === "GET") {
       const scope = await this.scope();
-      if (!(await scope.report(this.env.DB, decodeURIComponent(reportDownload[1] as string)))) {
+      if (
+        !(await scope.report(this.services.db, decodeURIComponent(reportDownload[1] as string)))
+      ) {
         return json({ error: "NOT_FOUND" }, 404);
       }
       const attachment = await reports.findAttachment(
@@ -562,12 +579,18 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
       if (!body) return json({ error: "TOO_LARGE" }, 413);
 
       const attachmentId = newId();
-      const key = FileStore.supportKey(threadId, messageId, attachmentId);
+      const key = await namespacedSupportKey(
+        this.services.registry,
+        messageId,
+        threadId,
+        attachmentId,
+      );
       const contentType = request.headers.get("Content-Type") ?? "application/octet-stream";
       const filename = request.headers.get(ATTACHMENT_FILENAME_HEADER) ?? undefined;
       const stored = await files.put(key, body, contentType);
 
-      await this.env.DB.batch([
+      if (!ownerDb) return json({ error: "NOT_FOUND" }, 404);
+      await ownerDb.batch([
         support.attachmentStatement({
           id: attachmentId,
           messageId,
@@ -586,7 +609,9 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
     );
     if (supportDownload && request.method === "GET") {
       const scope = await this.scope();
-      if (!(await scope.message(this.env.DB, decodeURIComponent(supportDownload[1] as string)))) {
+      if (
+        !(await scope.message(this.services.db, decodeURIComponent(supportDownload[1] as string)))
+      ) {
         return json({ error: "NOT_FOUND" }, 404);
       }
       const attachment = await support.findAttachment(

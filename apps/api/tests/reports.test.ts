@@ -177,16 +177,17 @@ describe("status transitions", () => {
     expect(detail.resolvedAt).toBeUndefined();
   });
 
-  it("keeps notes and resolutions in the timeline", async () => {
+  it("keeps notes but requires signed decisions to set a signed project's resolution", async () => {
     await h.reports.addNote({ reportId, note: "確認した" }, admin);
-    await h.reports.updateResolution(
-      { reportId, resolutionCode: "content_hidden", resolutionNote: "非表示にした" },
-      admin,
-    );
+    expect(
+      await h.reports.updateResolution(
+        { reportId, resolutionCode: "content_hidden", resolutionNote: "非表示にした" },
+        admin,
+      ),
+    ).toMatchObject({ ok: false, error: { code: "CONFLICT" } });
     const detail = expectOk<ReportDetail>((await h.reports.detail(reportId)) as never);
-    expect(detail.resolutionCode).toBe("content_hidden");
+    expect(detail.resolutionCode).toBeUndefined();
     expect(detail.events.map((event) => event.eventType)).toContain("note_added");
-    expect(detail.events.map((event) => event.eventType)).toContain("resolution_updated");
   });
 });
 
@@ -344,6 +345,59 @@ describe("moderation decisions", () => {
     ).toBe(false);
     const detail = await h.reports.detail(setupResult.id);
     expect(detail.ok && detail.value.status).toBe("open");
+  });
+  it("serializes duplicate completions and retries the same operation after adapter failure", async () => {
+    let calls = 0;
+    let fail = true;
+    h = await harness({
+      moderation: {
+        prepare: async (input) => ({
+          id: crypto.randomUUID(),
+          payload: "proposal",
+          keyID: "test",
+          decision: input.decision,
+        }),
+        complete: async () => {
+          calls++;
+          if (fail) throw new Error("offline");
+          return { revision: 1 };
+        },
+      },
+    });
+    await seedApp(h);
+    const created = await h.reports.create(report(), appActor);
+    if (!created.ok) throw new Error("fixture");
+    const proposed = await h.reports.prepareDecision(
+      { reportId: created.value.reportId, decision: "delete" },
+      admin,
+    );
+    if (!proposed.ok) throw new Error("fixture");
+    const input = {
+      reportId: created.value.reportId,
+      operationId: proposed.value.id,
+      envelope: "signed",
+    };
+    expect((await h.reports.completeDecision(input, admin)).ok).toBe(false);
+    expect(
+      await h.db
+        .prepare("SELECT attempts,last_error FROM report_operations WHERE id=?")
+        .bind(input.operationId)
+        .first(),
+    ).toMatchObject({ attempts: 1, last_error: "ADAPTER_OR_COMMIT_FAILED" });
+    fail = false;
+    const results = await Promise.all([
+      h.reports.completeDecision(input, admin),
+      h.reports.completeDecision(input, admin),
+    ]);
+    expect(results.some((r) => r.ok)).toBe(true);
+    expect(calls).toBe(2);
+    expect((await h.reports.completeDecision(input, admin)).ok).toBe(true);
+    expect(calls).toBe(2);
+    expect(
+      await h.db
+        .prepare("SELECT COUNT(*) n FROM report_events WHERE event_type='resolution_updated'")
+        .first("n"),
+    ).toBe(1);
   });
   it("does not overwrite a newer decision when an earlier RPC completes late", async () => {
     const { id, setRevision } = await setup();

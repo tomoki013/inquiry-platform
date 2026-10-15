@@ -19,7 +19,7 @@ import { AppRepository } from "./db/apps";
 import { ReportRepository } from "./db/reports";
 import { SupportRepository } from "./db/support";
 import { internalFailure, validationFailure } from "./domain/failures";
-import { TicketService } from "./domain/ticket-service";
+import { Scope } from "./domain/scope";
 import type { AdminCoreEnv } from "./env";
 import { putReportEvidence } from "./evidence";
 import { json } from "./http";
@@ -56,13 +56,25 @@ export class Intake extends WorkerEntrypoint<AdminCoreEnv> implements IntakeApi 
   private cached?: ReturnType<typeof buildServices>;
 
   private get services() {
-    this.cached ??= buildServices(this.env, (work) => this.ctx.waitUntil(work));
+    this.cached ??= buildServices(this.env, (work) => this.ctx.waitUntil(work), this.accessScope());
     return this.cached;
   }
 
   private grant(): IntakeProps | null {
     const parsed = intakePropsSchema.safeParse((this.ctx as { props?: unknown }).props);
     return parsed.success ? parsed.data : null;
+  }
+
+  private async accessScope(): Promise<Scope> {
+    const grant = this.grant();
+    const projects = [...(grant?.projects ?? [])];
+    if (grant?.allowUnassigned) {
+      const row = await this.env.DB.prepare(
+        "SELECT slug FROM services WHERE id=COALESCE((SELECT value FROM platform_settings WHERE key='default_service_id'),'unassigned')",
+      ).first<{ slug: string }>();
+      if (row) projects.push(row.slug);
+    }
+    return Scope.resolve(this.env.DB, { scope: { services: [...new Set(projects)] } });
   }
 
   private actor(grant: IntakeProps): ActorRef {
@@ -80,20 +92,19 @@ export class Intake extends WorkerEntrypoint<AdminCoreEnv> implements IntakeApi 
     }
 
     try {
-      // A granted slug the platform has not registered (yet) files the
-      // contact as unassigned — what the support form has always done — but
-      // only where the binding accepts unassigned contacts at all.
       const registered =
-        input.projectSlug !== undefined &&
+        input.projectSlug === undefined ||
         (await new AppRepository(this.env.DB).findBySlug(input.projectSlug)) !== null;
-      if (input.projectSlug && !registered && !grant.allowUnassigned) return unknownProject;
-      const projectSlug = registered ? input.projectSlug : undefined;
-
+      if (!registered) return unknownProject;
+      const projectSlug = input.projectSlug;
+      const projectDb = await this.services.registry.forSlug(projectSlug);
       // The same key the support form has always used, so a retry that
       // straddles the switch to this entrypoint is still one ticket.
       const providerMessageId = `form-${input.idempotencyKey}`;
-      const seen = await new SupportRepository(this.env.DB).messageExists(providerMessageId);
+      const seen = await new SupportRepository(projectDb).messageExists(providerMessageId);
       if (seen) {
+        const owner = await new SupportRepository(projectDb).detail(seen.thread_id, false);
+        if (owner && (owner.appSlug ?? undefined) !== projectSlug) return taken;
         const existing = await this.services.support.detail(seen.thread_id);
         if (!existing.ok) return existing;
         if ((existing.value.appSlug ?? undefined) !== projectSlug) return taken;
@@ -143,7 +154,7 @@ export class Intake extends WorkerEntrypoint<AdminCoreEnv> implements IntakeApi 
     if (!grant.projects.includes(input.projectSlug)) return forbidden;
 
     try {
-      const reports = new ReportRepository(this.env.DB);
+      const reports = new ReportRepository(await this.services.registry.forSlug(input.projectSlug));
       const existing = await reports.findByExternalId(input.externalReportId.trim());
       if (existing && (await reports.findRow(existing.id))?.app_slug !== input.projectSlug) {
         return taken;
@@ -193,12 +204,12 @@ export class Intake extends WorkerEntrypoint<AdminCoreEnv> implements IntakeApi 
     if (receipt && request.method === "POST") {
       const slug = receipt[1] as string;
       if (!grant.projects.includes(slug)) return json({ error: "FORBIDDEN" }, 403);
-      return recordMailReceipt(this.env.DB, slug, request);
+      return recordMailReceipt(await this.services.registry.forSlug(slug), slug, request);
     }
     const match = /^\/internal\/reports\/([^/]+)\/attachments$/.exec(new URL(request.url).pathname);
     if (!match || request.method !== "PUT") return json({ error: "NOT_FOUND" }, 404);
     const reportId = decodeURIComponent(match[1] as string);
-    const row = await new ReportRepository(this.env.DB).findRow(reportId);
+    const row = await new ReportRepository(this.services.db).findRow(reportId);
     // Another project's report answers exactly like a missing one.
     if (!row || !grant.projects.includes(row.app_slug)) return json({ error: "NOT_FOUND" }, 404);
     return await putReportEvidence(this.env, reportId, request);
@@ -208,7 +219,7 @@ export class Intake extends WorkerEntrypoint<AdminCoreEnv> implements IntakeApi 
     kind: "support" | "report",
     sourceId: string,
   ): Promise<{ ticketNumber: string | null; status: ContactReceipt["status"] }> {
-    const tickets = new TicketService(this.env.DB, this.services.moderation);
+    const tickets = this.services.tickets;
     const source = await tickets.source(kind, sourceId);
     const ticket = source.ok ? await tickets.row(source.value.id) : null;
     return {

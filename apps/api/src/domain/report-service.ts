@@ -162,18 +162,8 @@ export class ReportService {
       if (!adapter || !row.content_external_id) {
         return fail("CONFLICT", "このアプリのコンテンツ操作は設定されていません。");
       }
-      const ticket = await this.db
-        .prepare(
-          "SELECT t.status,t.merged_into FROM tickets t JOIN ticket_sources s ON s.ticket_id=t.id WHERE s.source_type='report' AND s.source_id=?",
-        )
-        .bind(row.id)
-        .first<{ status: string; merged_into: string | null }>();
-      if (
-        ticket
-          ? ticket.merged_into || ["CLOSED", "RESOLVED"].includes(ticket.status)
-          : !["open", "reviewing"].includes(row.status)
-      )
-        return fail("CONFLICT", "Ticketを再開してから操作してください。");
+      if (!["open", "reviewing"].includes(row.status))
+        return fail("CONFLICT", "通報専用APIから再審査を開始してください。");
       const proposal = await adapter.prepare({
         reportId: row.external_report_id,
         contentId: row.content_external_id,
@@ -203,6 +193,8 @@ export class ReportService {
       .safeParse(raw);
     if (!parsed.success) return validationFailure(parsed.error);
     const input = parsed.data;
+    const token = newId();
+    let claimed = false;
     try {
       const operation = await this.db
         .prepare("SELECT * FROM report_operations WHERE id=? AND report_id=?")
@@ -214,7 +206,25 @@ export class ReportService {
       if (!row) return notFound("通報");
       const adapter = this.moderation.adapterFor(row.app_slug);
       if (!adapter) return fail("CONFLICT", "コンテンツ操作は設定されていません。");
+      const lease = await this.db
+        .prepare(`UPDATE report_operations SET lease_token=?,lease_until=?,attempts=attempts+1,last_error=NULL
+        WHERE id=? AND report_id=? AND completed_at IS NULL AND (lease_token IS NULL OR lease_until<=?)`)
+        .bind(
+          token,
+          new Date(Date.now() + 120_000).toISOString(),
+          input.operationId,
+          input.reportId,
+          nowIso(),
+        )
+        .run();
+      if (!lease.meta.changes)
+        return fail("CONFLICT", "署名付き操作を処理中です。同じ操作IDで再試行してください。");
+      claimed = true;
+      // An adapter must return the same published revision when this operation
+      // is retried after a timeout or a Worker crash.
       const published = await adapter.complete(input.operationId, input.envelope);
+      if (!Number.isSafeInteger(published.revision) || published.revision < 1)
+        throw new Error("InvalidModerationRevision");
       const status = operation.decision === "delete" ? "actioned" : "closed";
       const code = operation.decision === "delete" ? "content_deleted" : "no_action";
       const note =
@@ -227,7 +237,7 @@ export class ReportService {
         this.db
           .prepare(`UPDATE reports SET status=?, resolution_code=?, resolution_note=?,
             updated_at=?, resolved_at=?, moderation_revision=?
-            WHERE id=? AND moderation_revision < ?`)
+            WHERE id=? AND moderation_revision < ? AND EXISTS(SELECT 1 FROM report_operations WHERE id=? AND lease_token=? AND completed_at IS NULL)`)
           .bind(
             status,
             code,
@@ -237,15 +247,14 @@ export class ReportService {
             published.revision,
             input.reportId,
             published.revision,
+            input.operationId,
+            token,
           ),
-        this.reports.eventStatement({
-          reportId: input.reportId,
-          eventType: "resolution_updated",
-          fromStatus: row.status as ReportDetail["status"],
-          toStatus: status,
-          actorId: actor.id,
-          note,
-        }),
+        this.db
+          .prepare(
+            `INSERT INTO report_events(id,report_id,event_type,from_status,to_status,actor_id,note,created_at) SELECT ?,?,'resolution_updated',?,?,?,?,? WHERE changes()>0`,
+          )
+          .bind(newId(), input.reportId, row.status, status, actor.id ?? null, note, nowIso()),
         this.audit.statement({
           actor,
           action: "report.resolution_updated",
@@ -254,11 +263,21 @@ export class ReportService {
           metadata: { resolutionCode: code, revision: published.revision },
         }),
         this.db
-          .prepare("UPDATE report_operations SET completed_at=? WHERE id=?")
-          .bind(nowIso(), input.operationId),
+          .prepare(
+            "UPDATE report_operations SET completed_at=?,lease_token=NULL,lease_until=NULL,last_error=NULL WHERE id=? AND lease_token=?",
+          )
+          .bind(nowIso(), input.operationId, token),
       ]);
       return this.detail(input.reportId);
     } catch (error) {
+      if (claimed)
+        await this.db
+          .prepare(
+            "UPDATE report_operations SET lease_token=NULL,lease_until=NULL,last_error='ADAPTER_OR_COMMIT_FAILED' WHERE id=? AND lease_token=? AND completed_at IS NULL",
+          )
+          .bind(input.operationId, token)
+          .run()
+          .catch(() => undefined);
       return internalFailure("report.completeDecision", error);
     }
   }
@@ -358,9 +377,10 @@ export class ReportService {
       }
 
       const reopened = from === "closed" && input.to === "reviewing";
-      await this.db.batch([
-        this.reports.statusStatement(input.reportId, input.to),
+      const batch = await this.db.batch([
+        this.reports.statusStatement(input.reportId, input.to, row),
         this.reports.eventStatement({
+          ifChanged: true,
           reportId: input.reportId,
           eventType: reopened ? "reopened" : "status_changed",
           fromStatus: from,
@@ -368,17 +388,25 @@ export class ReportService {
           actorId: actor.id,
           note: input.note,
         }),
-        this.audit.statement({
-          actor,
-          action: reopened ? "report.reopened" : "report.status_changed",
-          targetType: "report",
-          targetId: input.reportId,
-          // Statuses, not the note: the note is a person's words and belongs in
-          // the timeline, which is where an operator reads it.
-          metadata: { from, to: input.to, noteAdded: Boolean(input.note) },
-        }),
+        this.audit.statement(
+          {
+            actor,
+            action: reopened ? "report.reopened" : "report.status_changed",
+            targetType: "report",
+            targetId: input.reportId,
+            // Statuses, not the note: the note is a person's words and belongs in
+            // the timeline, which is where an operator reads it.
+            metadata: { from, to: input.to, noteAdded: Boolean(input.note) },
+          },
+          true,
+        ),
       ]);
 
+      if (!batch[0]?.meta.changes)
+        return fail(
+          "CONFLICT",
+          "通報が更新されたか、署名操作を処理中です。再読み込みしてください。",
+        );
       return await this.detail(input.reportId);
     } catch (error) {
       return internalFailure("report.changeStatus", error);
@@ -423,6 +451,9 @@ export class ReportService {
     try {
       const row = await this.reports.findRow(input.reportId);
       if (!row) return notFound("通報");
+      if (this.moderation.requiresSignedDecision(row.app_slug))
+        return fail("CONFLICT", "署名付きのコンテンツ操作から処理結果を確定してください。");
+
       await this.db.batch([
         this.reports.resolutionStatement(
           input.reportId,

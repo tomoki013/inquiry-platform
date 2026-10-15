@@ -66,7 +66,9 @@ describe("report evidence", () => {
       .bind(attachmentId)
       .first<Record<string, unknown>>();
     expect(JSON.stringify(row)).not.toContain("iVBOR");
-    expect(row?.r2_key).toBe(`reports/${reportId}/${attachmentId}`);
+    expect(row?.r2_key).toMatch(
+      new RegExp(`^projects/[^/]+/moderation/${reportId}/${attachmentId}$`),
+    );
 
     // And uploading it is part of the report's history.
     expect(detail.events.map((event) => event.eventType)).toContain("attachment_added");
@@ -89,7 +91,10 @@ describe("report evidence", () => {
   it("denies expired evidence and deletes only expired report bytes", async () => {
     const first = await put(INTERNAL_PATHS.reportAttachment(reportId), PNG);
     const { attachmentId } = (await first.json()) as { attachmentId: string };
-    const key = `reports/${reportId}/${attachmentId}`;
+    const key = await testEnv.DB.prepare("SELECT r2_key FROM report_attachments WHERE id=?")
+      .bind(attachmentId)
+      .first<string>("r2_key");
+    if (!key) throw new Error("Missing evidence key");
     await testEnv.DB.prepare("UPDATE report_attachments SET created_at = ? WHERE id = ?")
       .bind(new Date(Date.now() - 31 * 86400_000).toISOString(), attachmentId)
       .run();
@@ -105,7 +110,10 @@ describe("report evidence", () => {
     const recentId = ((await recent.json()) as { attachmentId: string }).attachmentId;
     await expireReportEvidence(testEnv);
     expect(await testEnv.PRIVATE_FILES.get(key)).toBeNull();
-    expect(await testEnv.PRIVATE_FILES.head(`reports/${reportId}/${recentId}`)).not.toBeNull();
+    const recentKey = await testEnv.DB.prepare("SELECT r2_key FROM report_attachments WHERE id=?")
+      .bind(recentId)
+      .first<string>("r2_key");
+    expect(await testEnv.PRIVATE_FILES.head(recentKey ?? "")).not.toBeNull();
     expect(await testEnv.PRIVATE_FILES.head("support/keep")).not.toBeNull();
     const row = await testEnv.DB.prepare("SELECT expired_at FROM report_attachments WHERE id = ?")
       .bind(attachmentId)
@@ -192,7 +200,9 @@ describe("report evidence", () => {
       .bind(attachmentId)
       .first<{ r2_key: string; original_filename: string }>();
 
-    expect(row?.r2_key).toBe(`reports/${reportId}/${attachmentId}`);
+    expect(row?.r2_key).toMatch(
+      new RegExp(`^projects/[^/]+/moderation/${reportId}/${attachmentId}$`),
+    );
     // Kept as a label, never used as a path.
     expect(row?.original_filename).toBe("../../etc/passwd");
   });

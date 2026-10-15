@@ -1,145 +1,97 @@
 # Architecture
 
-最終更新: 2026-09-27。
-
-## 1. 境界
+最終更新: 2026-10-15。調査結果・判断は [storage redesign](storage-redesign.md)、移行手順は
+[Project storage](../operations/project-storage.md)。
 
 ```mermaid
 flowchart TB
-  subgraph Projects["各 Project（基盤の外）"]
-    Site["ブランドサイトの /support フォーム"]
-    ProjAPI["各 Project の公開 API"]
-    Adapter["Moderation adapter\n（Project が実装）"]
-  end
-  subgraph Platform["inquiry-platform"]
-    Admin["apps/admin\nAPI-only gateway\nAccess JWT → 認可 → /api/*"]
-    Core["apps/api\nTicket / Report / Support / Reply\nNotification / Audit"]
-    Ingress["apps/mail-ingress"]
-  end
-  Site --> ProjAPI
-  ProjAPI -- "Service Binding → Intake entrypoint\n（submitContact / submitReport / 証跡 PUT）" --> Core
-  Email((Email Routing)) --> Ingress --> Core
-  Admin -- "Service Binding（AdminCoreApi）" --> Core
-  Core -- "SIGNED_MODERATION に登録された binding" --> Adapter
-  Core --> D1[(D1)]
-  Core --> R2[(R2 private)]
-  Core -- "番号だけの通知" --> Mail["Resend / Web Push"]
+  Projects[Project API / console] -->|Service Binding props| Intake[Intake / ProjectOperator]
+  Access[Cloudflare Access] --> Gateway[apps/admin API gateway]
+  Gateway -->|scoped Service Binding| Core[apps/api non-public Core]
+  Intake --> Core
+  Mail[apps/mail-ingress] -->|private binding| Core
+  Core --> Registry[Project Registry / authorization]
+  Registry --> Support[Support / Reply repositories]
+  Registry --> Moderation[Moderation repository]
+  Core --> Aggregate[Read-only management aggregation]
+  Support --> D1[(One D1: dedicated project tables)]
+  Moderation --> D1
+  Aggregate --> D1
+  Core --> R2[(Private R2 project/domain namespace)]
+  Moderation -->|prepare / sign / complete| Adapter[Project ModerationAdapter]
 ```
 
-- Core（`apps/api`）は route も `workers.dev` も持たない。到達手段は Service Binding だけで、呼び出し側は `@inquiry-platform/core` の型しか知らない。
-- Core には入口が 3 つある。`AdminCore`（基盤自身: API gateway と mail-ingress）、`Intake`（Project 用: 受付だけ）、`ProjectOperator`（Project 自身の管理画面用: 自 Project のチケットの閲覧・対応と、自 Project の返信テンプレート・署名の管理だけ）。Project は後の 2 つにだけ bind する（§7）。
-- インターネットに面した受付口（Turnstile・client key・rate limit）は Project 側の Worker にある。基盤は公開 HTTP を持たないので、独自ドメインは要らない。Service Binding が使えない相手（別アカウントの Worker、iOS から直接など）が出たときに、`Intake` の前に公開 Worker を足す。
-- 基盤が知るのは「誰が・どの対象を・何の理由で」まで。対象が何であるか、どう消すかは Project が知る（Moderation adapter）。
+## 境界と共通機能
 
-## 2. Project
+3 Workerを維持する。CoreだけがD1 / R2を持つ。Coreはrouteもworkers.devも持たない。
+gatewayはAccess JWTを再検証し、全/api/*をpermissionForで分類する。UIは利用側が持つ。
+ProjectはIntake（受付・証跡・provider receipt）と、propsで範囲を固定したProjectOperator（自Projectの運用）を使う。
+ProjectにAdminCoreやDBをbindしない。
 
-- **Project の正は `apps` 表**（slug、名前、リンク、メール署名）。API の `apps` resource は Project のこと。
-- `services` 表は Ticket 分類用の写しで、`apps` への INSERT トリガで同期される（`0006_ticket_core.sql`）。Project を持たない問い合わせは `platform_settings.default_service_id` の service に入る。未設定なら組み込みの `unassigned`。どの service にするかはデプロイ側の seed（`defaultServiceId`）で決める（`0010_default_service_setting.sql`）。
-- Tenant は導入しない。外部提供を始めるときに `Tenant → Project` へ拡張する。
+認証・通知・監査記録機構・ファイル抽象・ID・日時・Zod検証・Result形式・冪等性・SDK・Bindingは共通。
+本文を持つ業務表を共通化の境界にしない。署名や運営者名はBRANDING、Project設定はseed、
+アプリ固有の措置はSIGNED_MODERATIONのadapterが与える。
 
-## 3. Ticket モデル
+## 保存先とRepository
 
-現行モデルを正とする。
+appsがProjectの登録情報。servicesは分類・既定受付先の互換メタデータ。
+project_storageはservice IDから検証済みtable prefix、schema version、copying/activeを選ぶRegistry。
+実在の値はデプロイ側migrationに置く。slugをSQL識別子へ補間しない。
 
-| 項目 | 値 |
-|---|---|
-| type | `INQUIRY` / `REPORT` / `BUG` / `INCIDENT` / `BILLING` / `PRIVACY` / `OTHER` |
-| status | `NEW` / `TRIAGE` / `ACKNOWLEDGED` / `IN_PROGRESS` / `WAITING_CUSTOMER` / `WAITING_INTERNAL` / `RESOLVED` / `CLOSED` |
-| resolution | `RESOLVED` / `NO_ACTION_REQUIRED` / `SPAM` / `DUPLICATE` / … / `CONTENT_REMOVED` |
-| 表示 ID | `ticket_numbers.seq`（DB の主キーとは別） |
-| 旧 ID | `ticket_sources(source_type, source_id)` — 旧 `support_threads` / `reports` の ID |
+| 専用表suffix | 責務 |
+| --- | --- |
+| support_tickets / support_messages | 会話・返信先・本文・Support状態 |
+| support_attachments / support_drafts | 添付参照・下書き |
+| support_reply_sends / support_reply_attempts / support_redirects | 送信記録・provider key・旧IDの転送 |
+| moderation_reports / moderation_events | 対象・理由・証跡テキスト・審査状態・処理結果・履歴 |
+| moderation_evidence / moderation_operations | R2証跡参照・署名操作・リース・失敗コード |
+| cases / case_sources / case_messages / case_events / case_reports / case_relations | 受付番号・担当・優先度・既存Ticket APIの互換表現 |
 
-公開 API / SDK（Phase 3）では次の簡易語彙に写像する。DB には写像後の値を保存しない。
+各Projectは上記17表を持つ。FKは同じprefix内の実表を指す。親レコードのProject所有者はDB triggerでも強制する。
+casesはProject内の運用上の投影であり、複数Projectの本文を格納する共有tickets表ではない。
+共通RepositoryのSQL語彙をProject Databaseが固定の実表へ解決するので、プロダクトごとのSQLコピーは不要。
+管理一覧はアプリケーションが構成する読み取り専用CTE/UNIONで集約し、書き込みは必ず単一の保存先を選ぶ。
+IDだけのAPIで所有者が一意でなければ拒否する。project_record_idsは不透明IDと所有者だけを予約し、ID衝突を拒否する。
 
-| 簡易 status | 内部 status |
-|---|---|
-| `OPEN` | `NEW`, `TRIAGE`, `ACKNOWLEDGED` |
-| `IN_PROGRESS` | `IN_PROGRESS`, `WAITING_CUSTOMER`, `WAITING_INTERNAL` |
-| `RESOLVED` | `RESOLVED` |
-| `CLOSED` | `CLOSED` |
+共通表は設定・番号採番・通知device・監査メタデータ・delivery_jobs / delivery_progress。
+配送jobに本文を載せない。本文は専用業務表または期限付きprivate R2。監査metadataはID・コード・件数だけ。
+移行中は未切替Projectだけ旧表を使う。全切替後のsealでfallbackと旧表への書込を禁止する。
 
-| 簡易 type | 内部 type |
-|---|---|
-| `contact` | `INQUIRY` |
-| `report` | `REPORT` |
-| `bug` | `BUG` |
+## 独立したライフサイクル
 
-Report の拡張項目は指示書の語彙と次の対応: `targetType`=`contentType`、`targetId`=`contentExternalId`、`targetOwnerId`=`authorRefHash`（HMAC 仮名。生 ID は保存しない）、`reason`=`reasonCode`、`description`=`detail`、`evidence`=R2 の添付。
+Supportは会話・担当・内部メモ・返信/下書き・解決/再開とSLAを持つ。
+公開Ticketの既存status、type、TK番号、revisionは維持する。内部メモのサービスはmail providerを持たない。
 
-内部メモは `ticket_messages.visibility = 'INTERNAL'`。公開面から取得する経路は存在せず、Project 用の `Intake` には読み取りメソッドが無い。
+Moderationの正はreports。open → reviewing → actioned/closed、closed → reviewingの専用遷移を持つ。
+actionedは措置指示の公開・対応記録を表し、削除の実行確認とは区別する。
+通報用caseではSupport SLAの違反を計算せず、一般Ticket APIで最終判定や再審査を行わせない。
+会話の解決・返信・メール受信はModerationの判定を変えない。投稿時の自動チェックは別の処理。
+異議申立ては将来Moderationの独立イベントとして追加できる。
 
-## 4. Branding
+署名必須Projectはadapter不通でも署名必須を維持する。prepare → 端末署名 → completeは維持し、
+操作ID・2分のリース・単調増加revisionで重複/遅延完了を制御する。失敗は判定を確定せず同じ操作IDで再試行する。
+署名必須Projectの汎用resolution編集も拒否する。
 
-表示名・フォールバック署名・旧署名・メールロゴ・既定 Project はデプロイ設定の `BRANDING`（Core の構造化 var）だけに置く。`parseBranding`（`packages/core/src/branding.ts`）が検証し、不正・未設定なら中立な既定値（"Inquiry Platform"、署名なし、ロゴなし）になる。
+## 認可と外部契約
 
-- Core: 返信のフォールバック署名、HTML メールのロゴ、API の表示メタデータ。
-- API gateway: `consoleProfile()` などは JSON API として返す。HTML、PWA manifest、静的 asset は提供しない。画面、CLI、自動化は利用側が必要なら実装する。
-- Project ごとの署名とメール配送先は `app_mail_settings`。未設定の項目はデプロイ環境の既定値にフォールバックし、共有デプロイでもProject間の送信元・通知先を混線させない。
+Binding propsが許可Projectを決める。ProjectOperatorの一覧は許可Projectの専用表だけを読む。
+他ProjectのIDはNOT_FOUND。AdminCore scopeも一覧・個別操作・ファイル・監査に適用する。
+同じgatewayで人物ごとに対象Projectを分ける場合は、ADMIN_CORE_ROUTESでAccess subjectからscope付きbindingへ対応させる。
+設定時は未登録subjectを拒否し、リクエストからbindingを選ばせない。
+Projectを跨ぐ移管・結合は専用移行として扱い、通常のTicket変更で実行しない。
 
-## 5. Moderation adapter
+権限は support:read/reply/manage、moderation:read/review/decide、platform:configure、audit:read。
+viewerは両ドメイン閲覧、operatorは返信・Support運用・審査メモ、adminは設定と判定も持つ。
+supportはSupportのみ、moderatorはModerationのみ。operatorにコンテンツ削除権限は与えない。
+共通Ticket一覧は両ドメインの閲覧権限を持つrole向け。ドメイン専用roleは専用APIを使う。
 
-通報対象の「削除」を Project が自分で実行する仕組み。`SIGNED_MODERATION`（Project slug → Service Binding 名）に登録された Project は:
+既存SDKの受付・ProjectOperator公開契約は変更しない。旧ID、番号、簡易status、冪等キー、メール設定・署名は維持する。
+SDKの依存固定tagを変える必要はない。未登録slugの問い合わせを既定Projectへ暗黙に保存する挙動は廃止。
+正当な未分類受付はslug省略とallowUnassignedを明示する。
 
-- 報告のクローズがラベル変更ではできず、Core → adapter.prepare → 運営が端末で署名 → adapter.complete の署名付き決定でのみ閉じる。
-- adapter が到達不能でも「署名必須」は維持される（安全側）。
+新R2キーはprojects/{opaque project ID}/{support|moderation}/...。
+旧キーはDBのメタデータから読み、移動しない。メール原文journalは既存のproject/宛先hashにより分離し、30日保持を維持する。
+通知はTicket番号・種別・アプリ名・リンクだけ。
 
-実装: `apps/api/src/domain/moderation.ts`（`ModerationRegistry`）、契約 `ModerationAdapter`（`packages/core/src/moderation.ts`）。
-
-## 6. 認可
-
-`packages/core/src/authorization.ts` に権限表を置き、API gateway が全 `/api/*` に適用する。クライアント側の表示制御は存在しても補助にすぎず、共通機能の認可を実装してはならない。
-
-| role | 権限 |
-|---|---|
-| `viewer` | 閲覧、自分の通知設定 |
-| `operator` | + Ticket 操作（返信・メモ・状態・通報の決定） |
-| `admin` | + Project・マスタ・定型文・署名の設定 |
-
-role は `ADMIN_ROLES`（Access subject → role）、なければ `DEFAULT_ADMIN_ROLE`、なければ `viewer`。運営者が 1 人なら `DEFAULT_ADMIN_ROLE=admin` でよい。
-
-Core 自身は呼び出し元を Service Binding で信頼する。`AdminCore` に到達できるのは宣言済みの 2 Worker（gateway・mail-ingress）だけで、Project の Worker は `props` で範囲を限った `Intake` / `ProjectOperator` にだけ到達する。
-
-## 7. Intake と SDK
-
-Project が使う唯一の入口。`apps/api/src/intake.ts`（`Intake` entrypoint）と `packages/sdk`。
-
-```ts
-const inquiry = createInquiryClient(env.INQUIRY);
-await inquiry.createContact({ projectSlug, idempotencyKey, subject, message, email, channel: "web_form" });
-const r = await inquiry.createReport({ projectSlug, externalReportId, targetType, targetId, targetOwnerId, reason, description });
-if (r.ok) await inquiry.attachReportEvidence(r.value.reportId, { bytes, contentType });
-```
-
-- **どの Project に書けるかは binding が決める。** Project 側 `wrangler.jsonc` の Service Binding に `props: { caller, projects, allowUnassigned }` を書く。`props` が無い・不正なら全拒否。許可外の `projectSlug` は `FORBIDDEN`。
-- 冪等キー（`externalReportId`、`idempotencyKey`）が他 Project のものと衝突した場合は `CONFLICT` を返し、相手の ID も番号も返さない。証跡も他 Project の通報には「存在しない」と同じ 404。
-- 返すのは受付番号と簡易 status（`OPEN` 等）だけ。本文は返さない。
-- 読み取り・メモ・状態変更は `Intake` に存在しない。それらは `ProjectOperator` の役目（下記）。
-- SDK は依存ゼロ。Project は release tag を指定した git 依存で取り込む（[packages/sdk/README.md](../../packages/sdk/README.md)）。
-
-### ProjectOperator
-
-Project が自分の管理画面で自分のチケットを扱う入口。`apps/api/src/project-operator.ts` と SDK の `createProjectOperatorClient`。
-
-- binding の `props: { caller, projects }` が扱える Project を決める。許可外は `FORBIDDEN`、未登録は `NOT_FOUND`。
-- 一覧は常にその Project に絞られる。他 Project のチケットは ID でも番号でも `NOT_FOUND`（存在しないものと区別しない）。
-- 変更は Core の同じサービス（`TicketService`・`ReplyService`）を通るので、状態遷移・楽観ロック・SLA・監査・返信の宛先決定は gateway と同一。入力はフィールド単位で組み立て直し、Project・担当・優先度の上書きは受け付けない。
-- 監査の actor は `{ type: "app", id: "<caller>:<operator.id>" }`。`operator.id` は Project が決める不透明な ID（メールアドレスは拒否）。
-- 誰が管理画面を使えるかは Project の認証が決める。基盤の gateway・Access・role には何も足さない。
-- 通知のリンクは `app_mail_settings.ticket_url_template`（seed の `mailSettings[].ticketUrlTemplate`）で Project の管理画面へ向ける。未設定ならデプロイ全体の `OPERATOR_TICKET_URL_TEMPLATE`。
-
-### AdminCore の scope
-
-1 つのデプロイを複数の運営画面で分けて使うとき、gateway の `ADMIN_CORE` binding に `props: { scope: { services: [slug, …] } }` を書く。App の service は App と同じ slug（migration 0006 とトリガ）。`scope` が無ければ従来どおりデプロイ全体。`apps/api/src/domain/scope.ts`。
-
-- 一覧・件数・ダッシュボード・Ticket マスタ・監査ログは scope の service だけ。問い合わせは `app_id`、無ければ `default_service_id`、無ければ `unassigned` で判定する（Ticket のトリガと同じ規則）。`system` の監査行は含めない。
-- ID で指す操作（閲覧・変更・メモ・返信・下書き・定型文の適用・添付の取得・結合・関連付け・App の変更）は対象が scope 外なら `NOT_FOUND`。Ticket を scope 外の service へ移す・scope 外と結合する・問い合わせを scope 外の App に付け替えることもできない。
-- デプロイ全体の設定（App の追加、Ticket マスタ、共通の定型文・署名）は `FORBIDDEN`。共通の定型文は読める。受付（`createReport`・`createSupportThread`・受信メール・添付の upload）は scope 付き binding からは呼べない。
-- `scope` が不正な形なら何も見えない（全許可にはしない）。slug が未登録なら単にその分が空。
-- 通知（メール・Push）は scope と無関係にデプロイ単位のまま。
-
-標準機能は API gateway/Core が唯一の実装である。利用者は `GET /api` の descriptor と SDK を使い、標準 path を Project 側で再実装しない。追加機能は標準 path と衝突しない独自 namespace / Worker に分離する。UI が標準機能を隠すことはできても、サーバー側の認証・認可・検証・状態遷移を置き換えることはできない。
-
-## 決定事項
-
-- 3 Worker 分割（Core は非公開、API gateway は D1 / R2 を持たない）、Access JWT の Worker 側再検証、監査ログを変更と同一 batch に書く、署名付き削除、通報者・投稿者 ID の HMAC 仮名化、旧表 + トリガによる Ticket モデルへの移行、番号だけの通知、依存なしの Web Push。
-- 運営者固有の値はコードにも参照設定にも置かず、デプロイ設定（`BRANDING`、`SIGNED_MODERATION`、Worker 名・資源名）と seed で与える。
+D1の障害・容量・バックアップ・Time Travelは共有単位。テーブル分離は可用性分離ではない。
+Projectごとの論理exportと復旧、段階移行、追加手順は[運用文書](../operations/project-storage.md)を参照する。

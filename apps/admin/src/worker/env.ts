@@ -16,13 +16,15 @@ export interface AdminWebEnv {
 
   /**
    * The role of anybody Access lets in and `ADMIN_ROLES` does not name.
-   * `viewer`, `operator` or `admin`; anything else, or unset, is `viewer`,
+   * `viewer`, `operator`, `admin`, `support` or `moderator`; anything else, or unset, is `viewer`,
    * so a typo narrows access rather than widening it.
    */
   DEFAULT_ADMIN_ROLE?: string;
   /** Per-person roles, keyed by the Access subject id (never an address):
    * `{ "<sub>": "operator" }`. A JSON object in `vars`. */
   ADMIN_ROLES?: Record<string, string>;
+  /** Access subject → name of a scoped Core Service Binding. When present, unlisted subjects are denied. */
+  ADMIN_CORE_ROUTES?: Record<string, string>;
 
   /** Local development only, and only honoured when `ENVIRONMENT` is `local`.
    * There is no code path that lets this stand in for Access in production. */

@@ -124,3 +124,15 @@ Service Binding は相手の Worker が存在しないと作れないので、�
 5. Project 側の `@inquiry-platform/sdk` の tag も同じものに上げる。
 
 ロールバックは直前の tag で `deploy all`。migration は forward-only で、古いコードは新しい列・表を無視するので D1 は戻さない。
+
+## Project専用ストレージのrelease
+
+0015〜0019は共通schemaの準備。Projectごとの実名・prefix・生成migrationはデプロイ側に置く。
+[Project storage移行](project-storage.md)の順で、対応Worker検証 → prepare → copy → verify → cutover → sealを実施する。
+本番変更にはバックアップ、previewでの復元・照合、明示的承認が必要。既存D1・R2・3 Workerの構成は変わらない。
+
+同じgatewayで担当Projectを分けるときは、複数のscope付きCore Service Bindingを宣言し、
+`ADMIN_CORE_ROUTES`（Access subject → binding名）で選ぶ。値は実デプロイ設定だけに置く。
+設定を省略した既存gatewayは従来のADMIN_COREを使う。設定した場合は未登録subjectを拒否する。
+roleに `support` / `moderator` を追加。従来operatorからModeration判定権限を外したため、既存判定担当は
+adminまたはmoderatorへ明示的に割り当てる。Support担当に署名権限を追加しない。

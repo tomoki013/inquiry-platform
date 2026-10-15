@@ -7,28 +7,58 @@
  * function, but hiding is a courtesy — the Worker's answer is the rule.
  *
  * - `viewer` reads everything and manages only their own notification devices.
- * - `operator` also works tickets: replies, notes, status, moderation decisions.
+ * - `operator` also works tickets: replies, notes, support status, moderation review.
  * - `admin` also changes what every operator works with: projects, masters,
- *   reply templates and signatures.
+ *   reply templates, signatures and moderation decisions.
  */
-export const adminRoles = ["viewer", "operator", "admin"] as const;
+export const adminRoles = ["viewer", "operator", "admin", "support", "moderator"] as const;
 export type AdminRole = (typeof adminRoles)[number];
 
 export type AdminPermission =
-  /** Read tickets, reports, threads, projects and the audit trail. */
-  | "tickets:read"
-  /** Change a ticket, reply, add a note, decide a report. */
-  | "tickets:operate"
-  /** Projects, ticket masters, reply templates, mail signatures. */
+  | "support:read"
+  | "support:reply"
+  | "support:manage"
+  | "moderation:read"
+  | "moderation:review"
+  | "moderation:decide"
+  | "audit:read"
   | "platform:configure"
-  /** The signed-in person's own notification settings and devices. */
-  | "self:notifications";
+  | "self:notifications"
+  // Compatibility permissions for aggregate endpoints containing both domains.
+  | "tickets:read"
+  | "tickets:operate";
 
+const read: AdminPermission[] = [
+  "support:read",
+  "moderation:read",
+  "audit:read",
+  "tickets:read",
+  "self:notifications",
+];
+const operate: AdminPermission[] = [
+  ...read,
+  "support:reply",
+  "support:manage",
+  "moderation:review",
+  "tickets:operate",
+];
 const granted: Record<AdminRole, ReadonlySet<AdminPermission>> = {
-  viewer: new Set(["tickets:read", "self:notifications"]),
-  operator: new Set(["tickets:read", "self:notifications", "tickets:operate"]),
-  admin: new Set(["tickets:read", "self:notifications", "tickets:operate", "platform:configure"]),
+  viewer: new Set(read),
+  operator: new Set(operate),
+  admin: new Set([...operate, "moderation:decide", "platform:configure"]),
+  support: new Set(["support:read", "support:reply", "support:manage", "self:notifications"]),
+  moderator: new Set([
+    "moderation:read",
+    "moderation:review",
+    "moderation:decide",
+    "audit:read",
+    "self:notifications",
+  ]),
 };
+
+export function permissionsForRole(role: AdminRole): AdminPermission[] {
+  return [...(granted[role] ?? [])];
+}
 
 export function can(role: AdminRole, permission: AdminPermission): boolean {
   return granted[role]?.has(permission) ?? false;
@@ -62,8 +92,21 @@ export function permissionFor(method: string, pathname: string): AdminPermission
   if (pathname.startsWith("/api/notifications/") || pathname === "/api/notifications") {
     return READ_METHODS.has(verb) || WRITE_METHODS.has(verb) ? "self:notifications" : null;
   }
-  if (READ_METHODS.has(verb)) return "tickets:read";
+  if (READ_METHODS.has(verb)) {
+    if (/^\/api\/activity(?:\/|$)/.test(pathname)) return "audit:read";
+    if (/^\/api\/reports(?:\/|$)/.test(pathname)) return "moderation:read";
+    if (/^\/api\/support(?:\/|$)/.test(pathname)) return "support:read";
+    if (["/api", "/api/session"].includes(pathname) || /^\/api\/apps(?:\/|$)/.test(pathname))
+      return "self:notifications";
+    return "tickets:read";
+  }
   if (!WRITE_METHODS.has(verb)) return null;
   if (CONFIGURATION_PATHS.some((pattern) => pattern.test(pathname))) return "platform:configure";
+  if (/^\/api\/reports\/[^/]+\/(?:decision|resolution|status)(?:\/|$)/.test(pathname))
+    return "moderation:decide";
+  if (/^\/api\/reports(?:\/|$)/.test(pathname)) return "moderation:review";
+  if (/^\/api\/support\/threads\/[^/]+\/(?:reply|draft|apply-template)(?:\/|$)/.test(pathname))
+    return "support:reply";
+  if (/^\/api\/support(?:\/|$)/.test(pathname)) return "support:manage";
   return "tickets:operate";
 }

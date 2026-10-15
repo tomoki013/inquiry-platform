@@ -57,7 +57,7 @@ const atRisk = [
     return `(t.${c} IS NULL AND t.closed_at IS NULL AND ${clockExpression(c, m, 0.8)})`;
   })
   .join(" OR ");
-const SELECT = `SELECT t.*,s.name AS service_name,CASE WHEN ${breached} THEN 'BREACHED' WHEN ${atRisk} THEN 'AT_RISK' ELSE 'OK' END AS sla_state,
+const SELECT = `SELECT t.*,s.name AS service_name,CASE WHEN t.type='REPORT' THEN 'OK' WHEN ${breached} THEN 'BREACHED' WHEN ${atRisk} THEN 'AT_RISK' ELSE 'OK' END AS sla_state,
  (SELECT source_id FROM ticket_sources WHERE ticket_id=t.id AND source_type='report' LIMIT 1) AS report_id,
  COALESCE((SELECT source_id FROM ticket_sources WHERE ticket_id=t.id AND source_type='support' AND source_id=t.id),(SELECT source_id FROM ticket_sources WHERE ticket_id=t.id AND source_type='support' LIMIT 1)) AS thread_id,
  CASE WHEN EXISTS(SELECT 1 FROM ticket_sources WHERE ticket_id=t.id AND source_type='report') THEN 'report'
@@ -69,7 +69,7 @@ const clockBindings = (at: string) => Array(6).fill(at) as string[];
 export class TicketService {
   constructor(
     private readonly db: D1Database,
-    private readonly moderation: ModerationRegistry = ModerationRegistry.none,
+    _moderation: ModerationRegistry = ModerationRegistry.none,
   ) {}
   private event(
     ticketId: string,
@@ -304,6 +304,7 @@ export class TicketService {
     const p = createTicketSchema.safeParse(raw);
     if (!p.success) return validationFailure(p.error);
     try {
+      if (p.data.type === "REPORT") return fail("CONFLICT", "通報受付APIを使用してください。");
       const service = await this.db
         .prepare("SELECT id FROM services WHERE id=? AND is_active=1")
         .bind(p.data.service_id)
@@ -361,26 +362,23 @@ export class TicketService {
       const status = input.status ?? row.status;
       if (
         row.report_id &&
-        input.status &&
-        ["RESOLVED", "CLOSED"].includes(input.status) &&
-        !["RESOLVED", "CLOSED"].includes(row.status)
+        ((input.status && ["RESOLVED", "CLOSED"].includes(input.status)) ||
+          input.resolution !== undefined ||
+          (["RESOLVED", "CLOSED"].includes(row.status) && input.status))
       ) {
-        const report = await this.db
-          .prepare(
-            "SELECT r.status,a.slug FROM reports r JOIN apps a ON a.id=r.app_id WHERE r.id=?",
-          )
-          .bind(row.report_id)
-          .first<{ status: string; slug: string }>();
-        if (
-          report &&
-          this.moderation.requiresSignedDecision(report.slug) &&
-          ["open", "reviewing"].includes(report.status)
-        )
-          return fail(
-            "CONFLICT",
-            "通報のコンテンツ操作から削除または対応なしを確定してください。非表示解除には署名付きの対応が必要です。",
-          );
+        return fail("CONFLICT", "通報の判定・再審査は通報専用APIから行ってください。");
       }
+      if (
+        input.service_id &&
+        input.service_id !== row.service_id &&
+        (await this.db
+          .prepare("SELECT 1 FROM project_storage WHERE project_id IN (?,?)")
+          .bind(input.service_id, row.service_id)
+          .first())
+      )
+        return fail("CONFLICT", "Project を跨ぐ移管は専用の移行手順が必要です。");
+      if (input.type && (input.type === "REPORT") !== (row.type === "REPORT"))
+        return fail("CONFLICT", "問い合わせと通報のドメインは変更できません。");
       if (input.status && input.status !== row.status) {
         if (!ticketTransitions[row.status].includes(input.status))
           return fail("INVALID_STATUS_TRANSITION", "この状態には遷移できません。");
@@ -527,12 +525,6 @@ export class TicketService {
             `UPDATE support_threads SET status=(SELECT CASE WHEN resolution='SPAM' AND status='CLOSED' THEN 'spam' WHEN status IN ('CLOSED','RESOLVED') THEN 'resolved' WHEN status='WAITING_CUSTOMER' THEN 'pending_user' ELSE 'open' END FROM tickets WHERE id=?), updated_at=? WHERE id IN (SELECT source_id FROM ticket_sources WHERE ticket_id=? AND source_type='support') AND EXISTS(SELECT 1 FROM tickets WHERE id=? AND mutation_id=?)`,
           )
           .bind(row.id, at, row.id, row.id, mutation),
-        // Keep the moderation adapter operable after a Ticket reopen, without publishing an action.
-        this.db
-          .prepare(
-            "UPDATE reports SET status='reviewing' WHERE id=? AND status IN ('closed','actioned') AND EXISTS(SELECT 1 FROM tickets WHERE id=? AND mutation_id=? AND status='IN_PROGRESS')",
-          )
-          .bind(row.report_id, row.id, mutation),
       ]);
       if (!batch[0]?.meta.changes)
         return fail("CONFLICT", "同時更新を検出しました。再読み込みしてください。");
@@ -595,6 +587,11 @@ export class TicketService {
       const source = await this.row(p.data.id),
         target = await this.row(p.data.target_id);
       if (!source || !target) return notFound("Ticket");
+      if (
+        source.service_id !== target.service_id ||
+        Boolean(source.report_id) !== Boolean(target.report_id)
+      )
+        return fail("CONFLICT", "異なるProject・ドメインの案件は関連付けできません。");
       if (source.id === target.id || source.merged_into || source.status === "CLOSED")
         return fail("CONFLICT", "このTicketには関連を追加できません。");
       const at = nowIso(),
@@ -621,6 +618,8 @@ export class TicketService {
       const a = await this.row(p.data.id),
         b = await this.row(p.data.target_id);
       if (!a || !b) return notFound("Ticket");
+      if (a.service_id !== b.service_id || a.report_id || b.report_id)
+        return fail("CONFLICT", "問い合わせの統合は同じProject内で行ってください。");
       if (
         a.id === b.id ||
         a.merged_into ||

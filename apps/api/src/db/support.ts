@@ -258,6 +258,7 @@ export class SupportRepository {
   ): Promise<SupportThreadListPage> {
     const where: string[] = [
       "NOT EXISTS (SELECT 1 FROM support_thread_redirects x WHERE x.source_thread_id=t.id)",
+      "NOT EXISTS (SELECT 1 FROM reports r WHERE r.support_thread_id=t.id)",
     ];
     const values: unknown[] = [];
     const scoped = scope.where(THREAD_SERVICE);
@@ -383,7 +384,7 @@ export class SupportRepository {
     const scoped = scope.where(THREAD_SERVICE);
     const row = await this.db
       .prepare(
-        `SELECT COUNT(*) AS total FROM support_threads t WHERE t.status IN ('open','pending_user') AND t.id NOT IN (SELECT source_thread_id FROM support_thread_redirects)${scoped ? ` AND ${scoped.sql}` : ""}`,
+        `SELECT COUNT(*) AS total FROM support_threads t WHERE t.status IN ('open','pending_user') AND NOT EXISTS (SELECT 1 FROM reports r WHERE r.support_thread_id=t.id) AND t.id NOT IN (SELECT source_thread_id FROM support_thread_redirects)${scoped ? ` AND ${scoped.sql}` : ""}`,
       )
       .bind(...(scoped?.values ?? []))
       .first<{ total: number }>();
@@ -394,7 +395,7 @@ export class SupportRepository {
     const scoped = scope.where(THREAD_SERVICE);
     const row = await this.db
       .prepare(
-        `SELECT COUNT(*) AS total FROM support_threads t WHERE t.id NOT IN (SELECT source_thread_id FROM support_thread_redirects)${scoped ? ` AND ${scoped.sql}` : ""}`,
+        `SELECT COUNT(*) AS total FROM support_threads t WHERE NOT EXISTS (SELECT 1 FROM reports r WHERE r.support_thread_id=t.id) AND t.id NOT IN (SELECT source_thread_id FROM support_thread_redirects)${scoped ? ` AND ${scoped.sql}` : ""}`,
       )
       .bind(...(scoped?.values ?? []))
       .first<{ total: number }>();

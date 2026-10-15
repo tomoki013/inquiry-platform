@@ -51,3 +51,17 @@ export function roleFor(subject: string, env: AdminWebEnv): AdminRole {
 export function actorFor(identity: AdminIdentity): ActorRef {
   return { type: "admin", id: identity.id };
 }
+
+/** Optional per-subject choice of an already scoped Service Binding. The
+ * mapping is deployment configuration; neither a header nor a project slug
+ * can select the binding. When configured, unlisted subjects are refused. */
+export function coreFor(
+  identity: AdminIdentity,
+  env: AdminWebEnv,
+): AdminWebEnv["ADMIN_CORE"] | null {
+  if (env.ADMIN_CORE_ROUTES === undefined) return env.ADMIN_CORE;
+  const name = env.ADMIN_CORE_ROUTES[identity.id];
+  if (typeof name !== "string" || !/^[A-Z][A-Z0-9_]{0,79}$/.test(name)) return null;
+  const binding = (env as unknown as Record<string, unknown>)[name];
+  return binding && typeof binding === "object" ? (binding as AdminWebEnv["ADMIN_CORE"]) : null;
+}

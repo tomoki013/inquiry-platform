@@ -1,4 +1,4 @@
-import { parseBranding } from "@inquiry-platform/core";
+import { fail, parseBranding } from "@inquiry-platform/core";
 import type { MailProvider } from "@inquiry-platform/notification/mail";
 import { ResendMailProvider, UnconfiguredMailProvider } from "@inquiry-platform/notification/mail";
 import { importVapid, sendWebPush, type VapidSigner } from "@inquiry-platform/notification/push";
@@ -16,9 +16,15 @@ import { ModerationRegistry } from "./domain/moderation";
 import { NotificationService, type TicketCreatedRef } from "./domain/notification-service";
 import { ReplyService } from "./domain/reply-service";
 import { ReportService } from "./domain/report-service";
+import { findReportReplyThread } from "./domain/report-threading";
+import type { Scope } from "./domain/scope";
 import { SupportService } from "./domain/support-service";
+import { TicketService } from "./domain/ticket-service";
+import { findReceiptReplyThread, findTicketReplyThread } from "./domain/ticket-threading";
 import type { AdminCoreEnv } from "./env";
 import { projectMailResolver } from "./project-mail";
+import { aggregateDatabase, ProjectRegistry } from "./storage/database";
+import { namespacedSupportKey } from "./storage/files";
 
 // Wiring: every service the entrypoints use, built from the environment.
 /**
@@ -27,7 +33,11 @@ import { projectMailResolver } from "./project-mail";
  * called, so nothing here can fail it; it only decides whether the caller
  * waits.
  */
-export function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknown>) => void) {
+function buildLocalServices(
+  env: AdminCoreEnv,
+  schedule: (work: Promise<unknown>) => void,
+  registry?: ProjectRegistry,
+) {
   const branding = parseBranding(env.BRANDING);
   const moderation = ModerationRegistry.fromEnv(env.SIGNED_MODERATION, env);
   const apps = new AppRepository(env.DB);
@@ -104,7 +114,16 @@ export function buildServices(env: AdminCoreEnv, schedule: (work: Promise<unknow
 
   const supportService = new SupportService(env.DB, support, apps, audit, notify);
 
-  inbound = new InboundJobs(env, jobs, supportService, support);
+  inbound = new InboundJobs(
+    env,
+    jobs,
+    supportService,
+    support,
+    registry ? async (id) => registry.forRecord("message", id) : undefined,
+    registry
+      ? (message, thread, attachment) => namespacedSupportKey(registry, message, thread, attachment)
+      : undefined,
+  );
 
   const replyService = new ReplyService(
     env.DB,
@@ -173,4 +192,183 @@ function lazyVapid(env: AdminCoreEnv): VapidSigner | undefined {
       return signer.then((ready) => ready.authorization(endpoint, now));
     },
   };
+}
+
+/** Route mutations before constructing a repository; aggregate SQL cannot write
+ * business data. All routes are server-authored, never selected by request SQL. */
+export function buildServices(
+  env: AdminCoreEnv,
+  schedule: (work: Promise<unknown>) => void,
+  scope?: Scope | Promise<Scope>,
+) {
+  const registry = new ProjectRegistry(env.DB);
+  const db = aggregateDatabase(registry, scope);
+  const base = buildLocalServices({ ...env, DB: db }, schedule, registry);
+  const tickets = new TicketService(db, base.moderation);
+  const missing = () => fail("NOT_FOUND", "対象が見つかりません。");
+  type Selector = (...args: unknown[]) => Promise<D1Database | null>;
+  const fieldValue = (input: unknown, field: string): unknown =>
+    input && typeof input === "object" ? (input as Record<string, unknown>)[field] : undefined;
+  const record =
+    (kind: "ticket" | "thread" | "report", field?: string): Selector =>
+    async (input) =>
+      registry.forRecord(kind, field ? fieldValue(input, field) : input, await scope);
+  const slug: Selector = async (input) => registry.forSlug(fieldValue(input, "appSlug"));
+  const project: Selector = async (input) =>
+    registry.forProject(String(fieldValue(input, "service_id") ?? ""));
+  const local = (database: D1Database) => buildLocalServices({ ...env, DB: database }, schedule);
+  const inbound: Selector = async (raw) => {
+    const input = raw as {
+      appSlug?: string;
+      from?: string;
+      subject?: string;
+      bodyText?: string;
+      inReplyTo?: string;
+      references?: string[];
+    } | null;
+    if (input?.appSlug || typeof input?.from !== "string") return slug(raw);
+    // A shared mailbox may reply to a project thread without a route hint.
+    // Resolve only unambiguous references from that thread's requester.
+    const candidates = [
+      input.inReplyTo,
+      ...(Array.isArray(input.references) ? input.references : []),
+    ].filter((v): v is string => typeof v === "string");
+    for (const candidate of candidates) {
+      const rows = await db
+        .prepare(
+          `SELECT t.id FROM support_messages m JOIN support_threads t ON t.id=m.thread_id AND t.__project_id=m.__project_id WHERE m.provider_message_id=? AND lower(t.requester_email)=? LIMIT 2`,
+        )
+        .bind(candidate, input.from.trim().toLowerCase())
+        .all<{ id: string }>();
+      if (rows.results.length === 1 && rows.results[0])
+        return registry.forRecord("thread", rows.results[0].id, await scope);
+    }
+    const reply = {
+      from: input.from,
+      subject: input.subject ?? "",
+      bodyText: input.bodyText ?? "",
+    };
+    const thread =
+      (await findReportReplyThread(db, reply)) ??
+      (await findReceiptReplyThread(db, reply)) ??
+      (await findTicketReplyThread(db, reply));
+    return thread ? registry.forRecord("thread", thread, await scope) : registry.forSlug(undefined);
+  };
+
+  // Methods not mentioned here only read aggregate data or modify shared config.
+  // Repositories refuse a future business write accidentally left unclassified.
+  function route<T extends object>(
+    target: T,
+    routes: Record<string, Selector>,
+    pick: (database: D1Database) => T,
+    nullMethods: string[] = [],
+  ) {
+    for (const [name, select] of Object.entries(routes)) {
+      Object.defineProperty(target, name, {
+        configurable: true,
+        value: async (...args: unknown[]) => {
+          try {
+            const database = await select(...args);
+            if (!database) return nullMethods.includes(name) ? null : missing();
+            const service = pick(database);
+            const method: unknown = Reflect.get(service, name);
+            if (typeof method !== "function") throw new Error("InvalidStorageRoute");
+            return await Reflect.apply(method, service, args);
+          } catch {
+            // Identifiers/configuration failures never fall back to shared tables.
+            console.log(JSON.stringify({ event: "storage.route_failed", method: name }));
+            if (nullMethods.includes(name)) return null;
+            return fail("NOT_FOUND", "Project の保存先を利用できません。");
+          }
+        },
+      });
+    }
+  }
+  route(
+    base.support,
+    {
+      createThread: slug,
+      ingestInboundEmail: inbound,
+      detail: record("thread"),
+      threadForReply: record("thread"),
+      addMessage: record("thread", "threadId"),
+      addInternalNote: record("thread", "threadId"),
+      setStatus: record("thread", "threadId"),
+      assignApp: record("thread", "threadId"),
+    },
+    (database) => local(database).support,
+    ["threadForReply"],
+  );
+  route(
+    base.reports,
+    {
+      create: slug,
+      detail: record("report"),
+      sendReceipt: record("report"),
+      prepareDecision: record("report", "reportId"),
+      completeDecision: record("report", "reportId"),
+      changeStatus: record("report", "reportId"),
+      addNote: record("report", "reportId"),
+      updateResolution: record("report", "reportId"),
+    },
+    (database) => local(database).reports,
+  );
+  route(
+    base.reply,
+    {
+      send: record("thread", "threadId"),
+      getDraft: record("thread"),
+      deleteDraft: record("thread"),
+      saveDraft: record("thread", "threadId"),
+      applyTemplate: record("thread", "threadId"),
+      projectReportReceipt: record("thread"),
+    },
+    (database) => local(database).reply,
+  );
+  route(
+    tickets,
+    {
+      row: record("ticket"),
+      detail: record("ticket"),
+      ack: record("ticket"),
+      change: record("ticket", "id"),
+      note: record("ticket", "id"),
+      create: project,
+      merge: record("ticket", "id"),
+      relation: record("ticket", "id"),
+      source: async (kind, id) =>
+        registry.forRecord(kind === "report" ? "report" : "thread", id, await scope),
+    },
+    (database) => new TicketService(database, base.moderation),
+    ["row"],
+  );
+
+  base.reply.refreshMessageIds = async (threadId?: string) => {
+    if (threadId) {
+      const database = await registry.forRecord("thread", threadId, await scope);
+      if (database) await local(database).reply.refreshMessageIds(threadId);
+      return;
+    }
+    // Query once through aggregate storage; route each update by message owner.
+    const rows = await db
+      .prepare(
+        "SELECT id FROM support_messages WHERE provider_message_id IS NULL AND transport_id IS NOT NULL ORDER BY message_id_checked_at,created_at DESC LIMIT 50",
+      )
+      .all<{ id: string }>();
+    for (const row of rows.results) {
+      const database = await registry.forRecord("message", row.id, await scope);
+      if (!database) continue;
+      const thread = await new SupportRepository(database).messageThreadId(row.id);
+      if (thread) await local(database).reply.refreshMessageIds(thread);
+    }
+  };
+  base.reports.retryReceipts = async () => {
+    const rows = await db
+      .prepare(
+        `SELECT r.id FROM reports r JOIN support_threads t ON t.id=r.support_thread_id AND t.__project_id=r.__project_id WHERE t.requester_email<>'' AND t.status='open' AND NOT EXISTS(SELECT 1 FROM support_reply_sends s WHERE s.idempotency_key='report-receipt-'||r.id AND s.__project_id=r.__project_id) ORDER BY r.created_at LIMIT 25`,
+      )
+      .all<{ id: string }>();
+    for (const row of rows.results) await base.reports.sendReceipt(row.id);
+  };
+  return { ...base, tickets, db, registry };
 }
