@@ -34,16 +34,24 @@ export async function findTicketReplyThread(
   const numbers = ticketNumbersFromReply(input.subject, input.bodyText);
   if (numbers.length !== 1) return null;
   const rows = await db
-    .prepare(`SELECT th.id, th.app_id FROM tickets t
+    .prepare(`SELECT th.id, th.app_id, th.requester_email FROM tickets t
     JOIN ticket_sources s ON s.ticket_id = t.id AND s.source_type = 'support'
     JOIN support_threads th ON th.id = s.source_id
-    WHERE t.ticket_number = ? AND t.merged_into IS NULL AND lower(th.requester_email) = ? LIMIT 2`)
-    .bind(numbers[0], input.from.trim().toLowerCase())
-    .all<{ id: string; app_id: string | null }>();
-  if (rows.results.length !== 1) return null;
-  const row = rows.results[0];
+    WHERE t.ticket_number = ? AND t.merged_into IS NULL LIMIT 64`)
+    .bind(numbers[0])
+    .all<{ id: string; app_id: string | null; requester_email: string }>();
+  const matches = rows.results.filter(
+    (row) => row.requester_email.trim().toLowerCase() === input.from.trim().toLowerCase(),
+  );
+  if (rows.results.length === 64 || matches.length !== 1) return null;
+  const row = matches[0];
   // Mail to one project's address never lands in another project's ticket.
-  if (!row || (input.appId && row.app_id !== input.appId)) return null;
+  if (
+    !row ||
+    row.requester_email.trim().toLowerCase() !== input.from.trim().toLowerCase() ||
+    (input.appId && row.app_id !== input.appId)
+  )
+    return null;
   return row.id;
 }
 
@@ -74,11 +82,14 @@ export async function findReceiptReplyThread(
   const ids = receiptIdsFromReply(input.subject, input.bodyText);
   if (ids.length !== 1) return null;
   const row = await db
-    .prepare(
-      "SELECT id, app_id FROM support_threads WHERE lower(id) = ? AND lower(requester_email) = ? LIMIT 1",
-    )
-    .bind(ids[0], input.from.trim().toLowerCase())
-    .first<{ id: string; app_id: string | null }>();
-  if (!row || (input.appId && row.app_id !== input.appId)) return null;
+    .prepare("SELECT id, app_id, requester_email FROM support_threads WHERE lower(id) = ? LIMIT 1")
+    .bind(ids[0])
+    .first<{ id: string; app_id: string | null; requester_email: string }>();
+  if (
+    !row ||
+    row.requester_email.trim().toLowerCase() !== input.from.trim().toLowerCase() ||
+    (input.appId && row.app_id !== input.appId)
+  )
+    return null;
   return row.id;
 }

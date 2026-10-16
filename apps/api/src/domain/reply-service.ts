@@ -28,6 +28,7 @@ import type { AppRepository } from "../db/apps";
 import type { AuditRepository } from "../db/audit";
 import type { SupportRepository } from "../db/support";
 import type { ProjectMailSettings, TemplateRepository } from "../db/templates";
+import { privateText } from "../privacy/crypto";
 import type { ProjectMailDelivery } from "../project-mail";
 import { internalFailure, notFound, validationFailure } from "./failures";
 import { sha256Hex } from "./identity";
@@ -548,7 +549,7 @@ export class ReplyService {
           .prepare(
             "UPDATE support_threads SET mail_subject = COALESCE(mail_subject, ?) WHERE id = ?",
           )
-          .bind(subject, input.threadId),
+          .bind(privateText(this.db, subject), input.threadId),
         this.support.insertMessageStatement({
           id: messageId,
           threadId: input.threadId,

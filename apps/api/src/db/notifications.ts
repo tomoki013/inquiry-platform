@@ -1,5 +1,6 @@
 import type { NotificationSettings, PushDeviceSummary } from "@inquiry-platform/core";
 import { defaultNotificationSettings } from "@inquiry-platform/core";
+import { privateIndex, privateText } from "../privacy/crypto";
 
 export interface SubscriptionRow {
   id: string;
@@ -108,8 +109,8 @@ export class NotificationRepository {
 
   async findByEndpoint(endpoint: string): Promise<SubscriptionRow | null> {
     return await this.db
-      .prepare("SELECT * FROM push_subscriptions WHERE endpoint = ?")
-      .bind(endpoint)
+      .prepare("SELECT * FROM push_subscriptions WHERE endpoint_hash = ? OR endpoint = ?")
+      .bind(privateIndex(this.db, endpoint), endpoint)
       .first<SubscriptionRow>();
   }
 
@@ -154,9 +155,10 @@ export class NotificationRepository {
     return this.db
       .prepare(
         `INSERT INTO push_subscriptions
-           (id, admin_user_id, endpoint, p256dh, auth, user_agent, device_name, created_at, last_used_at, revoked_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
-         ON CONFLICT(endpoint) DO UPDATE SET
+           (id, admin_user_id, endpoint, p256dh, auth, user_agent, device_name, created_at, last_used_at, revoked_at, endpoint_hash)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+         ON CONFLICT(endpoint_hash) WHERE endpoint_hash IS NOT NULL DO UPDATE SET
+           endpoint = excluded.endpoint,
            p256dh = excluded.p256dh,
            auth = excluded.auth,
            user_agent = excluded.user_agent,
@@ -167,12 +169,13 @@ export class NotificationRepository {
       .bind(
         values.id,
         values.adminUserId,
-        values.endpoint,
-        values.p256dh,
-        values.auth,
-        values.userAgent ?? null,
-        values.deviceName ?? null,
+        privateText(this.db, values.endpoint),
+        privateText(this.db, values.p256dh),
+        privateText(this.db, values.auth),
+        privateText(this.db, values.userAgent ?? null),
+        privateText(this.db, values.deviceName ?? null),
         values.at,
+        privateIndex(this.db, values.endpoint),
       );
   }
 

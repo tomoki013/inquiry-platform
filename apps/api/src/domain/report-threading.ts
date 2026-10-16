@@ -30,13 +30,16 @@ export async function findReportReplyThread(
   const match = reportIdsFromReply(input.subject, input.bodyText);
   if (match.ids.length !== 1) return null;
   const rows = await db
-    .prepare(`SELECT t.id, t.subject FROM reports r
+    .prepare(`SELECT t.id, t.subject, t.requester_email FROM reports r
     JOIN support_threads t ON t.id = r.support_thread_id
-    WHERE lower(r.external_report_id) = ? AND lower(t.requester_email) = ? LIMIT 2`)
-    .bind(match.ids[0]!, input.from.trim().toLowerCase())
-    .all<{ id: string; subject: string }>();
-  if (rows.results.length !== 1) return null;
-  const row = rows.results[0]!;
+    WHERE lower(r.external_report_id) = ? LIMIT 64`)
+    .bind(match.ids[0]!)
+    .all<{ id: string; subject: string; requester_email: string }>();
+  const matches = rows.results.filter(
+    (row) => row.requester_email.trim().toLowerCase() === input.from.trim().toLowerCase(),
+  );
+  if (rows.results.length === 64 || matches.length !== 1) return null;
+  const row = matches[0]!;
   if (match.legacy && unprefixedSubject(input.subject) !== unprefixedSubject(row.subject))
     return null;
   return row.id;

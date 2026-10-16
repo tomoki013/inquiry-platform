@@ -7,6 +7,9 @@
  */
 export interface AdminCoreEnv {
   DB: D1Database;
+  PII_ENCRYPTION_KEYS?: string;
+  PII_HASH_KEY?: string;
+  PII_REQUIRED?: string;
   /**
    * Projects that act on reports through a moderation adapter: project slug →
    * the name of the Service Binding implementing it. The binding itself is

@@ -12,6 +12,7 @@ import type {
 } from "@inquiry-platform/core";
 import { newId, nowIso } from "@inquiry-platform/core";
 import { Scope } from "../domain/scope";
+import { privateText } from "../privacy/crypto";
 
 interface ReportRow {
   id: string;
@@ -122,8 +123,8 @@ export class ReportRepository {
         values.reporterRefHash ?? null,
         values.authorRefHash ?? null,
         input.reasonCode,
-        input.detail ?? null,
-        input.snapshotText ?? null,
+        privateText(this.db, input.detail ?? null),
+        privateText(this.db, input.snapshotText ?? null),
         input.priority,
         values.createdAt,
         values.createdAt,
@@ -151,8 +152,8 @@ export class ReportRepository {
         event.eventType,
         event.fromStatus ?? null,
         event.toStatus ?? null,
-        event.actorId ?? null,
-        event.note ?? null,
+        privateText(this.db, event.actorId),
+        privateText(this.db, event.note ?? null),
         nowIso(),
       );
   }
@@ -187,7 +188,7 @@ export class ReportRepository {
       .prepare(
         "UPDATE reports SET resolution_code = ?, resolution_note = ?, updated_at = ? WHERE id = ?",
       )
-      .bind(code, note ?? null, nowIso(), id);
+      .bind(code, privateText(this.db, note), nowIso(), id);
   }
 
   touchStatement(id: string): D1PreparedStatement {
@@ -215,7 +216,7 @@ export class ReportRepository {
         values.reportId,
         values.r2Key,
         values.contentType,
-        values.originalFilename ?? null,
+        privateText(this.db, values.originalFilename ?? null),
         values.byteSize,
         values.sha256,
         values.createdAt ?? nowIso(),

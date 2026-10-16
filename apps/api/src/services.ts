@@ -22,6 +22,8 @@ import { SupportService } from "./domain/support-service";
 import { TicketService } from "./domain/ticket-service";
 import { findReceiptReplyThread, findTicketReplyThread } from "./domain/ticket-threading";
 import type { AdminCoreEnv } from "./env";
+import { privateCipher, privateDatabase } from "./privacy/crypto";
+import { privateBucket } from "./privacy/files";
 import { projectMailResolver } from "./project-mail";
 import { aggregateDatabase, ProjectRegistry } from "./storage/database";
 import { namespacedSupportKey } from "./storage/files";
@@ -201,8 +203,14 @@ export function buildServices(
   schedule: (work: Promise<unknown>) => void,
   scope?: Scope | Promise<Scope>,
 ) {
-  const registry = new ProjectRegistry(env.DB);
-  const db = aggregateDatabase(registry, scope);
+  const cipher = privateCipher(env);
+  env = {
+    ...env,
+    DB: privateDatabase(env.DB, cipher),
+    PRIVATE_FILES: privateBucket(env.PRIVATE_FILES, cipher),
+  };
+  const registry = new ProjectRegistry(env.DB, cipher);
+  const db = privateDatabase(aggregateDatabase(registry, scope), cipher, "platform", false);
   const base = buildLocalServices({ ...env, DB: db }, schedule, registry);
   const tickets = new TicketService(db, base.moderation);
   const missing = () => fail("NOT_FOUND", "対象が見つかりません。");
@@ -236,12 +244,15 @@ export function buildServices(
     for (const candidate of candidates) {
       const rows = await db
         .prepare(
-          `SELECT t.id FROM support_messages m JOIN support_threads t ON t.id=m.thread_id AND t.__project_id=m.__project_id WHERE m.provider_message_id=? AND lower(t.requester_email)=? LIMIT 2`,
+          `SELECT t.id,t.requester_email FROM support_messages m JOIN support_threads t ON t.id=m.thread_id AND t.__project_id=m.__project_id WHERE m.provider_message_id=? LIMIT 64`,
         )
-        .bind(candidate, input.from.trim().toLowerCase())
-        .all<{ id: string }>();
-      if (rows.results.length === 1 && rows.results[0])
-        return registry.forRecord("thread", rows.results[0].id, await scope);
+        .bind(candidate)
+        .all<{ id: string; requester_email: string }>();
+      const matches = rows.results.filter(
+        (row) => row.requester_email.trim().toLowerCase() === input.from!.trim().toLowerCase(),
+      );
+      if (rows.results.length < 64 && matches.length === 1 && matches[0])
+        return registry.forRecord("thread", matches[0].id, await scope);
     }
     const reply = {
       from: input.from,

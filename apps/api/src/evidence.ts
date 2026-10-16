@@ -4,6 +4,8 @@ import { ReportRepository } from "./db/reports";
 import { sha256Hex } from "./domain/identity";
 import type { AdminCoreEnv } from "./env";
 import { json, readBounded } from "./http";
+import { privateCipher, privateDatabase } from "./privacy/crypto";
+import { privateBucket } from "./privacy/files";
 import { ProjectRegistry } from "./storage/database";
 
 /**
@@ -19,8 +21,12 @@ export async function putReportEvidence(
   reportId: string,
   request: Request,
 ): Promise<Response> {
-  const files = new FileStore(env.PRIVATE_FILES);
-  const database = await new ProjectRegistry(env.DB).forRecord("report", reportId);
+  const cipher = privateCipher(env);
+  const files = new FileStore(privateBucket(env.PRIVATE_FILES, cipher));
+  const database = await new ProjectRegistry(privateDatabase(env.DB, cipher), cipher).forRecord(
+    "report",
+    reportId,
+  );
   if (!database) return json({ error: "NOT_FOUND" }, 404);
   const reports = new ReportRepository(database);
   const report = await reports.findRow(reportId);

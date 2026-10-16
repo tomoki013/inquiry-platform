@@ -12,6 +12,7 @@ import type {
 } from "@inquiry-platform/core";
 import { newId, nowIso } from "@inquiry-platform/core";
 import { Scope, THREAD_SERVICE } from "../domain/scope";
+import { privateText } from "../privacy/crypto";
 
 interface ThreadRow {
   report_id: string | null;
@@ -157,9 +158,9 @@ export class SupportRepository {
         values.id,
         values.appId ?? null,
         values.source,
-        values.requesterEmail ?? "",
-        values.requesterName ?? null,
-        values.subject,
+        privateText(this.db, values.requesterEmail ?? ""),
+        privateText(this.db, values.requesterName ?? null),
+        privateText(this.db, values.subject),
         values.at,
         values.at,
         values.at,
@@ -191,9 +192,9 @@ export class SupportRepository {
         values.direction,
         values.providerMessageId ?? null,
         values.inReplyTo ?? null,
-        values.sender ?? null,
-        values.recipient ?? null,
-        values.bodyText,
+        privateText(this.db, values.sender ?? null),
+        privateText(this.db, values.recipient ?? null),
+        privateText(this.db, values.bodyText),
         values.at,
         values.transportId ?? null,
       );
@@ -274,12 +275,21 @@ export class SupportRepository {
       where.push("t.status = ?");
       values.push(input.status);
     }
-    if (input.query) {
-      // Exact address, or the thread id — not a substring scan over subjects.
-      where.push("(t.requester_email = ? OR t.id = ?)");
-      values.push(input.query, input.query);
-    }
     const clause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+
+    if (input.query) {
+      const rows = await this.db
+        .prepare(`${SELECT_THREAD} ${clause} ORDER BY t.last_message_at DESC`)
+        .bind(...values)
+        .all<ThreadRow>();
+      const matches = rows.results.filter(
+        (row) => row.requester_email === input.query || row.id === input.query,
+      );
+      return {
+        items: matches.slice(input.offset, input.offset + input.limit).map(toSummary),
+        total: matches.length,
+      };
+    }
 
     const batched = await this.db.batch<ThreadRow | { total: number }>([
       this.db
@@ -423,7 +433,7 @@ export class SupportRepository {
         values.id,
         values.messageId,
         values.r2Key,
-        values.originalFilename ?? null,
+        privateText(this.db, values.originalFilename ?? null),
         values.contentType,
         values.byteSize,
         values.sha256,
@@ -472,7 +482,7 @@ export class SupportRepository {
          ON CONFLICT(thread_id) DO UPDATE SET body_text = excluded.body_text,
                                               updated_at = excluded.updated_at`,
       )
-      .bind(threadId, bodyText, at, at)
+      .bind(threadId, privateText(this.db, bodyText), at, at)
       .run();
     return { threadId, bodyText, updatedAt: at };
   }

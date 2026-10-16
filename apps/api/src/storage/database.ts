@@ -1,4 +1,5 @@
 import type { Scope } from "../domain/scope";
+import { type PrivateCipher, privateDatabase } from "../privacy/crypto";
 import {
   ownerExpression,
   rewriteIdentifiers,
@@ -17,7 +18,10 @@ export interface ProjectStorage {
 
 /** A registry is invocation-local. Never cache its state across RPCs or cutover. */
 export class ProjectRegistry {
-  constructor(readonly raw: D1Database) {}
+  constructor(
+    readonly raw: D1Database,
+    private readonly cipher?: PrivateCipher,
+  ) {}
 
   async entries(): Promise<ProjectStorage[]> {
     const rows = await this.raw
@@ -37,12 +41,18 @@ export class ProjectRegistry {
       .first();
     if (!registered) throw new Error("UnknownStorageProject");
     const entry = (await this.entries()).find((row) => row.project_id === projectId);
-    if (entry?.state === "active") return projectDatabase(this.raw, entry);
+    if (entry?.state === "active")
+      return privateDatabase(
+        projectDatabase(this.raw, entry),
+        this.cipher,
+        entry.project_id,
+        false,
+      );
     const required = await this.raw
       .prepare("SELECT value FROM platform_settings WHERE key='project_storage_required'")
       .first<{ value: string }>();
     if (required?.value === "1") throw new Error("ProjectStorageUnavailable");
-    return this.raw;
+    return privateDatabase(this.raw, this.cipher, projectId, false);
   }
 
   async forSlug(slug: unknown): Promise<D1Database> {

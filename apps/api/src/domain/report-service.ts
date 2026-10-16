@@ -24,6 +24,7 @@ import type { AppRepository } from "../db/apps";
 import type { AuditRepository } from "../db/audit";
 import type { ReportRepository } from "../db/reports";
 import type { SupportRepository } from "../db/support";
+import { privateText } from "../privacy/crypto";
 import { internalFailure, notFound, validationFailure } from "./failures";
 import { pseudonymise } from "./identity";
 import { ModerationRegistry } from "./moderation";
@@ -241,7 +242,7 @@ export class ReportService {
           .bind(
             status,
             code,
-            note,
+            privateText(this.db, note),
             nowIso(),
             nowIso(),
             published.revision,
@@ -254,7 +255,15 @@ export class ReportService {
           .prepare(
             `INSERT INTO report_events(id,report_id,event_type,from_status,to_status,actor_id,note,created_at) SELECT ?,?,'resolution_updated',?,?,?,?,? WHERE changes()>0`,
           )
-          .bind(newId(), input.reportId, row.status, status, actor.id ?? null, note, nowIso()),
+          .bind(
+            newId(),
+            input.reportId,
+            row.status,
+            status,
+            privateText(this.db, actor.id),
+            privateText(this.db, note),
+            nowIso(),
+          ),
         this.audit.statement({
           actor,
           action: "report.resolution_updated",

@@ -5,6 +5,7 @@ import type {
   Result,
 } from "@inquiry-platform/core";
 import { fail, newId, ok } from "@inquiry-platform/core";
+import { privateText } from "../privacy/crypto";
 import type { Scope } from "./scope";
 
 export type JobKind = OperatorDeliveryJob["kind"];
@@ -57,7 +58,7 @@ export class DeliveryJobs {
       .prepare(
         `INSERT OR IGNORE INTO delivery_jobs(id,service_id,kind,payload,next_attempt_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`,
       )
-      .bind(id, serviceId, kind, JSON.stringify(payload), at, at, at);
+      .bind(id, serviceId, kind, privateText(this.db, JSON.stringify(payload)), at, at, at);
   }
   notificationStatements(ref: {
     ticketId: string;

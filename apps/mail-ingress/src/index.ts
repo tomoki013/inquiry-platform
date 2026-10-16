@@ -1,6 +1,8 @@
 import type { AdminCoreStub } from "@inquiry-platform/core";
 import { INTERNAL_ORIGIN } from "@inquiry-platform/core";
 import { persistInboundMail, readInboundBytes } from "@inquiry-platform/mail-parser/journal";
+import { privateCipher } from "../../api/src/privacy/crypto";
+import { privateBucket } from "../../api/src/privacy/files";
 
 /**
  * The deployment's support address (`SUPPORT_EMAIL`), and anything else Email Routing points here.
@@ -22,6 +24,8 @@ export interface MailIngressEnv {
   ADMIN_CORE: AdminCoreStub;
   /** The same private bucket as Core, so its outage cannot lose the original. */
   PRIVATE_FILES: R2Bucket;
+  PII_ENCRYPTION_KEYS?: string;
+  PII_REQUIRED?: string;
   SUPPORT_EMAIL: string;
   MAX_STORED_BYTES: string;
   /** The operator's own address. A Secret — it is personal, and it is the one
@@ -94,7 +98,12 @@ async function store(
   }
 
   const bytes = await readInboundBytes(message.raw);
-  await persistInboundMail(env.PRIVATE_FILES, bytes, message.to, projectSlug);
+  await persistInboundMail(
+    privateBucket(env.PRIVATE_FILES, privateCipher(env)),
+    bytes,
+    message.to,
+    projectSlug,
+  );
   const response = await env.ADMIN_CORE.fetch(`${INTERNAL_ORIGIN}/internal/mail-ingress/raw`, {
     method: "PUT",
     headers: {

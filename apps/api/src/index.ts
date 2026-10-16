@@ -39,6 +39,9 @@ import { Scope } from "./domain/scope";
 import type { AdminCoreEnv } from "./env";
 import { putReportEvidence } from "./evidence";
 import { json, readBounded } from "./http";
+import { privateCipher } from "./privacy/crypto";
+import { privateBucket } from "./privacy/files";
+import { migratePrivateStorage } from "./privacy/maintenance";
 import { buildServices } from "./services";
 import { namespacedSupportKey } from "./storage/files";
 
@@ -499,7 +502,13 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
 
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const files = new FileStore(this.env.PRIVATE_FILES);
+    if (url.pathname === "/internal/privacy/backfill" && request.method === "POST") {
+      if ((await this.scope()).limited) return json({ error: "FORBIDDEN" }, 403);
+      const input = (await request.json()) as { project?: unknown };
+      if (typeof input.project !== "string") return json({ error: "INVALID_PROJECT" }, 400);
+      return json(await migratePrivateStorage(this.env, input.project), 200);
+    }
+    const files = new FileStore(privateBucket(this.env.PRIVATE_FILES, privateCipher(this.env)));
     const ref = /\/internal\/reports\/([^/]+)/.exec(url.pathname)?.[1];
     const message = /\/internal\/support\/messages\/([^/]+)/.exec(url.pathname)?.[1];
     const ownerDb = ref

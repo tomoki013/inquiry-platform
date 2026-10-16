@@ -29,6 +29,7 @@ import {
 } from "@inquiry-platform/core";
 import { z } from "zod";
 import { SupportRepository } from "../db/support";
+import { privateText } from "../privacy/crypto";
 import { internalFailure, notFound, validationFailure } from "./failures";
 import { ModerationRegistry } from "./moderation";
 import { Scope } from "./scope";
@@ -85,8 +86,8 @@ export class TicketService {
       .bind(
         newId(),
         eventType,
-        actor.id ?? actor.type,
-        JSON.stringify(metadata),
+        privateText(this.db, actor.id ?? actor.type),
+        privateText(this.db, JSON.stringify(metadata)),
         at,
         ticketId,
         ...(mutation ? [mutation] : []),
@@ -173,15 +174,45 @@ export class TicketService {
       values.push(input.next === "TODAY" ? today : at);
       where.push("status NOT IN ('RESOLVED','CLOSED')");
     }
-    if (input.query) {
-      where.push(
-        "(ticket_number LIKE ? ESCAPE '\\' OR subject LIKE ? ESCAPE '\\' OR requester_email LIKE ? ESCAPE '\\' OR requester_id LIKE ? ESCAPE '\\' OR EXISTS(SELECT 1 FROM ticket_messages m WHERE m.ticket_id=q.id AND m.body LIKE ? ESCAPE '\\'))",
-      );
-      const v = `%${input.query.replace(/[\\%_]/g, "\\$&")}%`;
-      values.push(v, v, v, v, v);
-    }
     try {
       const from = `FROM (${SELECT}) q WHERE ${where.join(" AND ")}`;
+      if (input.query) {
+        const needle = input.query.toLocaleLowerCase();
+        const matches: Ticket[] = [];
+        let total = 0;
+        // Scope and queue filters run in SQL before any decryption/search.
+        // Scan in bounded pages so the public pagination and total stay exact.
+        for (let offset = 0; ; offset += 100) {
+          const result = await this.db
+            .prepare(
+              `SELECT q.*,(SELECT json_group_array(m.body) FROM ticket_messages m WHERE m.ticket_id=q.id) AS private_bodies ${from} ORDER BY priority,CASE sla_state WHEN 'BREACHED' THEN 0 WHEN 'AT_RISK' THEN 1 ELSE 2 END,created_at,id LIMIT 100 OFFSET ?`,
+            )
+            .bind(...clockBindings(at), ...values, offset)
+            .all<Ticket & { private_bodies: string }>();
+          for (const row of result.results) {
+            const bodies = JSON.parse(row.private_bodies || "[]") as string[];
+            if (
+              ![
+                row.ticket_number,
+                row.subject,
+                row.requester_email,
+                row.requester_id,
+                ...bodies,
+              ].some(
+                (value) => typeof value === "string" && value.toLocaleLowerCase().includes(needle),
+              )
+            )
+              continue;
+            if (total >= input.offset && matches.length < input.limit) {
+              const { private_bodies: _b, ...item } = row;
+              matches.push(item as Ticket);
+            }
+            total++;
+          }
+          if (result.results.length < 100) break;
+        }
+        return ok({ items: matches, total });
+      }
       const r = await this.db.batch([
         this.db
           .prepare(
@@ -329,7 +360,7 @@ export class TicketService {
         }),
         this.db
           .prepare("UPDATE tickets SET type=?,service_id=?,summary=? WHERE id=?")
-          .bind(p.data.type, p.data.service_id, p.data.summary ?? null, id),
+          .bind(p.data.type, p.data.service_id, privateText(this.db, p.data.summary), id),
         this.event(
           id,
           "DETAILS_CHANGED",
@@ -518,7 +549,15 @@ export class TicketService {
               .map((k) => `${k}=?`)
               .join(",")},revision=revision+1 WHERE id=? AND revision=?`,
           )
-          .bind(...Object.values(changes), row.id, input.revision),
+          .bind(
+            ...Object.entries(changes).map(([key, value]) =>
+              ["subject", "summary", "next_action", "priority_override"].includes(key)
+                ? privateText(this.db, value as string | null)
+                : value,
+            ),
+            row.id,
+            input.revision,
+          ),
         ...events.map(([type, data]) => this.event(row.id, type, actor, data, at, mutation)),
         this.db
           .prepare(
@@ -560,12 +599,18 @@ export class TicketService {
           .prepare(
             "INSERT OR IGNORE INTO ticket_messages(id,ticket_id,direction,visibility,sender,body,created_at) SELECT ?,id,'OUTBOUND','INTERNAL',?,?,? FROM tickets WHERE id=? AND status<>'CLOSED' AND merged_into IS NULL",
           )
-          .bind(id, actor.id ?? actor.type, p.data.body, at, row.id),
+          .bind(
+            id,
+            privateText(this.db, actor.id ?? actor.type),
+            privateText(this.db, p.data.body),
+            at,
+            row.id,
+          ),
         this.db
           .prepare(
             "INSERT OR IGNORE INTO ticket_events(id,ticket_id,event_type,actor_id,metadata,created_at) SELECT ?,ticket_id,'INTERNAL_NOTE_ADDED',?,json_object('messageId',id),created_at FROM ticket_messages WHERE id=?",
           )
-          .bind(id, actor.id ?? actor.type, id),
+          .bind(id, privateText(this.db, actor.id ?? actor.type), id),
         this.db
           .prepare("UPDATE tickets SET updated_at=?,revision=revision+1 WHERE id=? AND changes()>0")
           .bind(at, row.id),
@@ -604,7 +649,7 @@ export class TicketService {
           .prepare(
             "INSERT INTO ticket_events SELECT ?,source_ticket_id,'RELATION_ADDED',?,json_object('target',target_ticket_id,'type',relation_type),created_at FROM ticket_relations WHERE id=?",
           )
-          .bind(newId(), actor.id ?? actor.type, id),
+          .bind(newId(), privateText(this.db, actor.id ?? actor.type), id),
       ]);
       return this.detail(source.id);
     } catch (e) {
