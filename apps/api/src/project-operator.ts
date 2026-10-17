@@ -16,11 +16,14 @@ import type {
   ProjectOperatorApi,
   ProjectOperatorProps,
   ReplyTemplate,
+  ReportStatus,
   Result,
   Ticket,
   TicketDetail,
+  TicketStatus,
 } from "@inquiry-platform/core";
 import {
+  fail,
   projectOperatorPropsSchema,
   ticketTransitions,
   toPublicType,
@@ -104,6 +107,26 @@ const templateChangeSchema = z
 const listTemplatesSchema = z.object({ includeInactive: z.boolean().optional() }).strict();
 const signatureSchema = z.string().max(2000);
 const TICKET_NUMBER = /^TK-\d{1,12}$/;
+const CLOSING: readonly string[] = ["RESOLVED", "CLOSED"];
+/** A console's outcome, as the report records it. The ticket shows it back
+ * through the report projection: CONTENT_REMOVED, NO_ACTION_REQUIRED or OTHER. */
+const REPORT_RESOLUTION_CODES: Record<string, string> = {
+  RESOLVED: "content_removed",
+  CONTENT_REMOVED: "content_removed",
+  NO_ACTION_REQUIRED: "no_action_required",
+  SPAM: "spam",
+  DUPLICATE: "duplicate",
+  INVALID: "invalid",
+  USER_WITHDREW: "user_withdrew",
+  ACCOUNT_ACTIONED: "account_actioned",
+  FIXED: "fixed",
+  OTHER: "other",
+};
+/** From a reopened report's TRIAGE on to the state a console asked for. */
+const REOPEN_STEPS: Partial<Record<TicketStatus, TicketStatus[]>> = {
+  ACKNOWLEDGED: ["ACKNOWLEDGED"],
+  IN_PROGRESS: ["ACKNOWLEDGED", "IN_PROGRESS"],
+};
 
 /**
  * A project's own console, working its own tickets.
@@ -189,7 +212,15 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
       await this.receiptId(detail.ticket),
       assignees.get(detail.ticket.id) ?? null,
       (actorId) => (grant ? ownOperator(grant, actorId) : null),
+      detail.ticket.report_id ? await this.signedReports(detail.ticket.service_id) : false,
     );
+  }
+
+  /** Whether the project decides its reports through a signed moderation
+   * adapter, which a console's status change must never stand in for. */
+  private async signedReports(serviceId: string): Promise<boolean> {
+    const app = await new AppRepository(this.services.db).findById(serviceId);
+    return !app || this.services.moderation.requiresSignedDecision(app.slug);
   }
 
   /** Per ticket, the console operator who last moved it to ACKNOWLEDGED. */
@@ -304,6 +335,15 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
       const ticket = await this.ticket(scoped.app, ticketId);
       if (!ticket) return notFound;
       const change = parsed.data;
+      if (
+        ticket.report_id &&
+        (change.resolution !== undefined ||
+          (change.status !== undefined &&
+            change.status !== ticket.status &&
+            (CLOSING.includes(change.status) || CLOSING.includes(ticket.status))))
+      ) {
+        return await this.decideReport(ticket, ticket.report_id, change, actor);
+      }
       // Rebuilt field by field: no project, owner or priority override
       // reaches Core from here, only what a project console decides.
       const result = await this.tickets.change(
@@ -321,6 +361,87 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
     } catch (error) {
       return internalFailure("operator.changeTicket", error);
     }
+  }
+
+  /**
+   * A console resolving, closing or reopening a report ticket. The ticket of a
+   * report only mirrors the report, so the decision is made on the report
+   * through `ReportService` — its state machine, audit and signed-moderation
+   * refusal — and the ticket follows by projection. A console keeps working in
+   * ticket terms: 解決 is `actioned` with the chosen outcome, クローズ is
+   * `closed`, and reopening goes back to review and on to 対応中.
+   */
+  private async decideReport(
+    ticket: Ticket,
+    reportId: string,
+    change: z.infer<typeof changeSchema>,
+    actor: ActorRef,
+  ): Promise<Result<OperatorTicketDetail>> {
+    if (change.nextAction !== undefined || change.nextActionAt !== undefined)
+      return fail("VALIDATION_ERROR", "通報の判定と次のアクションは別々に変更してください。");
+    if (ticket.revision !== change.revision)
+      return fail("CONFLICT", "別の操作が反映されました。再読み込みしてください。");
+    const target = (change.status ?? ticket.status) as TicketStatus;
+    if (target !== ticket.status && !ticketTransitions[ticket.status].includes(target))
+      return fail("INVALID_STATUS_TRANSITION", "この状態には遷移できません。");
+    const reports = this.services.reports;
+    const current = await reports.detail(reportId);
+    if (!current.ok) return current;
+    let status = current.value.status;
+    const move = async (to: ReportStatus, note?: string) => {
+      const moved = await reports.changeStatus({ reportId, to, ...(note ? { note } : {}) }, actor);
+      if (moved.ok) status = moved.value.status;
+      return moved;
+    };
+
+    if (CLOSING.includes(target)) {
+      const code = change.resolution ? REPORT_RESOLUTION_CODES[change.resolution] : undefined;
+      if (change.resolution && !code) return fail("VALIDATION_ERROR", "処理結果を選んでください。");
+      if (!code && !(target === "CLOSED" && status === "actioned"))
+        return fail("VALIDATION_ERROR", "処理結果を選んでください。");
+      if (code) {
+        const recorded = await reports.updateResolution({ reportId, resolutionCode: code }, actor);
+        if (!recorded.ok) return recorded;
+      }
+      const path: ReportStatus[] =
+        target === "RESOLVED"
+          ? status === "open"
+            ? ["reviewing", "actioned"]
+            : status === "reviewing"
+              ? ["actioned"]
+              : []
+          : status === "closed"
+            ? []
+            : ["closed"];
+      if (target === "RESOLVED" && status === "closed")
+        return fail("INVALID_STATUS_TRANSITION", "この状態には遷移できません。");
+      for (const to of path) {
+        const moved = await move(to);
+        if (!moved.ok) return moved;
+      }
+    } else {
+      // Reopening: a report goes back to review (an `actioned` one is closed
+      // first, the only way out of it), and the ticket on to the state asked.
+      if (status === "actioned") {
+        const closed = await move("closed");
+        if (!closed.ok) return closed;
+      }
+      if (status === "closed") {
+        const reviewing = await move("reviewing", "コンソールから対応を再開しました。");
+        if (!reviewing.ok) return reviewing;
+      }
+      for (const step of REOPEN_STEPS[target] ?? []) {
+        const row = await this.tickets.row(ticket.id);
+        if (!row) return notFound;
+        if (row.status === target) break;
+        const moved = await this.tickets.change(
+          { id: ticket.id, revision: row.revision, status: step },
+          actor,
+        );
+        if (!moved.ok) return moved;
+      }
+    }
+    return await this.detail(ticket.id);
   }
 
   async addNote(
@@ -603,6 +724,7 @@ function toDetail(
   receiptId: string | null,
   assignee: string | null,
   by: (actorId: string | null) => string | null,
+  signedReports: boolean,
 ): OperatorTicketDetail {
   const { ticket } = detail;
   return {
@@ -612,11 +734,13 @@ function toDetail(
     acknowledgedAt: ticket.acknowledged_at,
     resolvedAt: ticket.resolved_at,
     closedAt: ticket.closed_at,
+    // A report's outcome is decided through the report (see `decideReport`),
+    // which a signed-moderation project can only do with a signed decision.
     allowedStatuses: [...(ticketTransitions[ticket.status] ?? [])].filter(
       (status) =>
         !ticket.report_id ||
-        (!["RESOLVED", "CLOSED"].includes(status) &&
-          !["RESOLVED", "CLOSED"].includes(ticket.status)),
+        !signedReports ||
+        (!CLOSING.includes(status) && !CLOSING.includes(ticket.status)),
     ),
     canReply: ticket.thread_id !== null && ticket.requester_email !== null,
     timeline: detail.timeline.map((item) =>

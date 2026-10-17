@@ -419,3 +419,125 @@ describe("createProjectOperatorClient", () => {
     expect(await client.project()).toMatchObject({ ok: false, error: { code: "UNAVAILABLE" } });
   });
 });
+
+async function reportTicket(projectSlug: string, key: string) {
+  const ctx = createExecutionContext();
+  Object.defineProperty(ctx, "props", {
+    value: { caller: "form", projects: [projectSlug] },
+  });
+  const intake = new Intake(ctx, testEnv as never);
+  const result = await intake.submitReport({
+    projectSlug,
+    externalReportId: key,
+    targetType: "post",
+    targetId: "content-1",
+    reason: "spam",
+    reporterEmail: "reporter@example.com",
+  });
+  await waitOnExecutionContext(ctx);
+  if (!result.ok || !result.value.ticketNumber) throw new Error("fixture report failed");
+  const row = await testEnv.DB.prepare("SELECT id FROM tickets WHERE ticket_number = ?")
+    .bind(result.value.ticketNumber)
+    .first<{ id: string }>();
+  return row?.id ?? "";
+}
+
+const reportStatus = (ticketId: string) =>
+  testEnv.DB.prepare(
+    "SELECT r.status FROM reports r JOIN ticket_sources s ON s.source_id = r.id AND s.source_type = 'report' WHERE s.ticket_id = ?",
+  )
+    .bind(ticketId)
+    .first<string>("status");
+
+describe("ProjectOperator: a report is decided on the report", () => {
+  it("resolves, closes and reopens a report ticket through the report's own rules", async () => {
+    const id = await reportTicket("orbit", "report-1");
+    const client = createProjectOperatorClient(operator(orbitConsole).api, "orbit");
+    const opened = await client.getTicket(id);
+    expect(opened).toMatchObject({
+      ok: true,
+      value: { status: "NEW", source: "report" },
+    });
+    if (!opened.ok) return;
+    expect(opened.value.allowedStatuses).toContain("RESOLVED");
+
+    const unchosen = await client.changeTicket(
+      id,
+      { revision: opened.value.revision, status: "RESOLVED" },
+      person,
+    );
+    expect(unchosen).toMatchObject({
+      ok: false,
+      error: { code: "VALIDATION_ERROR" },
+    });
+
+    const resolved = await client.changeTicket(
+      id,
+      {
+        revision: opened.value.revision,
+        status: "RESOLVED",
+        resolution: "RESOLVED",
+      },
+      person,
+    );
+    expect(resolved).toMatchObject({
+      ok: true,
+      value: { status: "RESOLVED", resolution: "CONTENT_REMOVED" },
+    });
+    expect(await reportStatus(id)).toBe("actioned");
+    if (!resolved.ok) return;
+    expect(resolved.value.allowedStatuses).toEqual(["CLOSED", "IN_PROGRESS"]);
+
+    const closed = await client.changeTicket(
+      id,
+      { revision: resolved.value.revision, status: "CLOSED" },
+      person,
+    );
+    expect(closed).toMatchObject({ ok: true, value: { status: "CLOSED" } });
+    expect(await reportStatus(id)).toBe("closed");
+    if (!closed.ok) return;
+
+    const reopened = await client.changeTicket(
+      id,
+      { revision: closed.value.revision, status: "IN_PROGRESS" },
+      person,
+    );
+    expect(reopened).toMatchObject({
+      ok: true,
+      value: { status: "IN_PROGRESS", resolution: null },
+    });
+    expect(await reportStatus(id)).toBe("reviewing");
+    if (!reopened.ok) return;
+
+    const dismissed = await client.changeTicket(
+      id,
+      {
+        revision: reopened.value.revision,
+        status: "RESOLVED",
+        resolution: "NO_ACTION_REQUIRED",
+      },
+      person,
+    );
+    expect(dismissed).toMatchObject({
+      ok: true,
+      value: { status: "RESOLVED", resolution: "NO_ACTION_REQUIRED" },
+    });
+
+    const audit = await testEnv.DB.prepare(
+      "SELECT COUNT(*) AS n FROM audit_logs WHERE action LIKE 'report.%' AND actor_id = 'orbit-api:sub-1234'",
+    ).first<number>("n");
+    expect(audit).toBeGreaterThan(0);
+  });
+
+  it("refuses a stale revision and leaves the report alone", async () => {
+    const id = await reportTicket("orbit", "report-2");
+    const client = createProjectOperatorClient(operator(orbitConsole).api, "orbit");
+    const stale = await client.changeTicket(
+      id,
+      { revision: 9999, status: "RESOLVED", resolution: "RESOLVED" },
+      person,
+    );
+    expect(stale).toMatchObject({ ok: false, error: { code: "CONFLICT" } });
+    expect(await reportStatus(id)).toBe("open");
+  });
+});
