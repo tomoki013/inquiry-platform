@@ -448,6 +448,7 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
       consoleShortName: branding.consoleShortName,
       replyFromAddress: this.env.SUPPORT_EMAIL,
       defaultSignature: branding.defaultSignature,
+      replyClosing: branding.replyClosing || undefined,
       defaultProjectId: branding.defaultProjectId,
     };
   }

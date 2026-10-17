@@ -138,6 +138,7 @@ function buildLocalServices(
     defaultSupportUrl: env.DEFAULT_SUPPORT_URL,
     defaultSignature: branding.defaultSignature,
     legacySignatures: branding.legacySignatures,
+    replyClosing: branding.replyClosing,
     resolve: async (appId) => templates.mailSettings(appId),
     delivery,
   });

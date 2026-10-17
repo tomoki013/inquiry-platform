@@ -57,6 +57,8 @@ export interface ReplyAddresses {
   defaultSignature: string;
   /** Older signatures to strip from drafts; see `Branding.legacySignatures`. */
   legacySignatures: readonly string[];
+  /** See `Branding.replyClosing`. */
+  replyClosing?: string;
   /** Project-scoped overrides from the platform's mail settings repository. */
   resolve?: (appId: string | undefined) => Promise<ProjectMailSettings>;
   delivery?: (appId: string | undefined) => ProjectMailDelivery;
@@ -105,6 +107,7 @@ export class ReplyService {
       fromName: override.fromName ?? this.addresses.fromName,
       defaultSignature: delivery?.defaultSignature ?? this.addresses.defaultSignature,
       defaultSupportUrl: delivery?.supportUrl ?? this.addresses.defaultSupportUrl,
+      replyClosing: (delivery?.replyClosing ?? this.addresses.replyClosing ?? "").trim(),
       mail: delivery?.mail ?? this.mail,
     };
   }
@@ -286,6 +289,7 @@ export class ReplyService {
     try {
       const thread = await this.support.findThread(threadId);
       if (!thread?.requester_email || thread.status !== "open") return;
+      if (this.addresses.delivery?.(thread.app_id ?? undefined)?.inquiryReceipt === false) return;
       if (thread.source !== "web_form" && thread.source !== "email") return;
       const addresses = await this.addressesFor(thread.app_id ?? undefined);
       const own = [addresses.supportEmail, this.addresses.supportEmail].map((a) =>
@@ -609,7 +613,10 @@ export class ReplyService {
         .first<{ external_report_id: string }>();
       const receiptLine = linkedReport ? `受付ID: ${linkedReport.external_report_id}` : undefined;
       const reportFooter = receiptLine && !body.includes(receiptLine) ? `\n\n${receiptLine}` : "";
-      const text = `${body}${reportFooter}\n\n${signature}`;
+      // The closing goes last, above the signature, once.
+      const content = `${body}${reportFooter}`.trimEnd();
+      const closing = addresses.replyClosing;
+      const text = `${content}${closing && !content.endsWith(closing) ? `\n\n${closing}` : ""}\n\n${signature}`;
       const existingAttempt = await this.db
         .prepare(
           "SELECT thread_id,provider_key FROM support_reply_attempts WHERE idempotency_key=?",
@@ -641,6 +648,9 @@ export class ReplyService {
         .first<{ thread_id: string; provider_key: string }>();
       if (!attempt || attempt.thread_id !== input.threadId)
         return fail("CONFLICT", "送信キーの競合を検出しました。");
+      // Ours, so it is known whether or not the provider reports its own.
+      const domain = addresses.supportEmail.split("@")[1]?.trim() || "localhost";
+      const ownMessageId = `<${newId()}@${domain}>`;
       const sent = await mail.sendSupportReply({
         to: thread.requester_email,
         from,
@@ -651,6 +661,7 @@ export class ReplyService {
         inReplyTo,
         references,
         idempotencyKey: attempt.provider_key,
+        messageId: ownMessageId,
         ...(options.automatic ? { automatic: true } : {}),
       });
 
@@ -689,7 +700,7 @@ export class ReplyService {
           id: messageId,
           threadId: input.threadId,
           direction: "outbound",
-          providerMessageId: sent.providerMessageId,
+          providerMessageId: sent.providerMessageId ?? ownMessageId,
           transportId: sent.transportId,
           inReplyTo,
           sender: addresses.supportEmail,

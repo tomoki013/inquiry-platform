@@ -111,6 +111,18 @@ describe("ResendMailProvider", () => {
     expect(body.headers["X-Auto-Response-Suppress"]).toBe("All");
   });
 
+  it("sends under the Message-ID the caller chose", async () => {
+    const fetcher = fakeFetch(jsonResponse({ id: "resend-5" }));
+    await new ResendMailProvider("key", fetcher as never, undefined, false).sendSupportReply({
+      ...mail,
+      messageId: "<chosen@example.com>",
+    });
+    const body = JSON.parse(String((fetcher.mock.calls[0] as [string, RequestInit])[1].body)) as {
+      headers: Record<string, string>;
+    };
+    expect(body.headers["Message-ID"]).toBe("<chosen@example.com>");
+  });
+
   it("omits the headers block entirely for a first message", async () => {
     const fetcher = fakeFetch(jsonResponse({ id: "resend-3" }));
     await new ResendMailProvider("key", fetcher as never).sendTransactional(mail);

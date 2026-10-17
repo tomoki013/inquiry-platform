@@ -43,6 +43,10 @@ export interface SupportReplyMail extends BaseMail {
   inReplyTo?: string;
   /** Oldest first, as the header is written. */
   references?: string[];
+  /** The `Message-ID` to send under, chosen by the caller so it is known
+   * before the provider answers: the next reply's `In-Reply-To` and the
+   * customer's answer are matched against it. */
+  messageId?: string;
   /** Sent without an operator (a receipt). Marked `Auto-Submitted` so a
    * well-behaved auto-responder on the other end does not answer it. */
   automatic?: boolean;

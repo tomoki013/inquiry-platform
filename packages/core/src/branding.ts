@@ -25,6 +25,10 @@ export const brandingSchema = z.object({
    * go out signed twice.
    */
   legacySignatures: z.array(z.string().max(2000)).max(20).default([]),
+  /** A closing line every mail to a customer ends with, above the signature
+   * (for example a set phrase a language expects). Not added again when the
+   * text already ends with it. Empty means none. */
+  replyClosing: z.string().trim().max(200).default(""),
   /** The one `<img>` an outgoing HTML mail may carry, beside the signature. */
   mailLogo: z.object({ url: z.url({ protocol: /^https$/ }), alt: z.string().max(80) }).optional(),
   /** The project a ticket opened from the console defaults to. */
@@ -62,5 +66,7 @@ export interface ConsoleProfile {
   replyFromAddress: string;
   /** The composer's preview when no `app_mail_settings` row applies. */
   defaultSignature: string;
+  /** Added above the signature of every reply; see `Branding.replyClosing`. */
+  replyClosing?: string;
   defaultProjectId?: string;
 }
