@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { htmlToText, parseInboundEmail, parseReferences } from "./parse";
+import { htmlToText, isAutomated, parseInboundEmail, parseReferences } from "./parse";
 
 describe("htmlToText", () => {
   it("keeps the words and drops the markup", () => {
@@ -115,5 +115,48 @@ describe("parseInboundEmail", () => {
     const parsed = await parseInboundEmail(raw("this is not an email at all"));
     expect(parsed.from).toBe("");
     expect(typeof parsed.bodyText).toBe("string");
+  });
+});
+
+describe("isAutomated", () => {
+  const h = (key: string, value: string) => [{ key, value }];
+  it("recognises machine mail by its headers", () => {
+    expect(isAutomated(h("Auto-Submitted", "auto-replied"), "a@example.com")).toBe(true);
+    expect(isAutomated(h("auto-submitted", "auto-generated"), "a@example.com")).toBe(true);
+    expect(isAutomated(h("Precedence", "bulk"), "a@example.com")).toBe(true);
+    expect(isAutomated(h("List-Id", "<news.example.com>"), "a@example.com")).toBe(true);
+    expect(isAutomated(h("X-Auto-Response-Suppress", "OOF, AutoReply"), "a@example.com")).toBe(
+      true,
+    );
+    expect(isAutomated(h("Return-Path", "<>"), "a@example.com")).toBe(true);
+  });
+  it("recognises addresses that only send machine mail", () => {
+    for (const from of [
+      "MAILER-DAEMON@example.com",
+      "postmaster@example.com",
+      "noreply@example.com",
+      "no-reply+abc@example.com",
+      "do-not-reply@example.com",
+      "bounces@example.com",
+    ])
+      expect(isAutomated([], from)).toBe(true);
+  });
+  it("leaves a person's mail alone", () => {
+    expect(isAutomated(h("Auto-Submitted", "no"), "taro@example.com")).toBe(false);
+    expect(isAutomated([], "noreen@example.com")).toBe(false);
+    expect(isAutomated(h("Return-Path", "<taro@example.com>"), "taro@example.com")).toBe(false);
+  });
+  it("is reported by the parser", async () => {
+    const raw = [
+      "From: Bot <mailer-daemon@example.com>",
+      "To: support@example.com",
+      "Subject: Undelivered",
+      "Message-ID: <x@example.com>",
+      "",
+      "failed",
+    ].join("\r\n");
+    expect(
+      (await parseInboundEmail(new TextEncoder().encode(raw).buffer as ArrayBuffer)).automated,
+    ).toBe(true);
   });
 });

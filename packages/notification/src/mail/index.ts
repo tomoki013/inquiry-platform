@@ -43,6 +43,9 @@ export interface SupportReplyMail extends BaseMail {
   inReplyTo?: string;
   /** Oldest first, as the header is written. */
   references?: string[];
+  /** Sent without an operator (a receipt). Marked `Auto-Submitted` so a
+   * well-behaved auto-responder on the other end does not answer it. */
+  automatic?: boolean;
 }
 
 export interface MailProvider {

@@ -94,6 +94,8 @@ export const ingestInboundEmailInputSchema = z.object({
   requesterName: optionalText(120),
   appSlug: z.string().min(1).max(64).optional(),
   receivedAt: z.iso.datetime().optional(),
+  /** Machine-sent (auto-reply, bounce, list). Stored, never auto-answered. */
+  automated: z.boolean().default(false),
 });
 export type IngestInboundEmailInput = z.infer<typeof ingestInboundEmailInputSchema>;
 

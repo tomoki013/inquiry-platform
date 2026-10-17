@@ -98,6 +98,19 @@ describe("ResendMailProvider", () => {
     expect(body.headers.References).toBe("<first@example.com> <second@example.com>");
   });
 
+  it("marks a receipt as auto-submitted so auto-responders leave it alone", async () => {
+    const fetcher = fakeFetch(jsonResponse({ id: "resend-4" }));
+    await new ResendMailProvider("key", fetcher as never).sendSupportReply({
+      ...mail,
+      automatic: true,
+    });
+    const body = JSON.parse(String((fetcher.mock.calls[0] as [string, RequestInit])[1].body)) as {
+      headers: Record<string, string>;
+    };
+    expect(body.headers["Auto-Submitted"]).toBe("auto-replied");
+    expect(body.headers["X-Auto-Response-Suppress"]).toBe("All");
+  });
+
   it("omits the headers block entirely for a first message", async () => {
     const fetcher = fakeFetch(jsonResponse({ id: "resend-3" }));
     await new ResendMailProvider("key", fetcher as never).sendTransactional(mail);

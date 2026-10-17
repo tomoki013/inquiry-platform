@@ -14,7 +14,7 @@ import { DeliveryError, DeliveryJobs } from "./domain/delivery-jobs";
 import { InboundJobs } from "./domain/inbound-jobs";
 import { ModerationRegistry } from "./domain/moderation";
 import { NotificationService, type TicketCreatedRef } from "./domain/notification-service";
-import { ReplyService } from "./domain/reply-service";
+import { INQUIRY_RECEIPT_RETRY_SQL, ReplyService } from "./domain/reply-service";
 import { ReportService } from "./domain/report-service";
 import { findReportReplyThread } from "./domain/report-threading";
 import type { Scope } from "./domain/scope";
@@ -114,7 +114,12 @@ function buildLocalServices(
     statements: (ref: TicketCreatedRef) => jobs.notificationStatements(ref),
   });
 
-  const supportService = new SupportService(env.DB, support, apps, audit, notify);
+  // The receipt is sent by `ReplyService`, built below; `SupportService` only
+  // says that somebody opened a conversation.
+  let replyService: ReplyService;
+  const supportService = new SupportService(env.DB, support, apps, audit, notify, (threadId) =>
+    schedule(replyService.sendInquiryReceipt(threadId)),
+  );
 
   inbound = new InboundJobs(
     env,
@@ -127,24 +132,15 @@ function buildLocalServices(
       : undefined,
   );
 
-  const replyService = new ReplyService(
-    env.DB,
-    support,
-    supportService,
-    templates,
-    apps,
-    audit,
-    mail,
-    {
-      supportEmail: env.SUPPORT_EMAIL,
-      fromName: env.SUPPORT_FROM_NAME,
-      defaultSupportUrl: env.DEFAULT_SUPPORT_URL,
-      defaultSignature: branding.defaultSignature,
-      legacySignatures: branding.legacySignatures,
-      resolve: async (appId) => templates.mailSettings(appId),
-      delivery,
-    },
-  );
+  replyService = new ReplyService(env.DB, support, supportService, templates, apps, audit, mail, {
+    supportEmail: env.SUPPORT_EMAIL,
+    fromName: env.SUPPORT_FROM_NAME,
+    defaultSupportUrl: env.DEFAULT_SUPPORT_URL,
+    defaultSignature: branding.defaultSignature,
+    legacySignatures: branding.legacySignatures,
+    resolve: async (appId) => templates.mailSettings(appId),
+    delivery,
+  });
 
   return {
     branding,
@@ -333,6 +329,7 @@ export function buildServices(
       saveDraft: record("thread", "threadId"),
       applyTemplate: record("thread", "threadId"),
       projectReportReceipt: record("thread"),
+      sendInquiryReceipt: record("thread"),
     },
     (database) => local(database).reply,
   );
@@ -380,6 +377,15 @@ export function buildServices(
       )
       .all<{ id: string }>();
     for (const row of rows.results) await base.reports.sendReceipt(row.id);
+  };
+  base.reply.retryInquiryReceipts = async () => {
+    const rows = await db
+      .prepare(
+        INQUIRY_RECEIPT_RETRY_SQL.replaceAll("__PROJECT__", "AND x.__project_id=t.__project_id"),
+      )
+      .bind(new Date(Date.now() - 86_400_000).toISOString())
+      .all<{ id: string }>();
+    for (const row of rows.results) await base.reply.sendInquiryReceipt(row.id);
   };
   return { ...base, tickets, db, registry };
 }

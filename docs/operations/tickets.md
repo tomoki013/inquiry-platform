@@ -20,7 +20,7 @@ Admin Core owns D1 and private R2. The API gateway is authenticated on every rou
 | report low / normal / high | P4 / P3 / P2 |
 | content_deleted / no_action | CONTENT_REMOVED / NO_ACTION_REQUIRED |
 
-A linked report takes lifecycle precedence over its mail thread during migration: a resolved correspondence does not imply moderation has completed. Unknown historical resolution codes are retained and map to OTHER. Historical ACKs are not invented. Successfully sent report receipt emails count as the first customer response. Failed sends and reports without an email address remain unanswered. Migration 0008 backfills the earliest successful receipt time, including tickets with a later manual reply. The automatic flag remains visible on the message.
+A linked report takes lifecycle precedence over its mail thread during migration: a resolved correspondence does not imply moderation has completed. Unknown historical resolution codes are retained and map to OTHER. Historical ACKs are not invented. Successfully sent report receipt emails count as the first customer response. Failed sends and reports without an email address remain unanswered. Migration 0008 backfills the earliest successful receipt time, including tickets with a later manual reply. The automatic flag remains visible on the message. Inquiry receipts (`inquiry-receipt-<thread>`) are also flagged automatic but never count as the first response: being told a question arrived is not an answer.
 
 ## Rollout
 

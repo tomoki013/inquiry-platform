@@ -17,6 +17,11 @@ const configSchema = z.object({
     .string()
     .regex(/^[a-z0-9]+(?:_[a-z0-9]+)*$/)
     .optional(),
+  /** The same for the receipt a new inquiry gets. */
+  inquiryReceiptTemplate: z
+    .string()
+    .regex(/^[a-z0-9]+(?:_[a-z0-9]+)*$/)
+    .optional(),
 });
 
 export interface ProjectMailDelivery {
@@ -24,6 +29,7 @@ export interface ProjectMailDelivery {
   defaultSignature?: string;
   supportUrl?: string;
   reportReceiptTemplate?: string;
+  inquiryReceiptTemplate?: string;
 }
 
 /** Deployment-owned routing by immutable project id. Credentials live only in
@@ -56,6 +62,7 @@ export function projectMailResolver(
       defaultSignature: parsed.success ? parsed.data.defaultSignature : "",
       supportUrl: parsed.success ? parsed.data.supportUrl : undefined,
       reportReceiptTemplate: parsed.success ? parsed.data.reportReceiptTemplate : undefined,
+      inquiryReceiptTemplate: parsed.success ? parsed.data.inquiryReceiptTemplate : undefined,
     };
     cache.set(appId, delivery);
     return delivery;

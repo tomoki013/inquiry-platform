@@ -74,6 +74,21 @@ Message-ID による上書きは 409。これで受信返信のスレッド照�
 （無ければ基盤が末尾に足す）。テンプレートが無い・無効・他 Project のもの・未置換の
 項目が残る場合は汎用文面で送る（受付メールは文面を理由に止めない）。
 
+### 問い合わせの受付メール
+
+人が新しく問い合わせた時（Web フォーム、または既存スレッドに繋がらない新しいメール）に、
+受付番号つきの自動受付メールを1回だけ送る。`Auto-Submitted: auto-replied` を付け、
+タイムラインでは自動受付として表示し、初回返信（対応期限）には数えない。
+送らないもの: 運営が作ったチケット、返信先の無いフォーム、既存スレッドへの追記、
+通報（通報の受付メールがある）、このデプロイ自身の support アドレス、自動送信メール
+（`Auto-Submitted`・`Precedence: bulk/list/junk`・`List-Id`・`Return-Path: <>`・
+mailer-daemon / no-reply 等の差出人）。Web フォーム分は送信失敗を cron が24時間以内に再送する。
+
+文面は次の順で最初に使えるテンプレート、無ければ基盤の汎用文面。
+`inquiryReceiptTemplate`（このルート設定の key）→ `inquiry_receipt_<project slug の - を _ に>`
+→ 共通の `inquiry_receipt`。有効で、その Project か共通のもので、未置換項目が残らないこと。
+`{{ticketNumber}}` は受付番号。返信の照合に使うので `受付番号: {{ticketNumber}}` の行を残すとよい。
+
 ## 2. コマンド
 
 v0.8.0以降はmail-ingressにもCoreと同じprivate bucketを`PRIVATE_FILES`でbindする。D1はCoreだけが保持する。[配送・受信処理の復旧](delivery-jobs.md)を参照。

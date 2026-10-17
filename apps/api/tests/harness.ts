@@ -244,6 +244,9 @@ export async function harness(
     /** Unset means "no mail channel", like an environment without the Secret. */
     notifyEmail?: string;
     delivery?: (appId: string | undefined) => ProjectMailDelivery;
+    /** Send inquiry receipts, as production does. Off by default so suites
+     * that count mails count only what they are about. */
+    receipts?: boolean;
   } = {},
 ): Promise<Harness> {
   if (!options.database) await migrate();
@@ -284,9 +287,17 @@ export async function harness(
   const notify = (ref: Parameters<NotificationService["ticketCreated"]>[0]) => {
     pending.push(notifications.ticketCreated(ref));
   };
-  const supportService = new SupportService(db, supportRepo, appRepo, auditRepo, notify);
+  let replyService: ReplyService;
+  const supportService = new SupportService(
+    db,
+    supportRepo,
+    appRepo,
+    auditRepo,
+    notify,
+    options.receipts ? (id) => pending.push(replyService.sendInquiryReceipt(id)) : undefined,
+  );
 
-  const replyService = new ReplyService(
+  replyService = new ReplyService(
     db,
     supportRepo,
     supportService,

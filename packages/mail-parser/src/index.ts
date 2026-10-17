@@ -18,6 +18,10 @@ export interface ParsedInboundEmail {
   messageId?: string;
   inReplyTo?: string;
   references: string[];
+  /** Sent by a machine — an auto-reply, a bounce, a mailing list. Stored like
+   * any other mail, but never answered automatically: two auto-responders
+   * answering each other is a mail loop. */
+  automated: boolean;
   attachments: ParsedAttachment[];
 }
 
@@ -48,6 +52,7 @@ export async function parseInboundEmail(
     messageId: parsed.messageId ?? undefined,
     inReplyTo: parsed.inReplyTo ?? undefined,
     references: parseReferences(parsed.references),
+    automated: isAutomated(parsed.headers ?? [], parsed.from?.address ?? ""),
     attachments: (parsed.attachments ?? []).map((attachment) => ({
       filename: attachment.filename ?? undefined,
       contentType: attachment.mimeType ?? "application/octet-stream",
@@ -57,6 +62,30 @@ export async function parseInboundEmail(
           : new TextEncoder().encode(String(attachment.content ?? "")),
     })),
   };
+}
+
+/**
+ * Whether a mail announces itself as machine-sent (RFC 3834 and the headers
+ * common mail systems use in its place), or comes from an address that only
+ * ever sends machine mail. Erring towards `true` costs one receipt; erring
+ * towards `false` can cost a loop.
+ */
+export function isAutomated(headers: Array<{ key: string; value: string }>, from: string): boolean {
+  const value = (name: string) =>
+    headers
+      .find((header) => header.key.toLowerCase() === name)
+      ?.value.trim()
+      .toLowerCase();
+  const autoSubmitted = value("auto-submitted");
+  if (autoSubmitted && autoSubmitted !== "no") return true;
+  if (/^(bulk|junk|list|auto_reply)$/.test(value("precedence") ?? "")) return true;
+  if (value("list-id") || value("list-unsubscribe")) return true;
+  if (/\b(all|autoreply|oof)\b/.test(value("x-auto-response-suppress") ?? "")) return true;
+  if (value("x-autoreply") || value("x-autorespond") || value("x-autoresponder")) return true;
+  if (value("return-path") === "<>") return true;
+  return /^(mailer-daemon|postmaster|no-?reply|do-?not-?reply|bounces?)([+.-].*)?@/i.test(
+    from.trim(),
+  );
 }
 
 /**

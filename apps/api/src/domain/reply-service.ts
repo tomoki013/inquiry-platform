@@ -35,6 +35,19 @@ import { sha256Hex } from "./identity";
 import type { SupportService } from "./support-service";
 import { TicketService } from "./ticket-service";
 
+/**
+ * Web-form threads from the last day still owed a receipt: nobody has written
+ * to them and no receipt was recorded. Mail threads are not retried — whether
+ * one was machine-sent is known only while it is being ingested. `__PROJECT__`
+ * is where aggregate storage adds its project join condition.
+ */
+export const INQUIRY_RECEIPT_RETRY_SQL = `SELECT t.id FROM support_threads t
+  WHERE t.source='web_form' AND t.requester_email<>'' AND t.status='open' AND t.created_at>=?
+  AND NOT EXISTS (SELECT 1 FROM support_messages x WHERE x.thread_id=t.id AND x.direction='outbound' __PROJECT__)
+  AND NOT EXISTS (SELECT 1 FROM support_reply_sends x WHERE x.idempotency_key='inquiry-receipt-'||t.id __PROJECT__)
+  AND NOT EXISTS (SELECT 1 FROM reports x WHERE x.support_thread_id=t.id __PROJECT__)
+  ORDER BY t.created_at LIMIT 25`;
+
 export interface ReplyAddresses {
   supportEmail: string;
   fromName: string;
@@ -258,6 +271,115 @@ export class ReplyService {
     return unresolvedVariables(rendered).length === 0 && rendered.trim() ? rendered : null;
   }
 
+  /**
+   * The receipt a person gets when they open a conversation: by the web form,
+   * or by a new mail that is not machine-sent (`SupportService` decides that
+   * and only calls in for those).
+   *
+   * Sent at most once per thread (the idempotency key), never after a person
+   * has already been answered, never for a report (it has its own receipt),
+   * and never to one of this deployment's own addresses. Failing to send is
+   * logged and retried by the cron for web-form threads; it never fails the
+   * inquiry itself.
+   */
+  async sendInquiryReceipt(threadId: string): Promise<void> {
+    try {
+      const thread = await this.support.findThread(threadId);
+      if (!thread?.requester_email || thread.status !== "open") return;
+      if (thread.source !== "web_form" && thread.source !== "email") return;
+      const addresses = await this.addressesFor(thread.app_id ?? undefined);
+      const own = [addresses.supportEmail, this.addresses.supportEmail].map((a) =>
+        a.trim().toLowerCase(),
+      );
+      if (own.includes(thread.requester_email.trim().toLowerCase())) return;
+      const answered = await this.db
+        .prepare(
+          `SELECT 1 FROM support_messages WHERE thread_id=? AND direction='outbound'
+           UNION ALL SELECT 1 FROM reports WHERE support_thread_id=? LIMIT 1`,
+        )
+        .bind(threadId, threadId)
+        .first();
+      if (answered) return;
+      const ticket = await this.db
+        .prepare(
+          "SELECT t.ticket_number FROM tickets t JOIN ticket_sources s ON s.ticket_id=t.id WHERE s.source_type='support' AND s.source_id=? LIMIT 1",
+        )
+        .bind(threadId)
+        .first<{ ticket_number: string }>();
+      const number = ticket?.ticket_number;
+      const numberLine = number ? `受付番号: ${number}` : "";
+      const body =
+        (await this.inquiryReceiptTemplate(thread, numberLine)) ??
+        [
+          "お問い合わせを受け付けました。ご連絡いただきありがとうございます。",
+          numberLine,
+          "内容を確認のうえ、あらためてご連絡いたします。内容によってはお返事までにお時間をいただく場合がありますので、ご了承ください。",
+          "追加でお伝えいただきたいことがあれば、このメールにそのままご返信ください。",
+          "※このメールは受付時に自動で送信しています。",
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+      const sent = await this.send(
+        { threadId, bodyText: body, idempotencyKey: `inquiry-receipt-${threadId}` },
+        { type: "system", id: "inquiry-receipt" },
+        {
+          preserveDraft: true,
+          automatic: true,
+          countsAsResponse: false,
+          // A form has no mail to answer; the receipt's subject becomes the
+          // conversation's, and the number in it keeps replies threaded.
+          ...(thread.source === "web_form"
+            ? {
+                subject: `${number ? `[${number}] ` : ""}お問い合わせを受け付けました: ${thread.subject}`,
+              }
+            : {}),
+        },
+      );
+      if (!sent.ok) internalFailure("reply.sendInquiryReceipt", new Error(sent.error.code));
+    } catch (error) {
+      internalFailure("reply.sendInquiryReceipt", error);
+    }
+  }
+
+  async retryInquiryReceipts(): Promise<void> {
+    const { results } = await this.db
+      .prepare(INQUIRY_RECEIPT_RETRY_SQL.replaceAll("__PROJECT__", ""))
+      .bind(new Date(Date.now() - 86_400_000).toISOString())
+      .all<{ id: string }>();
+    for (const row of results) await this.sendInquiryReceipt(row.id);
+  }
+
+  /**
+   * An operator-written receipt, most specific first: the project's mail route
+   * (`inquiryReceiptTemplate`), then a template keyed `inquiry_receipt_<project>`,
+   * then the shared `inquiry_receipt`. Each must be active, belong to this
+   * project or to none, and render completely; otherwise the next one is tried
+   * and finally the generic wording is used.
+   */
+  private async inquiryReceiptTemplate(
+    thread: { app_id: string | null; requester_name: string | null },
+    numberLine: string,
+  ): Promise<string | null> {
+    const appId = thread.app_id ?? undefined;
+    const app = appId ? await this.apps.findById(appId) : null;
+    const keys = [
+      appId ? this.addresses.delivery?.(appId)?.inquiryReceiptTemplate : undefined,
+      app ? `inquiry_receipt_${app.slug.replace(/-/g, "_")}` : undefined,
+      "inquiry_receipt",
+    ].filter((key): key is string => Boolean(key));
+    for (const key of keys) {
+      const template = await this.templates.findByKey(key);
+      if (!template?.isActive || (template.appId && template.appId !== appId)) continue;
+      const rendered = renderTemplate(template.body, {
+        appName: app?.name ?? undefined,
+        userName: thread.requester_name ?? undefined,
+        supportUrl: app?.support_url ?? (await this.addressesFor(appId)).defaultSupportUrl,
+      }).replace(/\{\{\s*ticketNumber\s*\}\}/g, numberLine.replace("受付番号: ", ""));
+      if (rendered.trim() && unresolvedVariables(rendered).length === 0) return rendered;
+    }
+    return null;
+  }
+
   /** Render only the editable body. Every outgoing mail gets its signature at send time. */
   async applyTemplate(raw: unknown): Promise<Result<AppliedTemplate>> {
     const parsed = applyTemplateInputSchema.safeParse(raw);
@@ -378,7 +500,17 @@ export class ReplyService {
   async send(
     raw: unknown,
     actor: ActorRef,
-    options: { preserveDraft?: boolean; initialMessage?: boolean } = {},
+    options: {
+      preserveDraft?: boolean;
+      initialMessage?: boolean;
+      /** Sent without an operator; see `SupportReplyMail.automatic`. */
+      automatic?: boolean;
+      /** The subject, decided by the caller. Only system mail sets it. */
+      subject?: string;
+      /** False for mail that tells somebody nothing but that their message
+       * arrived: it must not stop the response clock. */
+      countsAsResponse?: boolean;
+    } = {},
   ): Promise<Result<SupportThreadDetail>> {
     const parsed = sendSupportReplyInputSchema.safeParse(raw);
     if (!parsed.success) return validationFailure(parsed.error);
@@ -453,16 +585,18 @@ export class ReplyService {
       // one still cannot choose what a reply says it is about.
       const template = input.templateId ? await this.templates.find(input.templateId) : undefined;
       if (template?.appId && template.appId !== thread.app_id) return notFound("定型文");
-      const subject = options.initialMessage
-        ? thread.subject
-        : replySubjectFor(
-            {
-              subject: thread.subject,
-              source: thread.source as never,
-              mailSubject: thread.mail_subject ?? undefined,
-            },
-            template?.subject,
-          );
+      const subject = options.subject
+        ? options.subject
+        : options.initialMessage
+          ? thread.subject
+          : replySubjectFor(
+              {
+                subject: thread.subject,
+                source: thread.source as never,
+                mailSubject: thread.mail_subject ?? undefined,
+              },
+              template?.subject,
+            );
 
       const signature =
         (await this.templates.signature(thread.app_id ?? undefined))?.trim() ||
@@ -517,6 +651,7 @@ export class ReplyService {
         inReplyTo,
         references,
         idempotencyKey: attempt.provider_key,
+        ...(options.automatic ? { automatic: true } : {}),
       });
 
       if (!sent.ok) {
@@ -568,6 +703,25 @@ export class ReplyService {
         this.support.touchThreadStatement(input.threadId, "outbound", at),
         this.support.recordSendStatement(input.idempotencyKey, input.threadId, messageId),
         ...(options.preserveDraft ? [] : [this.support.deleteDraftStatement(input.threadId)]),
+        // The projection triggers copy the send into the ticket; these run
+        // after them in the same batch. Done here rather than in the triggers
+        // because every project's storage carries its own copy of those.
+        ...(options.automatic
+          ? [
+              this.db
+                .prepare("UPDATE ticket_messages SET is_automatic=1 WHERE legacy_message_id=?")
+                .bind(messageId),
+            ]
+          : []),
+        ...(options.countsAsResponse === false
+          ? [
+              this.db
+                .prepare(
+                  "UPDATE tickets SET first_response_at=NULL WHERE id=(SELECT ticket_id FROM ticket_sources WHERE source_type='support' AND source_id=?) AND first_response_at=(SELECT created_at FROM ticket_messages WHERE legacy_message_id=?)",
+                )
+                .bind(input.threadId, messageId),
+            ]
+          : []),
         this.audit.statement({
           actor,
           action: "support.reply_sent",
