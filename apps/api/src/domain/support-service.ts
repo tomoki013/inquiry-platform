@@ -48,6 +48,12 @@ export class SupportService {
      * with nothing to notify.
      */
     private readonly notify?: NotificationHook,
+    /**
+     * Told about a conversation a person just opened, after it committed, so
+     * they can be sent a receipt. A callback rather than a mail provider: this
+     * class still has no way to send anything itself (see above).
+     */
+    private readonly opened?: (threadId: string) => void,
   ) {}
 
   /**
@@ -121,7 +127,9 @@ export class SupportService {
           providerMessageId: input.messageId,
           inReplyTo: input.inReplyTo,
           sender: input.from,
-          recipient: input.to,
+          // All of To and Cc, not just our own address: a reply-all is
+          // worked out from this message later.
+          recipient: input.recipients.length ? input.recipients.join(", ") : input.to,
           bodyText: input.bodyText,
           at,
         }),
@@ -154,6 +162,7 @@ export class SupportService {
       // second mail saying "there is mail" would be noise.
       if (!existingThreadId) {
         this.notify?.({ ticketId: threadId, category: "inquiry", channels: { email: false } });
+        if (!input.automated) this.opened?.(threadId);
       }
       return ok({ threadId, messageId, duplicate: false, newThread: !existingThreadId });
     } catch (error) {
@@ -217,6 +226,9 @@ export class SupportService {
       ]);
 
       this.notify?.({ ticketId: threadId, category: "inquiry" });
+      // Only a person's own form. A thread an operator opens on someone's
+      // behalf is not something to confirm receipt of.
+      if (input.source === "web_form" && input.requesterEmail) this.opened?.(threadId);
       return await this.detail(threadId);
     } catch (error) {
       if (input.providerMessageId) {

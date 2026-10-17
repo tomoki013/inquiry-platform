@@ -448,6 +448,7 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
       consoleShortName: branding.consoleShortName,
       replyFromAddress: this.env.SUPPORT_EMAIL,
       defaultSignature: branding.defaultSignature,
+      replyClosing: branding.replyClosing || undefined,
       defaultProjectId: branding.defaultProjectId,
     };
   }
@@ -495,6 +496,9 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
       .purge()
       .catch(() => console.log(JSON.stringify({ event: "delivery.purge_failed" })));
     await this.services.reports.retryReceipts();
+    await this.services.reply
+      .retryInquiryReceipts()
+      .catch(() => console.log(JSON.stringify({ event: "inquiry_receipt.retry_failed" })));
     await this.services.reply.refreshMessageIds();
     await expireReportEvidence(this.env);
     await this.services.notifications.purgeRevoked();

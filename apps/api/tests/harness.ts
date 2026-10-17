@@ -158,6 +158,8 @@ export class FakeMailProvider implements MailProvider {
   readonly name = "fake";
   sent: SupportReplyMail[] = [];
   failNext = false;
+  /** False: like a provider that never tells us the Message-ID it used. */
+  reportsMessageId = true;
 
   constructor(readonly configured = true) {}
 
@@ -171,7 +173,11 @@ export class FakeMailProvider implements MailProvider {
       return Promise.resolve({ ok: false, code: "REJECTED", detail: "test failure" });
     }
     this.sent.push(mail);
-    return Promise.resolve({ ok: true, providerMessageId: `<sent-${this.sent.length}@test>` });
+    return Promise.resolve(
+      this.reportsMessageId
+        ? { ok: true, providerMessageId: `<sent-${this.sent.length}@test>` }
+        : { ok: true },
+    );
   }
 
   sendTransactional(mail: SupportReplyMail) {
@@ -244,6 +250,11 @@ export async function harness(
     /** Unset means "no mail channel", like an environment without the Secret. */
     notifyEmail?: string;
     delivery?: (appId: string | undefined) => ProjectMailDelivery;
+    /** Send inquiry receipts, as production does. Off by default so suites
+     * that count mails count only what they are about. */
+    receipts?: boolean;
+    /** `Branding.replyClosing` for this deployment. */
+    replyClosing?: string;
   } = {},
 ): Promise<Harness> {
   if (!options.database) await migrate();
@@ -284,9 +295,17 @@ export async function harness(
   const notify = (ref: Parameters<NotificationService["ticketCreated"]>[0]) => {
     pending.push(notifications.ticketCreated(ref));
   };
-  const supportService = new SupportService(db, supportRepo, appRepo, auditRepo, notify);
+  let replyService: ReplyService;
+  const supportService = new SupportService(
+    db,
+    supportRepo,
+    appRepo,
+    auditRepo,
+    notify,
+    options.receipts ? (id) => pending.push(replyService.sendInquiryReceipt(id)) : undefined,
+  );
 
-  const replyService = new ReplyService(
+  replyService = new ReplyService(
     db,
     supportRepo,
     supportService,
@@ -300,6 +319,7 @@ export async function harness(
       defaultSupportUrl: "https://example.com/support",
       defaultSignature: TEST_BRANDING.defaultSignature,
       legacySignatures: TEST_BRANDING.legacySignatures,
+      replyClosing: options.replyClosing,
       resolve: (appId) => templateRepo.mailSettings(appId),
       delivery: options.delivery,
     },

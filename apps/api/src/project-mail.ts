@@ -17,6 +17,16 @@ const configSchema = z.object({
     .string()
     .regex(/^[a-z0-9]+(?:_[a-z0-9]+)*$/)
     .optional(),
+  /** False: this project's inquiries get no automatic receipt. */
+  inquiryReceipt: z.boolean().default(true),
+  /** This project's closing line instead of the deployment's
+   * (`Branding.replyClosing`); an empty string means none. */
+  replyClosing: z.string().trim().max(200).optional(),
+  /** The same for the receipt a new inquiry gets. */
+  inquiryReceiptTemplate: z
+    .string()
+    .regex(/^[a-z0-9]+(?:_[a-z0-9]+)*$/)
+    .optional(),
 });
 
 export interface ProjectMailDelivery {
@@ -24,6 +34,9 @@ export interface ProjectMailDelivery {
   defaultSignature?: string;
   supportUrl?: string;
   reportReceiptTemplate?: string;
+  inquiryReceiptTemplate?: string;
+  inquiryReceipt?: boolean;
+  replyClosing?: string;
 }
 
 /** Deployment-owned routing by immutable project id. Credentials live only in
@@ -56,6 +69,10 @@ export function projectMailResolver(
       defaultSignature: parsed.success ? parsed.data.defaultSignature : "",
       supportUrl: parsed.success ? parsed.data.supportUrl : undefined,
       reportReceiptTemplate: parsed.success ? parsed.data.reportReceiptTemplate : undefined,
+      inquiryReceiptTemplate: parsed.success ? parsed.data.inquiryReceiptTemplate : undefined,
+      // An unreadable route sends no receipt rather than one in the wrong voice.
+      inquiryReceipt: parsed.success ? parsed.data.inquiryReceipt : false,
+      replyClosing: parsed.success ? parsed.data.replyClosing : undefined,
     };
     cache.set(appId, delivery);
     return delivery;

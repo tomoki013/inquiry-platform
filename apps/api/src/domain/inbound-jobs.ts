@@ -93,6 +93,8 @@ export class InboundJobs {
         inReplyTo: parsed.inReplyTo,
         references: parsed.references,
         requesterName: parsed.fromName,
+        automated: parsed.automated,
+        recipients: parsed.recipients,
         ...(payload.projectSlug ? { appSlug: payload.projectSlug } : {}),
       },
       { type: "email", id: "mail-ingress" },

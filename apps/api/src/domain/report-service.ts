@@ -307,7 +307,7 @@ export class ReportService {
           idempotencyKey: `report-receipt-${reportId}`,
         },
         { type: "system", id: "report-receipt" },
-        { preserveDraft: true, initialMessage: true },
+        { preserveDraft: true, initialMessage: true, automatic: true },
       );
     } catch (error) {
       // The report is durable even if receipt lookup or delivery fails.

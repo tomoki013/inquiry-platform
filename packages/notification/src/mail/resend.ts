@@ -47,7 +47,12 @@ export class ResendMailProvider implements MailProvider {
    */
   sendSupportReply(mail: SupportReplyMail): Promise<MailResult> {
     const headers: Record<string, string> = {};
+    if (mail.messageId) headers["Message-ID"] = mail.messageId;
     if (mail.inReplyTo) headers["In-Reply-To"] = mail.inReplyTo;
+    if (mail.automatic) {
+      headers["Auto-Submitted"] = "auto-replied";
+      headers["X-Auto-Response-Suppress"] = "All";
+    }
     if (mail.references && mail.references.length > 0) {
       headers.References = mail.references.join(" ");
     }
@@ -67,6 +72,7 @@ export class ResendMailProvider implements MailProvider {
         body: JSON.stringify({
           from: mail.from,
           to: [mail.to],
+          ...("cc" in mail && Array.isArray(mail.cc) && mail.cc.length ? { cc: mail.cc } : {}),
           reply_to: mail.replyTo,
           subject: mail.subject,
           text: mail.text,

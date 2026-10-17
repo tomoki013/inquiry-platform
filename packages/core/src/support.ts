@@ -94,6 +94,10 @@ export const ingestInboundEmailInputSchema = z.object({
   requesterName: optionalText(120),
   appSlug: z.string().min(1).max(64).optional(),
   receivedAt: z.iso.datetime().optional(),
+  /** Every To and Cc address of the mail; a reply-all answers them too. */
+  recipients: z.array(z.string().max(320)).max(50).default([]),
+  /** Machine-sent (auto-reply, bounce, list). Stored, never auto-answered. */
+  automated: z.boolean().default(false),
 });
 export type IngestInboundEmailInput = z.infer<typeof ingestInboundEmailInputSchema>;
 

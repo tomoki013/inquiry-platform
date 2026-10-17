@@ -1,17 +1,17 @@
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import type { IntakeProps } from "@inquiry-platform/core";
 import { createInquiryClient, type IntakeBinding } from "@inquiry-platform/sdk";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Intake } from "../src/intake";
 import { harness, seedApp, testEnv } from "./harness";
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
 
 /** An `Intake` as a project's binding sees it: `props` fixed by the binding. */
-function bind(props: IntakeProps | Record<string, unknown> | undefined) {
+function bind(props: IntakeProps | Record<string, unknown> | undefined, env: object = testEnv) {
   const ctx = createExecutionContext();
   Object.defineProperty(ctx, "props", { value: props });
-  const intake = new Intake(ctx, testEnv as never);
+  const intake = new Intake(ctx, env as never);
   // What a Service Binding does on the way in: RPC methods as they are, and
   // `fetch(url, init)` delivered to the entrypoint as one `Request`.
   const binding = {
@@ -86,6 +86,29 @@ describe("Intake: contacts", () => {
       contact({ projectSlug: undefined, idempotencyKey: "req-3" }),
     );
     expect(refused).toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
+  });
+});
+
+describe("Intake: the receipt for a contact", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("mails the person who wrote, once, through the deployment's provider", async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ id: `resend-${sent.length}` }));
+    });
+    const { client, ctx } = bind(projectApi, { ...testEnv, MAIL_API_KEY: "test-key" });
+    const result = await client.createContact(contact({ idempotencyKey: "receipt-1" }));
+    await client.createContact(contact({ idempotencyKey: "receipt-1" }));
+    await waitOnExecutionContext(ctx);
+    expect(result.ok).toBe(true);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.to).toEqual(["someone@example.com"]);
+    expect(String(sent[0]?.text)).toContain(
+      `受付番号: ${result.ok ? result.value.ticketNumber : ""}`,
+    );
+    expect(sent[0]?.headers).toMatchObject({ "Auto-Submitted": "auto-replied" });
   });
 });
 
