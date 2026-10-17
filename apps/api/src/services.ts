@@ -139,6 +139,7 @@ function buildLocalServices(
     defaultSignature: branding.defaultSignature,
     legacySignatures: branding.legacySignatures,
     replyClosing: branding.replyClosing,
+    ownAddresses: [env.NOREPLY_EMAIL, env.REPORT_EMAIL].filter((a): a is string => Boolean(a)),
     resolve: async (appId) => templates.mailSettings(appId),
     delivery,
   });

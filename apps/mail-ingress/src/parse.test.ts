@@ -160,3 +160,22 @@ describe("isAutomated", () => {
     ).toBe(true);
   });
 });
+
+describe("recipients", () => {
+  it("lists every To and Cc address once, lower-cased", async () => {
+    const raw = [
+      "From: Taro <taro@corp.example>",
+      "To: Support <Support@Example.com>, boss@corp.example",
+      "Cc: hanako@corp.example, BOSS@corp.example",
+      "Subject: x",
+      "",
+      "y",
+    ].join("\r\n");
+    const parsed = await parseInboundEmail(new TextEncoder().encode(raw).buffer as ArrayBuffer);
+    expect(parsed.recipients).toEqual([
+      "support@example.com",
+      "boss@corp.example",
+      "hanako@corp.example",
+    ]);
+  });
+});

@@ -72,6 +72,7 @@ export class ResendMailProvider implements MailProvider {
         body: JSON.stringify({
           from: mail.from,
           to: [mail.to],
+          ...("cc" in mail && Array.isArray(mail.cc) && mail.cc.length ? { cc: mail.cc } : {}),
           reply_to: mail.replyTo,
           subject: mail.subject,
           text: mail.text,

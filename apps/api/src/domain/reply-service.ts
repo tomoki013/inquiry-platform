@@ -59,6 +59,8 @@ export interface ReplyAddresses {
   legacySignatures: readonly string[];
   /** See `Branding.replyClosing`. */
   replyClosing?: string;
+  /** This deployment's other addresses (no-reply, report), never copied on a reply. */
+  ownAddresses?: readonly string[];
   /** Project-scoped overrides from the platform's mail settings repository. */
   resolve?: (appId: string | undefined) => Promise<ProjectMailSettings>;
   delivery?: (appId: string | undefined) => ProjectMailDelivery;
@@ -343,6 +345,38 @@ export class ReplyService {
     } catch (error) {
       internalFailure("reply.sendInquiryReceipt", error);
     }
+  }
+
+  /**
+   * Everybody on the person's latest mail besides them and us: its sender (a
+   * colleague may have answered for them) and every To/Cc address. Our own
+   * addresses — the deployment's and any at the sending domain — never are.
+   */
+  private async replyAllCc(threadId: string, requester: string, from: string): Promise<string[]> {
+    const latest = await this.db
+      .prepare(
+        "SELECT sender, recipient FROM support_messages WHERE thread_id=? AND direction='inbound' ORDER BY created_at DESC, rowid DESC LIMIT 1",
+      )
+      .bind(threadId)
+      .first<{ sender: string | null; recipient: string | null }>();
+    if (!latest) return [];
+    const own = new Set(
+      [from, this.addresses.supportEmail, ...(this.addresses.ownAddresses ?? [])].map((a) =>
+        a.trim().toLowerCase(),
+      ),
+    );
+    const ownDomains = new Set([...own].map((a) => a.split("@")[1]).filter(Boolean));
+    const person = requester.trim().toLowerCase();
+    const found = [latest.sender ?? "", ...(latest.recipient ?? "").split(",")]
+      .map((a) => a.trim().toLowerCase())
+      .filter(
+        (a) =>
+          /^[^\s@<>,]+@[^\s@<>,]+$/.test(a) &&
+          a !== person &&
+          !own.has(a) &&
+          !ownDomains.has(a.split("@")[1] ?? ""),
+      );
+    return [...new Set(found)].slice(0, 10);
   }
 
   async retryInquiryReceipts(): Promise<void> {
@@ -648,6 +682,13 @@ export class ReplyService {
         .first<{ thread_id: string; provider_key: string }>();
       if (!attempt || attempt.thread_id !== input.threadId)
         return fail("CONFLICT", "送信キーの競合を検出しました。");
+      // Reply-all: whoever else the person's latest mail was from or to.
+      // Worked out here from stored mail, never from the request, so a
+      // tampered request still cannot add an address. Automatic mail goes to
+      // the person alone.
+      const cc = options.automatic
+        ? []
+        : await this.replyAllCc(input.threadId, thread.requester_email, addresses.supportEmail);
       // Ours, so it is known whether or not the provider reports its own.
       const domain = addresses.supportEmail.split("@")[1]?.trim() || "localhost";
       const ownMessageId = `<${newId()}@${domain}>`;
@@ -662,6 +703,7 @@ export class ReplyService {
         references,
         idempotencyKey: attempt.provider_key,
         messageId: ownMessageId,
+        ...(cc.length ? { cc } : {}),
         ...(options.automatic ? { automatic: true } : {}),
       });
 
@@ -704,7 +746,7 @@ export class ReplyService {
           transportId: sent.transportId,
           inReplyTo,
           sender: addresses.supportEmail,
-          recipient: thread.requester_email,
+          recipient: [thread.requester_email, ...cc].join(", "),
           // The finished text, stored as sent. Never re-rendered from a
           // template later: editing a template must not change what somebody
           // was actually told.

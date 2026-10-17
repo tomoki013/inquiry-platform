@@ -43,6 +43,8 @@ export interface SupportReplyMail extends BaseMail {
   inReplyTo?: string;
   /** Oldest first, as the header is written. */
   references?: string[];
+  /** Everybody else on the conversation; a reply goes to all of them. */
+  cc?: string[];
   /** The `Message-ID` to send under, chosen by the caller so it is known
    * before the provider answers: the next reply's `In-Reply-To` and the
    * customer's answer are matched against it. */

@@ -130,3 +130,69 @@ describe("turning the inquiry receipt off for a project", () => {
     expect(shared.sent).toHaveLength(0);
   });
 });
+
+describe("reply-all", () => {
+  async function mailThread(h: Awaited<ReturnType<typeof harness>>) {
+    return expectOk<{ threadId: string }>(
+      (await h.support.ingestInboundEmail(
+        {
+          from: "taro@corp.example",
+          to: "support@example.com",
+          recipients: ["support@example.com", "boss@corp.example", "notification@example.com"],
+          subject: "ログインできません",
+          bodyText: "入れません",
+          messageId: "<q1@corp.example>",
+          appSlug: "orbit",
+        },
+        mailActor,
+      )) as never,
+    ).threadId;
+  }
+
+  it("copies everyone else on the person's mail, never us", async () => {
+    const h = await harness();
+    await seedApp(h, "orbit");
+    const threadId = await mailThread(h);
+    expectOk((await reply(h, threadId, "確認します")) as never);
+    expect(h.mail.sent[0]?.to).toBe("taro@corp.example");
+    expect(h.mail.sent[0]?.cc).toEqual(["boss@corp.example"]);
+  });
+
+  it("follows the conversation: a colleague who answers is copied next time", async () => {
+    const h = await harness();
+    await seedApp(h, "orbit");
+    const threadId = await mailThread(h);
+    expectOk((await reply(h, threadId, "確認します")) as never);
+    expectOk(
+      (await h.support.ingestInboundEmail(
+        {
+          from: "hanako@corp.example",
+          recipients: ["support@example.com", "taro@corp.example", "boss@corp.example"],
+          subject: "Re: ログインできません",
+          bodyText: "代わりに返信します",
+          messageId: "<q2@corp.example>",
+          // What the fake provider reported as the sent Message-ID.
+          inReplyTo: "<sent-1@test>",
+          appSlug: "orbit",
+        },
+        mailActor,
+      )) as never,
+    );
+    expectOk((await reply(h, threadId, "承知しました")) as never);
+    expect(h.mail.sent[1]?.to).toBe("taro@corp.example");
+    expect(h.mail.sent[1]?.cc).toEqual(["hanako@corp.example", "boss@corp.example"]);
+  });
+
+  it("sends a receipt to the person alone, and a form reply has nobody to copy", async () => {
+    const h = await harness({ receipts: true });
+    await seedApp(h, "orbit");
+    await mailThread(h);
+    await h.settled();
+    expect(h.mail.sent[0]?.automatic).toBe(true);
+    expect(h.mail.sent[0]?.cc).toBeUndefined();
+    const form = await formThread(h);
+    await h.settled();
+    expectOk((await reply(h, form, "回答です")) as never);
+    expect(h.mail.sent.at(-1)?.cc).toBeUndefined();
+  });
+});

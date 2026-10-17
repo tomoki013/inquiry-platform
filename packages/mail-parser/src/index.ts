@@ -13,6 +13,9 @@ export interface ParsedInboundEmail {
   from: string;
   fromName?: string;
   to?: string;
+  /** Every address in To and Cc, lower-cased, once each — who a reply-all
+   * answers besides the sender. */
+  recipients: string[];
   subject: string;
   bodyText: string;
   messageId?: string;
@@ -47,6 +50,7 @@ export async function parseInboundEmail(
     // would write in a greeting. Never derived from the address.
     fromName: cleanName(parsed.from?.name),
     to: parsed.to?.[0]?.address,
+    recipients: addresses([...(parsed.to ?? []), ...(parsed.cc ?? [])]),
     subject: (parsed.subject ?? "").slice(0, 500),
     bodyText: normalise(text),
     messageId: parsed.messageId ?? undefined,
@@ -62,6 +66,17 @@ export async function parseInboundEmail(
           : new TextEncoder().encode(String(attachment.content ?? "")),
     })),
   };
+}
+
+/** Mailboxes and the members of groups, as bare lower-case addresses. */
+function addresses(
+  list: Array<{ address?: string; group?: Array<{ address: string }> }>,
+): string[] {
+  const flat = list.flatMap((entry) => (entry.group ? entry.group : [entry]));
+  const found = flat
+    .map((entry) => entry.address?.trim().toLowerCase() ?? "")
+    .filter((address) => /^[^\s@<>,]+@[^\s@<>,]+$/.test(address));
+  return [...new Set(found)].slice(0, 50);
 }
 
 /**

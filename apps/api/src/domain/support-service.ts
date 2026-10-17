@@ -127,7 +127,9 @@ export class SupportService {
           providerMessageId: input.messageId,
           inReplyTo: input.inReplyTo,
           sender: input.from,
-          recipient: input.to,
+          // All of To and Cc, not just our own address: a reply-all is
+          // worked out from this message later.
+          recipient: input.recipients.length ? input.recipients.join(", ") : input.to,
           bodyText: input.bodyText,
           at,
         }),
