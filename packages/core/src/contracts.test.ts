@@ -54,6 +54,14 @@ describe("template variables", () => {
     expect(unresolvedVariables(rendered)).toEqual(["userName"]);
   });
 
+  it("uses a template's own words for an unknown value, and the value when there is one", () => {
+    const body = "{{userName|お客様}} 様 / {{ userName | どなたか }}";
+    const anonymous = renderTemplate(body, { userName: undefined });
+    expect(anonymous).toBe("お客様 様 / どなたか");
+    expect(unresolvedVariables(anonymous)).toEqual([]);
+    expect(renderTemplate(body, { userName: "山田" })).toBe("山田 様 / 山田");
+  });
+
   it("reports each placeholder once, in order", () => {
     expect(unresolvedVariables("{{a}} {{b}} {{a}}")).toEqual(["a", "b"]);
   });

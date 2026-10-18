@@ -92,7 +92,13 @@ Message-ID による上書きは 409。これで受信返信のスレッド照�
 
 ### 問い合わせの受付メール
 
-ルート設定で `inquiryReceipt: false` にした Project には送らない。
+送るかどうかと文面は Project ごとの設定（seed の `mailSettings[]`、D1 の `app_mail_settings`）で決める。
+送信そのもの（いつ・誰に・1回だけ・再送）は基盤が行い、Project 側に送信処理を実装しない。
+
+- `inquiryReceipt: false` — その Project には送らない。`appSlug` を省いた行はデプロイ全体の既定で、
+  Project の行が優先する。未設定ならメールルート（`PROJECT_MAIL_PROVIDERS`）の同名項目、それも無ければ送る。
+  メールルートの `inquiryReceipt` / `inquiryReceiptTemplate` は v0.10.0 の置き場所で、互換のために残している。
+- `inquiryReceiptTemplate` — 文面に使う、その Project の返信テンプレートの key。
 
 人が新しく問い合わせた時（Web フォーム、または既存スレッドに繋がらない新しいメール）に、
 受付番号つきの自動受付メールを1回だけ送る。`Auto-Submitted: auto-replied` を付け、
@@ -103,9 +109,13 @@ Message-ID による上書きは 409。これで受信返信のスレッド照�
 mailer-daemon / no-reply 等の差出人）。Web フォーム分は送信失敗を cron が24時間以内に再送する。
 
 文面は次の順で最初に使えるテンプレート、無ければ基盤の汎用文面。
-`inquiryReceiptTemplate`（このルート設定の key）→ `inquiry_receipt_<project slug の - を _ に>`
+`inquiryReceiptTemplate`（Project 設定、無ければルート設定の key）→ `inquiry_receipt_<project slug の - を _ に>`
 → 共通の `inquiry_receipt`。有効で、その Project か共通のもので、未置換項目が残らないこと。
-`{{ticketNumber}}` は受付番号。返信の照合に使うので `受付番号: {{ticketNumber}}` の行を残すとよい。
+受付メールで使える置換: `{{appName}}`・`{{userName}}`・`{{supportUrl}}`・`{{ticketNumber}}`（受付番号）・
+`{{receiptId}}`（会話の不透明ID）。`{{userName|お客様}}` のように `|` の後に書いた語は、値が無いときに使われる。
+返信の照合には `受付番号: {{ticketNumber}}` か `受付ID: {{receiptId}}` の行を残す。
+テンプレートに件名があれば、Web フォームの受付メールはその件名で送る（無ければ `[受付番号] お問い合わせを受け付けました: 件名`）。
+メールで届いた問い合わせへの受付は、元のメールへの返信（`Re:`）のまま。
 
 ## 2. コマンド
 

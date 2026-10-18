@@ -291,7 +291,10 @@ export class ReplyService {
     try {
       const thread = await this.support.findThread(threadId);
       if (!thread?.requester_email || thread.status !== "open") return;
-      if (this.addresses.delivery?.(thread.app_id ?? undefined)?.inquiryReceipt === false) return;
+      const settings = (await this.addresses.resolve?.(thread.app_id ?? undefined)) ?? {};
+      const route = this.addresses.delivery?.(thread.app_id ?? undefined);
+      // The project's own setting first; the route's is the older place for it.
+      if ((settings.inquiryReceipt ?? route?.inquiryReceipt) === false) return;
       if (thread.source !== "web_form" && thread.source !== "email") return;
       const addresses = await this.addressesFor(thread.app_id ?? undefined);
       const own = [addresses.supportEmail, this.addresses.supportEmail].map((a) =>
@@ -314,8 +317,13 @@ export class ReplyService {
         .first<{ ticket_number: string }>();
       const number = ticket?.ticket_number;
       const numberLine = number ? `受付番号: ${number}` : "";
+      const projectReceipt = await this.inquiryReceiptTemplate(
+        thread,
+        number,
+        settings.inquiryReceiptTemplate ?? route?.inquiryReceiptTemplate,
+      );
       const body =
-        (await this.inquiryReceiptTemplate(thread, numberLine)) ??
+        projectReceipt?.body ??
         [
           "お問い合わせを受け付けました。ご連絡いただきありがとうございます。",
           numberLine,
@@ -333,10 +341,14 @@ export class ReplyService {
           automatic: true,
           countsAsResponse: false,
           // A form has no mail to answer; the receipt's subject becomes the
-          // conversation's, and the number in it keeps replies threaded.
+          // conversation's, and the number in it keeps replies threaded. A
+          // project's template may name its own subject (replies then thread
+          // by Message-ID and a quoted `受付ID:` line).
           ...(thread.source === "web_form"
             ? {
-                subject: `${number ? `[${number}] ` : ""}お問い合わせを受け付けました: ${thread.subject}`,
+                subject:
+                  projectReceipt?.subject ??
+                  `${number ? `[${number}] ` : ""}お問い合わせを受け付けました: ${thread.subject}`,
               }
             : {}),
         },
@@ -394,26 +406,42 @@ export class ReplyService {
    * project or to none, and render completely; otherwise the next one is tried
    * and finally the generic wording is used.
    */
+  /**
+   * The project's own receipt wording: the first usable template of `key`
+   * (the project's setting), `inquiry_receipt_<slug>`, `inquiry_receipt`.
+   * Besides the usual variables it fills `{{ticketNumber}}` and
+   * `{{receiptId}}` (the conversation's opaque ID, which a reply quoting a
+   * `受付ID:` line is filed under). Its subject, when it has one, is used for
+   * a form's receipt. Null when no template renders completely.
+   */
   private async inquiryReceiptTemplate(
-    thread: { app_id: string | null; requester_name: string | null },
-    numberLine: string,
-  ): Promise<string | null> {
+    thread: { id: string; app_id: string | null; requester_name: string | null },
+    ticketNumber: string | undefined,
+    key: string | undefined,
+  ): Promise<{ body: string; subject?: string } | null> {
     const appId = thread.app_id ?? undefined;
     const app = appId ? await this.apps.findById(appId) : null;
     const keys = [
-      appId ? this.addresses.delivery?.(appId)?.inquiryReceiptTemplate : undefined,
+      key,
       app ? `inquiry_receipt_${app.slug.replace(/-/g, "_")}` : undefined,
       "inquiry_receipt",
-    ].filter((key): key is string => Boolean(key));
-    for (const key of keys) {
-      const template = await this.templates.findByKey(key);
+    ].filter((k): k is string => Boolean(k));
+    const values = {
+      appName: app?.name ?? undefined,
+      userName: thread.requester_name ?? undefined,
+      supportUrl: app?.support_url ?? (await this.addressesFor(appId)).defaultSupportUrl,
+    };
+    const fill = (text: string) =>
+      renderTemplate(text, values)
+        .replace(/\{\{\s*ticketNumber\s*\}\}/g, ticketNumber ?? "{{ticketNumber}}")
+        .replace(/\{\{\s*receiptId\s*\}\}/g, thread.id);
+    for (const candidate of new Set(keys)) {
+      const template = await this.templates.findByKey(candidate);
       if (!template?.isActive || (template.appId && template.appId !== appId)) continue;
-      const rendered = renderTemplate(template.body, {
-        appName: app?.name ?? undefined,
-        userName: thread.requester_name ?? undefined,
-        supportUrl: app?.support_url ?? (await this.addressesFor(appId)).defaultSupportUrl,
-      }).replace(/\{\{\s*ticketNumber\s*\}\}/g, numberLine.replace("受付番号: ", ""));
-      if (rendered.trim() && unresolvedVariables(rendered).length === 0) return rendered;
+      const body = fill(template.body);
+      if (!body.trim() || unresolvedVariables(body).length > 0) continue;
+      const subject = template.subject ? fill(template.subject).trim() : "";
+      return subject && unresolvedVariables(subject).length === 0 ? { body, subject } : { body };
     }
     return null;
   }
