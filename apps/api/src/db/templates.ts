@@ -34,6 +34,10 @@ export interface ProjectMailSettings {
   ticketUrlTemplate?: string;
   /** False when the project's new tickets are not announced by mail. */
   notifyByEmail?: boolean;
+  /** Whether a new inquiry gets an automatic receipt. Unset: the route decides. */
+  inquiryReceipt?: boolean;
+  /** Key of the template the receipt is written with, tried first. */
+  inquiryReceiptTemplate?: string;
 }
 
 function toTemplate(row: TemplateRow): ReplyTemplate {
@@ -196,7 +200,7 @@ export class TemplateRepository {
     const rows = await this.db
       .prepare(
         `SELECT app_id, support_email, from_name, noreply_email, notification_email,
-                ticket_url_template, notify_by_email
+                ticket_url_template, notify_by_email, inquiry_receipt, inquiry_receipt_template
            FROM app_mail_settings
           WHERE app_id IS NULL OR app_id = ?
           ORDER BY app_id IS NULL`,
@@ -210,6 +214,8 @@ export class TemplateRepository {
         notification_email: string | null;
         ticket_url_template: string | null;
         notify_by_email: number | null;
+        inquiry_receipt: number | null;
+        inquiry_receipt_template: string | null;
       }>();
 
     const resolved: ProjectMailSettings = {};
@@ -223,6 +229,10 @@ export class TemplateRepository {
         resolved.ticketUrlTemplate = row.ticket_url_template;
       if (resolved.notifyByEmail === undefined && row.notify_by_email !== null)
         resolved.notifyByEmail = row.notify_by_email === 1;
+      if (resolved.inquiryReceipt === undefined && row.inquiry_receipt !== null)
+        resolved.inquiryReceipt = row.inquiry_receipt === 1;
+      if (!resolved.inquiryReceiptTemplate && row.inquiry_receipt_template)
+        resolved.inquiryReceiptTemplate = row.inquiry_receipt_template;
     }
     return resolved;
   }

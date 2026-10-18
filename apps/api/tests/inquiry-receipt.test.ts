@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { admin, appActor, expectOk, harness, seedApp } from "./harness";
+import { admin, appActor, expectOk, FakeMailProvider, harness, seedApp } from "./harness";
 
 /*
  * Somebody who writes in is told, once, that their message arrived — by a mail
@@ -205,5 +205,86 @@ describe("the receipt for a new inquiry", () => {
     expect(broken.success).toBe(true);
     await form(h);
     expect(h.mail.sent.at(-1)?.text).toMatch(/^共通の受付です。/);
+  });
+});
+
+describe("a project's receipt settings", () => {
+  async function settings(
+    h: Awaited<ReturnType<typeof setup>>,
+    slug: string | null,
+    values: { receipt?: boolean; template?: string },
+  ) {
+    await h.db
+      .prepare(
+        `INSERT INTO app_mail_settings (app_id, signature_text, updated_at, inquiry_receipt, inquiry_receipt_template)
+         VALUES (${slug ? "(SELECT id FROM apps WHERE slug=?)" : "NULL"}, '', '2026-10-18T00:00:00.000Z', ?, ?)`,
+      )
+      .bind(
+        ...(slug ? [slug] : []),
+        values.receipt === undefined ? null : values.receipt ? 1 : 0,
+        values.template ?? null,
+      )
+      .run();
+  }
+
+  it("turns the receipt off for one project, and back on over a deployment-wide off", async () => {
+    const h = await setup();
+    await settings(h, "orbit", { receipt: false });
+    await form(h);
+    expect(h.mail.sent).toHaveLength(0);
+
+    const other = await setup();
+    await settings(other, null, { receipt: false });
+    await settings(other, "orbit", { receipt: true });
+    await form(other);
+    expect(other.mail.sent).toHaveLength(1);
+  });
+
+  it("decides before a mail route's older switch does", async () => {
+    const mail = new FakeMailProvider();
+    const h = await harness({
+      receipts: true,
+      mail,
+      delivery: () => ({ mail, inquiryReceipt: false }),
+    });
+    await seedApp(h, "orbit");
+    await form(h as never);
+    expect(mail.sent).toHaveLength(0);
+
+    await settings(h as never, "orbit", { receipt: true });
+    await form(h as never);
+    expect(mail.sent).toHaveLength(1);
+  });
+
+  it("writes it in the project's own words: its template, subject, name fallback and receipt ID", async () => {
+    const h = await setup();
+    const appId = (
+      await h.db.prepare("SELECT id FROM apps WHERE slug='orbit'").first<{ id: string }>()
+    )?.id;
+    expectOk(
+      (await h.reply.createTemplate(
+        {
+          key: "orbit_auto_ack",
+          name: "受付",
+          category: "acknowledgement",
+          appId,
+          subject: "【{{appName}}】お問い合わせを受け付けました",
+          body: "{{userName|お客様}} 様\n\n受付ID: {{receiptId}}",
+          includeSignature: true,
+          isActive: true,
+          sortOrder: 0,
+        },
+        admin,
+      )) as never,
+    );
+    await settings(h, "orbit", { template: "orbit_auto_ack" });
+
+    const anonymous = await form(h);
+    const mail = h.mail.sent.at(-1);
+    expect(mail?.subject).toBe("【orbit】お問い合わせを受け付けました");
+    expect(mail?.text).toMatch(new RegExp(`^お客様 様\\n\\n受付ID: ${anonymous}`));
+
+    await form(h, { requesterName: "山田" });
+    expect(h.mail.sent.at(-1)?.text).toMatch(/^山田 様/);
   });
 });

@@ -64,21 +64,31 @@ export function unresolvedVariables(body: string): string[] {
   return found;
 }
 
+/** `{{userName|お客様}}`: the value, or the text after `|` when there is none. */
+const FALLBACK_PATTERN = /\{\{\s*([a-zA-Z][a-zA-Z0-9_]*)\s*\|([^{}\n]*)\}\}/g;
+
 /**
  * Fills what it can and leaves the rest standing.
  *
  * Leaving `{{userName}}` visible is deliberate: `sendSupportReply` refuses a
  * body that still contains one, so an unknown name stops the mail instead of
- * shipping a literal `{{userName}}` to a customer.
+ * shipping a literal `{{userName}}` to a customer. A template that has words
+ * for the unknown case says so itself: `{{userName|お客様}}` never stands.
  */
 export function renderTemplate(
   body: string,
   values: Partial<Record<ReplyTemplateVariable, string | undefined>>,
 ): string {
-  return body.replace(VARIABLE_PATTERN, (whole, name: string) => {
+  const filled = (name: string): string | undefined => {
     const value = values[name as ReplyTemplateVariable];
-    return typeof value === "string" && value.length > 0 ? value : whole;
-  });
+    return typeof value === "string" && value.length > 0 ? value : undefined;
+  };
+  return body
+    .replace(
+      FALLBACK_PATTERN,
+      (_whole, name: string, fallback: string) => filled(name) ?? fallback.trim(),
+    )
+    .replace(VARIABLE_PATTERN, (whole, name: string) => filled(name) ?? whole);
 }
 
 /**

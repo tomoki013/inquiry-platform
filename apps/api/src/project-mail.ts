@@ -17,12 +17,15 @@ const configSchema = z.object({
     .string()
     .regex(/^[a-z0-9]+(?:_[a-z0-9]+)*$/)
     .optional(),
-  /** False: this project's inquiries get no automatic receipt. */
+  /** False: this project's inquiries get no automatic receipt. Superseded by
+   * the project's mail settings (`app_mail_settings.inquiry_receipt`), which
+   * win when set; kept for deployments configured with v0.10.0. */
   inquiryReceipt: z.boolean().default(true),
   /** This project's closing line instead of the deployment's
    * (`Branding.replyClosing`); an empty string means none. */
   replyClosing: z.string().trim().max(200).optional(),
-  /** The same for the receipt a new inquiry gets. */
+  /** The same for the receipt a new inquiry gets. Superseded, like
+   * `inquiryReceipt`, by `app_mail_settings.inquiry_receipt_template`. */
   inquiryReceiptTemplate: z
     .string()
     .regex(/^[a-z0-9]+(?:_[a-z0-9]+)*$/)

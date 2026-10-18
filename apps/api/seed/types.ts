@@ -69,4 +69,11 @@ export interface MailSettingsSeed {
    * project whose messages already arrive in its own inbox. Omit to keep the
    * deployment's behaviour. */
   notifyByEmail?: boolean;
+  /** False: this project's new inquiries get no automatic receipt. Omit to
+   * keep the deployment's behaviour (the mail route's setting, else on). */
+  inquiryReceipt?: boolean;
+  /** Key of one of the project's reply templates to write the receipt with
+   * (the project's own wording). Omit for `inquiry_receipt_<slug>`, then
+   * the shared `inquiry_receipt`, then the platform's generic text. */
+  inquiryReceiptTemplate?: string;
 }
