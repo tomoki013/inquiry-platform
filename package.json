@@ -23,8 +23,8 @@
     "deployment": "node scripts/deploy.mjs"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.5",
-    "turbo": "^2.10.5",
+    "@biomejs/biome": "^2.5.15",
+    "turbo": "^2.11.9",
     "typescript": "^6.0.3"
   }
 }
