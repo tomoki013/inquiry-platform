@@ -8,6 +8,6 @@
     "./journal": "./src/journal.ts"
   },
   "dependencies": {
-    "postal-mime": "^2.7.6"
+    "postal-mime": "^4.0.11"
   }
 }
