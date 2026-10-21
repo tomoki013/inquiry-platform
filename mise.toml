@@ -1,6 +1,6 @@
 [tools]
 node = "24"
-pnpm = "11.11.0"
+pnpm = "11.28.6"
 
 [tasks.dev]
 description = "Start the API, admin and mail ingress Workers"
