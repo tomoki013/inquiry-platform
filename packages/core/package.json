@@ -13,10 +13,10 @@
   },
   "dependencies": {
     "@inquiry-platform/sdk": "workspace:*",
-    "zod": "^4.4.2"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "typescript": "^6.0.3",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   }
 }

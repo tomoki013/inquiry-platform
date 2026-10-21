@@ -17,18 +17,18 @@
   },
   "dependencies": {
     "@inquiry-platform/core": "workspace:*",
+    "@inquiry-platform/mail-parser": "workspace:*",
     "@inquiry-platform/notification": "workspace:*",
-    "hono": "^4.13.5",
-    "zod": "^4.4.2",
-    "@inquiry-platform/mail-parser": "workspace:*"
+    "hono": "^4.13.13",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.18.7",
-    "@types/node": "^24.10.1",
+    "@cloudflare/vitest-pool-workers": "^0.18.8",
+    "@inquiry-platform/sdk": "workspace:*",
+    "@types/node": "^24.19.2",
     "typescript": "^6.0.3",
-    "vite": "^7.3.6",
-    "vitest": "^4.1.11",
-    "wrangler": "^4.113.0",
-    "@inquiry-platform/sdk": "workspace:*"
+    "vite": "^7.3.7",
+    "vitest": "^4.1.12",
+    "wrangler": "^4.151.3"
   }
 }

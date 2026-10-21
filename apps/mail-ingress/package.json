@@ -16,9 +16,9 @@
     "@inquiry-platform/mail-parser": "workspace:*"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.18.7",
+    "@cloudflare/vitest-pool-workers": "^0.18.8",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.11",
-    "wrangler": "^4.113.0"
+    "vitest": "^4.1.12",
+    "wrangler": "^4.151.3"
   }
 }
