@@ -8,6 +8,7 @@ import { z } from "zod";
 const configSchema = z.object({
   apiKeyBinding: z.string().regex(/^MAIL_API_KEY_[A-Z0-9_]+$/),
   defaultSignature: z.string().max(2000).default(""),
+  supportEmail: z.email().optional(),
   supportUrl: z.url({ protocol: /^https$/ }).optional(),
   logo: z.object({ url: z.url({ protocol: /^https$/ }), alt: z.string().max(80) }).optional(),
   lookupMessageIds: z.boolean().default(false),
@@ -27,6 +28,8 @@ const configSchema = z.object({
   inquiryReceipt: z.boolean().default(true),
   /** Opt-in customer receipt containing only the original message body. */
   inquiryReceiptQuoteBody: z.boolean().default(false),
+  /** Do not send a separate conversation when a sent parent is awaiting its real ID. */
+  requireVerifiedReplyParent: z.boolean().default(false),
   /** Copy the receipt to the private notification recipient for email reply-all. */
   inquiryReceiptCopyToNotification: z.boolean().default(false),
   /** This project's closing line instead of the deployment's
@@ -43,11 +46,13 @@ const configSchema = z.object({
 export interface ProjectMailDelivery {
   mail: MailProvider;
   defaultSignature?: string;
+  supportEmail?: string;
   supportUrl?: string;
   reportReceiptTemplate?: string;
   inquiryReceiptTemplate?: string;
   inquiryReceipt?: boolean;
   inquiryReceiptQuoteBody?: boolean;
+  requireVerifiedReplyParent?: boolean;
   inquiryReceiptCopyToNotification?: boolean;
   replyClosing?: string;
 }
@@ -86,12 +91,14 @@ export function projectMailResolver(
           : new UnconfiguredMailProvider(),
       // Missing or invalid routes have no deployment branding fallback.
       defaultSignature: parsed.success ? parsed.data.defaultSignature : "",
+      supportEmail: parsed.success ? parsed.data.supportEmail : undefined,
       supportUrl: parsed.success ? parsed.data.supportUrl : undefined,
       reportReceiptTemplate: parsed.success ? parsed.data.reportReceiptTemplate : undefined,
       inquiryReceiptTemplate: parsed.success ? parsed.data.inquiryReceiptTemplate : undefined,
       // An unreadable route sends no receipt rather than one in the wrong voice.
       inquiryReceipt: parsed.success ? parsed.data.inquiryReceipt : false,
       inquiryReceiptQuoteBody: parsed.success && parsed.data.inquiryReceiptQuoteBody,
+      requireVerifiedReplyParent: parsed.success && parsed.data.requireVerifiedReplyParent,
       inquiryReceiptCopyToNotification:
         parsed.success && parsed.data.inquiryReceiptCopyToNotification,
       replyClosing: parsed.success ? parsed.data.replyClosing : undefined,

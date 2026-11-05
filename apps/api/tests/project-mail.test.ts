@@ -182,7 +182,7 @@ describe("scoped provider receipt ingestion", () => {
     const transportId = "d56f4e72-18ce-4c0f-8e24-0b1a9a7dd234";
     await h.db
       .prepare(
-        "UPDATE support_messages SET transport_id=?,provider_message_id=NULL WHERE thread_id=? AND direction='outbound'",
+        "UPDATE support_messages SET transport_id=?,provider_message_id=NULL,message_id_checked_at=NULL WHERE thread_id=? AND direction='outbound'",
       )
       .bind(transportId, thread.id)
       .run();
