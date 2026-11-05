@@ -333,6 +333,14 @@ export class ReplyService {
         ]
           .filter(Boolean)
           .join("\n\n");
+      const original = route?.inquiryReceiptQuoteBody
+        ? await this.db
+            .prepare(
+              "SELECT body_text FROM support_messages WHERE thread_id=? AND direction='inbound' ORDER BY created_at, rowid LIMIT 1",
+            )
+            .bind(threadId)
+            .first<{ body_text: string }>()
+        : null;
       const sent = await this.send(
         { threadId, bodyText: body, idempotencyKey: `inquiry-receipt-${threadId}` },
         { type: "system", id: "inquiry-receipt" },
@@ -340,11 +348,15 @@ export class ReplyService {
           preserveDraft: true,
           automatic: true,
           countsAsResponse: false,
+          quotedBody: original?.body_text,
+          receiptCopy: route?.inquiryReceiptCopyToNotification
+            ? settings.notificationEmail
+            : undefined,
           // A form has no mail to answer; the receipt's subject becomes the
           // conversation's, and the number in it keeps replies threaded. A
           // project's template may name its own subject (replies then thread
           // by Message-ID and a quoted `受付ID:` line).
-          ...(thread.source === "web_form"
+          ...(thread.source === "web_form" || route?.inquiryReceiptCopyToNotification
             ? {
                 subject:
                   projectReceipt?.subject ??
@@ -576,6 +588,9 @@ export class ReplyService {
       /** False for mail that tells somebody nothing but that their message
        * arrived: it must not stop the response clock. */
       countsAsResponse?: boolean;
+      /** Internal receipt-only fields, never accepted from a reply request. */
+      quotedBody?: string;
+      receiptCopy?: string;
     } = {},
   ): Promise<Result<SupportThreadDetail>> {
     const parsed = sendSupportReplyInputSchema.safeParse(raw);
@@ -676,7 +691,11 @@ export class ReplyService {
       const receiptLine = linkedReport ? `受付ID: ${linkedReport.external_report_id}` : undefined;
       const reportFooter = receiptLine && !body.includes(receiptLine) ? `\n\n${receiptLine}` : "";
       // The closing goes last, above the signature, once.
-      const content = `${body}${reportFooter}`.trimEnd();
+      const quote =
+        options.automatic && options.quotedBody
+          ? `\n\nお問い合わせ内容\n\n${options.quotedBody}`
+          : "";
+      const content = `${body}${reportFooter}${quote}`.trimEnd();
       const closing = addresses.replyClosing;
       const text = `${content}${closing && !content.endsWith(closing) ? `\n\n${closing}` : ""}\n\n${signature}`;
       const existingAttempt = await this.db
@@ -712,10 +731,19 @@ export class ReplyService {
         return fail("CONFLICT", "送信キーの競合を検出しました。");
       // Reply-all: whoever else the person's latest mail was from or to.
       // Worked out here from stored mail, never from the request, so a
-      // tampered request still cannot add an address. Automatic mail goes to
-      // the person alone.
+      // tampered request still cannot add an address. Receipts may explicitly
+      // copy the deployment-owned private operator address.
+      const copy = options.receiptCopy?.trim();
+      const receiptCc =
+        copy &&
+        /^[^\s@<>,]+@[^\s@<>,]+\.[^\s@<>,]+$/.test(copy) &&
+        ![thread.requester_email, addresses.supportEmail, this.addresses.supportEmail].some(
+          (address) => address.toLowerCase() === copy.toLowerCase(),
+        )
+          ? [copy]
+          : [];
       const cc = options.automatic
-        ? []
+        ? receiptCc
         : await this.replyAllCc(input.threadId, thread.requester_email, addresses.supportEmail);
       // Ours, so it is known whether or not the provider reports its own.
       const domain = addresses.supportEmail.split("@")[1]?.trim() || "localhost";

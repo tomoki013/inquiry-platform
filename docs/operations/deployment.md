@@ -179,3 +179,7 @@ Service Binding は相手の Worker が存在しないと作れないので、�
 設定を省略した既存gatewayは従来のADMIN_COREを使う。設定した場合は未登録subjectを拒否する。
 roleに `support` / `moderator` を追加。従来operatorからModeration判定権限を外したため、既存判定担当は
 adminまたはmoderatorへ明示的に割り当てる。Support担当に署名権限を追加しない。
+
+### Receipt quote and operator reply-all
+
+A project mail route can opt into `inquiryReceiptQuoteBody: true` to append the first inbound message body to its customer receipt. Names, addresses, metadata and attachments are not appended. `inquiryReceiptCopyToNotification: true` copies that receipt to the project’s private notification address; this exposes the operator address to the requester and shares the quoted inquiry with the operator. Enable only when that email workflow is intended. The receipt uses the support address as Reply-To and records its Message-ID, so requester and operator reply-all messages join the original conversation. These options default to false; ordinary operator notifications remain body-free.

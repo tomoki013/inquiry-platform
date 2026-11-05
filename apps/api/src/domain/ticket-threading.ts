@@ -5,7 +5,7 @@
  * Accepted: a number in the subject (`[TK-000123]`, `TK-000123`), or an exact
  * `受付番号: TK-000123` line in the body — which is how a quoted receipt mail
  * carries it. Never a number found anywhere else in prose, and never a ticket
- * whose requester is somebody else: naming a number does not let a stranger
+ * whose requester or recorded outgoing recipients exclude the sender: naming a number does not let a stranger
  * write into another person's conversation.
  */
 const NUMBER = "TK-\\d{1,12}";
@@ -40,18 +40,32 @@ export async function findTicketReplyThread(
     WHERE t.ticket_number = ? AND t.merged_into IS NULL LIMIT 64`)
     .bind(numbers[0])
     .all<{ id: string; app_id: string | null; requester_email: string }>();
-  const matches = rows.results.filter(
-    (row) => row.requester_email.trim().toLowerCase() === input.from.trim().toLowerCase(),
-  );
+  const sender = input.from.trim().toLowerCase();
+  const matches = [];
+  for (const row of rows.results) {
+    if (input.appId && row.app_id !== input.appId) continue;
+    if (row.requester_email.trim().toLowerCase() === sender) {
+      matches.push(row);
+      continue;
+    }
+    // A recipient of a recorded outgoing reply (for example the operator
+    // copied on a receipt) can reply-all after a client drops its headers.
+    // Read recipient normally so private storage decrypts it before matching.
+    const recipients = await db
+      .prepare("SELECT recipient FROM support_messages WHERE thread_id=? AND direction='outbound'")
+      .bind(row.id)
+      .all<{ recipient: string | null }>();
+    if (
+      recipients.results.some((message) =>
+        message.recipient?.split(",").some((address) => address.trim().toLowerCase() === sender),
+      )
+    )
+      matches.push(row);
+  }
   if (rows.results.length === 64 || matches.length !== 1) return null;
   const row = matches[0];
   // Mail to one project's address never lands in another project's ticket.
-  if (
-    !row ||
-    row.requester_email.trim().toLowerCase() !== input.from.trim().toLowerCase() ||
-    (input.appId && row.app_id !== input.appId)
-  )
-    return null;
+  if (!row || (input.appId && row.app_id !== input.appId)) return null;
   return row.id;
 }
 
