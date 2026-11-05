@@ -14,6 +14,7 @@ describe("project-owned mail delivery", () => {
       {
         orbit: {
           apiKeyBinding: "MAIL_API_KEY_ORBIT",
+          signatureAccentColor: "#995544",
           logo: { url: "https://orbit.example/logo.png", alt: "Orbit" },
         },
       },
@@ -35,6 +36,7 @@ describe("project-owned mail delivery", () => {
     expect(new Headers(init?.headers).get("authorization")).toBe("Bearer test-project-key");
     const body = JSON.parse(String(init?.body));
     expect(body.html).toContain("https://orbit.example/logo.png");
+    expect(body.html).toContain("border-left:3px solid #995544;");
     expect(fallback.sent).toHaveLength(0);
     expect(resolve("other").mail).toBe(fallback);
     expect(resolve(undefined).mail).toBe(fallback);

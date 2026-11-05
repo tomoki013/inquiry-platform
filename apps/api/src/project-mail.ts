@@ -11,6 +11,10 @@ const configSchema = z.object({
   supportUrl: z.url({ protocol: /^https$/ }).optional(),
   logo: z.object({ url: z.url({ protocol: /^https$/ }), alt: z.string().max(80) }).optional(),
   lookupMessageIds: z.boolean().default(false),
+  signatureAccentColor: z
+    .string()
+    .regex(/^#[0-9a-f]{6}$/i)
+    .optional(),
   /** Key of one of this project's reply templates to write its report
    * receipts with, instead of the platform's generic wording. */
   reportReceiptTemplate: z
@@ -72,7 +76,13 @@ export function projectMailResolver(
     const delivery: ProjectMailDelivery = {
       mail:
         parsed.success && typeof key === "string" && key.trim()
-          ? new ResendMailProvider(key, fetcher, parsed.data.logo, parsed.data.lookupMessageIds)
+          ? new ResendMailProvider(
+              key,
+              fetcher,
+              parsed.data.logo,
+              parsed.data.lookupMessageIds,
+              parsed.data.signatureAccentColor,
+            )
           : new UnconfiguredMailProvider(),
       // Missing or invalid routes have no deployment branding fallback.
       defaultSignature: parsed.success ? parsed.data.defaultSignature : "",

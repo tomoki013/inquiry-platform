@@ -30,6 +30,7 @@ export class ResendMailProvider implements MailProvider {
     private readonly logo?: MailLogo,
     /** Sending-only project keys use signed delivery receipts for Message-ID. */
     private readonly lookupMessageIds = true,
+    private readonly signatureAccentColor?: string,
   ) {}
 
   sendTransactional(mail: BaseMail): Promise<MailResult> {
@@ -76,7 +77,12 @@ export class ResendMailProvider implements MailProvider {
           reply_to: mail.replyTo,
           subject: mail.subject,
           text: mail.text,
-          html: plainTextToSafeHtml(mail.text, mail.signatureText, this.logo),
+          html: plainTextToSafeHtml(
+            mail.text,
+            mail.signatureText,
+            this.logo,
+            this.signatureAccentColor,
+          ),
           ...(headers && Object.keys(headers).length > 0 ? { headers } : {}),
         }),
       });

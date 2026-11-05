@@ -255,3 +255,20 @@ it("renders one dark-mode aware mail document with escaped body and signature", 
   expect(html).toContain("&lt;script&gt;unsafe&lt;/script&gt;");
   expect(html).not.toContain("<script>");
 });
+
+it("uses only a validated deployment colour for the signature border", () => {
+  const signature = "Example\nSupport team";
+  const text = `Reply\n\n${signature}`;
+  expect(plainTextToSafeHtml(text, signature, undefined, "#995544")).toContain(
+    "border-left:3px solid #995544;",
+  );
+  expect(plainTextToSafeHtml(text, signature)).toContain("border-left:3px solid #426b62;");
+  const invalid = plainTextToSafeHtml(
+    text,
+    signature,
+    undefined,
+    "#123456; background:url(https://evil.example)",
+  );
+  expect(invalid).toContain("border-left:3px solid #426b62;");
+  expect(invalid).not.toContain("evil.example");
+});
