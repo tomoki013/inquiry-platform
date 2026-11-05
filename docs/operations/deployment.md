@@ -183,3 +183,5 @@ adminまたはmoderatorへ明示的に割り当てる。Support担当に署名�
 ### Receipt quote and operator reply-all
 
 A project mail route can opt into `inquiryReceiptQuoteBody: true` to append the first inbound message body to its customer receipt. Names, addresses, metadata and attachments are not appended. `inquiryReceiptCopyToNotification: true` copies that receipt to the project’s private notification address; this exposes the operator address to the requester and shares the quoted inquiry with the operator. Enable only when that email workflow is intended. The receipt uses the support address as Reply-To and records its Message-ID, so requester and operator reply-all messages join the original conversation. These options default to false; ordinary operator notifications remain body-free.
+
+Project mail routes may set `signatureAccentColor` to a six-digit hex colour (for example `#995544`) for the signature’s left border. Other routes retain the default colour. Signature text remains plain text and cannot supply CSS.
