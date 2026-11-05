@@ -373,15 +373,24 @@ export class SupportRepository {
   async threadReferences(threadId: string): Promise<{ references: string[]; inReplyTo?: string }> {
     const { results } = await this.db
       .prepare(
-        `SELECT provider_message_id, direction FROM support_messages
+        `SELECT provider_message_id, direction, transport_id, message_id_checked_at FROM support_messages
           WHERE thread_id = ? AND provider_message_id IS NOT NULL
             AND direction IN ('inbound','outbound')
           ORDER BY created_at, rowid`,
       )
       .bind(threadId)
-      .all<{ provider_message_id: string; direction: string }>();
+      .all<{
+        provider_message_id: string;
+        direction: string;
+        transport_id: string | null;
+        message_id_checked_at: string | null;
+      }>();
 
-    const valid = results.filter((row) => /^<[^<>\s]+@[^<>\s]+>$/.test(row.provider_message_id));
+    const valid = results.filter(
+      (row) =>
+        /^<[^<>\s]+@[^<>\s]+>$/.test(row.provider_message_id) &&
+        (row.direction === "inbound" || !row.transport_id || row.message_id_checked_at !== null),
+    );
     const references = valid.map((row) => row.provider_message_id).slice(-50);
     const lastInbound = [...valid].reverse().find((row) => row.direction === "inbound");
     return {

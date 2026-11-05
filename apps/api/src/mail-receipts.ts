@@ -34,20 +34,28 @@ export async function recordMailReceipt(
   if (!app) return json({ error: "NOT_FOUND" }, 404);
   const row = await db
     .prepare(
-      `SELECT m.id, m.provider_message_id FROM support_messages m
+      `SELECT m.id, m.provider_message_id, m.message_id_checked_at FROM support_messages m
      JOIN support_threads t ON t.id=m.thread_id
      WHERE t.app_id=? AND m.direction='outbound' AND m.transport_id=?`,
     )
     .bind(app.id, parsed.data.transportId)
-    .first<{ id: string; provider_message_id: string | null }>();
+    .first<{
+      id: string;
+      provider_message_id: string | null;
+      message_id_checked_at: string | null;
+    }>();
   if (!row) return json({ error: "NOT_FOUND" }, 404);
-  if (row.provider_message_id && row.provider_message_id !== parsed.data.messageId)
+  if (
+    row.provider_message_id &&
+    row.message_id_checked_at &&
+    row.provider_message_id !== parsed.data.messageId
+  )
     return json({ error: "CONFLICT" }, 409);
   try {
     const saved = await db
       .prepare(
         `UPDATE support_messages SET provider_message_id=?, message_id_checked_at=?
-       WHERE id=? AND (provider_message_id IS NULL OR provider_message_id=?)`,
+       WHERE id=? AND (provider_message_id IS NULL OR message_id_checked_at IS NULL OR provider_message_id=?)`,
       )
       .bind(parsed.data.messageId, nowIso(), row.id, parsed.data.messageId)
       .run();

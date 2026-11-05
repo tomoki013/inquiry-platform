@@ -196,3 +196,89 @@ describe("reply-all", () => {
     expect(h.mail.sent.at(-1)?.cc).toBeUndefined();
   });
 });
+
+describe("provider-confirmed reply parents", () => {
+  it("waits for the receipt ID and then replies to the real provider ID", async () => {
+    const h = await harness({ receipts: true });
+    await seedApp(h, "orbit");
+    const id = await formThread(h);
+    await h.settled();
+    const transportId = "d56f4e72-18ce-4c0f-8e24-0b1a9a7dd234";
+    await h.db
+      .prepare(
+        "UPDATE support_messages SET provider_message_id='<temporary@example.com>', transport_id=?, message_id_checked_at=NULL WHERE thread_id=? AND direction='outbound'",
+      )
+      .bind(transportId, id)
+      .run();
+    const { ReplyService } = await import("../src/domain/reply-service");
+    const { SupportRepository } = await import("../src/db/support");
+    const { AppRepository } = await import("../src/db/apps");
+    const { AuditRepository } = await import("../src/db/audit");
+    const { TemplateRepository } = await import("../src/db/templates");
+    const { recordMailReceipt } = await import("../src/mail-receipts");
+    const service = new ReplyService(
+      h.db,
+      new SupportRepository(h.db),
+      h.support,
+      new TemplateRepository(h.db),
+      new AppRepository(h.db),
+      new AuditRepository(h.db),
+      h.mail,
+      {
+        supportEmail: "support@example.com",
+        fromName: "Example",
+        defaultSupportUrl: "https://example.com",
+        defaultSignature: "Example",
+        legacySignatures: [],
+        delivery: () => ({ mail: h.mail, requireVerifiedReplyParent: true }),
+      },
+    );
+    const waiting = await service.send(
+      { threadId: id, bodyText: "回答", idempotencyKey: "wait-parent" },
+      admin,
+    );
+    expect(waiting.ok).toBe(false);
+    expect(h.mail.sent).toHaveLength(1);
+    const received = await recordMailReceipt(
+      h.db,
+      "orbit",
+      new Request("https://internal", {
+        method: "POST",
+        body: JSON.stringify({ transportId, messageId: "<actual@provider.example>" }),
+      }),
+    );
+    expect(received.status).toBe(200);
+    const sent = await service.send(
+      { threadId: id, bodyText: "回答", idempotencyKey: "real-parent" },
+      admin,
+    );
+    expect(sent.ok).toBe(true);
+    expect(h.mail.sent[1]?.inReplyTo).toBe("<actual@provider.example>");
+    expect(h.mail.sent[1]?.references).toContain("<actual@provider.example>");
+    expect(h.mail.sent[1]?.references).not.toContain("<temporary@example.com>");
+    expect(h.mail.sent[1]?.subject).toBe(`Re: ${h.mail.sent[0]?.subject}`);
+    const replay = await recordMailReceipt(
+      h.db,
+      "orbit",
+      new Request("https://internal", {
+        method: "POST",
+        body: JSON.stringify({ transportId, messageId: "<other@provider.example>" }),
+      }),
+    );
+    expect(replay.status).toBe(409);
+  });
+});
+
+it("pins a project's sender instead of falling back to the shared address", async () => {
+  const { FakeMailProvider } = await import("./harness");
+  const mail = new FakeMailProvider();
+  const h = await harness({
+    mail,
+    delivery: () => ({ mail, supportEmail: "contact@orbit.example" }),
+  });
+  await seedApp(h, "orbit");
+  const threadId = await formThread(h);
+  expectOk((await reply(h, threadId, "Answer")) as never);
+  expect(mail.sent[0]?.from).toContain("<contact@orbit.example>");
+  expect(mail.sent[0]?.replyTo).toBe("contact@orbit.example");
+});

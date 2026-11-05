@@ -105,7 +105,7 @@ export class ReplyService {
     const override = (await this.addresses.resolve?.(appId)) ?? {};
     const delivery = this.addresses.delivery?.(appId);
     return {
-      supportEmail: override.supportEmail ?? this.addresses.supportEmail,
+      supportEmail: delivery?.supportEmail ?? override.supportEmail ?? this.addresses.supportEmail,
       fromName: override.fromName ?? this.addresses.fromName,
       defaultSignature: delivery?.defaultSignature ?? this.addresses.defaultSignature,
       defaultSupportUrl: delivery?.supportUrl ?? this.addresses.defaultSupportUrl,
@@ -553,7 +553,7 @@ export class ReplyService {
     const { results } = await this.db
       .prepare(`SELECT m.id, m.transport_id, t.app_id FROM support_messages m
       JOIN support_threads t ON t.id=m.thread_id
-      WHERE m.provider_message_id IS NULL AND m.transport_id IS NOT NULL
+      WHERE (m.provider_message_id IS NULL OR m.message_id_checked_at IS NULL) AND m.transport_id IS NOT NULL
       ${threadId ? "AND m.thread_id = ?" : ""} ORDER BY m.message_id_checked_at ASC, m.created_at DESC LIMIT 50`)
       .bind(...(threadId ? [threadId] : []))
       .all<{ id: string; transport_id: string; app_id: string | null }>();
@@ -561,14 +561,12 @@ export class ReplyService {
       const mail = this.addresses.delivery?.(row.app_id ?? undefined)?.mail ?? this.mail;
       if (!mail.resolveMessageId) continue;
       const messageId = await mail.resolveMessageId(row.transport_id);
-      await this.db
-        .prepare("UPDATE support_messages SET message_id_checked_at = ? WHERE id = ?")
-        .bind(nowIso(), row.id)
-        .run();
       if (messageId)
         await this.db
-          .prepare("UPDATE support_messages SET provider_message_id = ? WHERE id = ?")
-          .bind(messageId, row.id)
+          .prepare(
+            "UPDATE support_messages SET provider_message_id = ?, message_id_checked_at = ? WHERE id = ?",
+          )
+          .bind(messageId, nowIso(), row.id)
           .run();
     }
   }
@@ -659,6 +657,23 @@ export class ReplyService {
 
       await this.refreshMessageIds(input.threadId);
       const { references, inReplyTo } = await this.support.threadReferences(input.threadId);
+      if (
+        !options.automatic &&
+        this.addresses.delivery?.(thread.app_id ?? undefined)?.requireVerifiedReplyParent &&
+        !inReplyTo
+      ) {
+        const sentParent = await this.db
+          .prepare(
+            "SELECT 1 FROM support_messages WHERE thread_id=? AND direction='outbound' LIMIT 1",
+          )
+          .bind(input.threadId)
+          .first();
+        if (sentParent)
+          return fail(
+            "CONFLICT",
+            "受付メールの送信情報を確認中です。しばらくしてから返信してください。",
+          );
+      }
       const from = `${addresses.fromName} <${addresses.supportEmail}>`;
       // The subject is resolved here, from the thread and — for a thread that
       // has no subject of its own — the template the operator inserted. The
@@ -798,7 +813,8 @@ export class ReplyService {
           id: messageId,
           threadId: input.threadId,
           direction: "outbound",
-          providerMessageId: sent.providerMessageId ?? ownMessageId,
+          providerMessageId:
+            sent.providerMessageId ?? (sent.transportId ? undefined : ownMessageId),
           transportId: sent.transportId,
           inReplyTo,
           sender: addresses.supportEmail,
@@ -809,6 +825,13 @@ export class ReplyService {
           bodyText: text,
           at,
         }),
+        ...(sent.providerMessageId
+          ? [
+              this.db
+                .prepare("UPDATE support_messages SET message_id_checked_at=? WHERE id=?")
+                .bind(at, messageId),
+            ]
+          : []),
         this.support.touchThreadStatement(input.threadId, "outbound", at),
         this.support.recordSendStatement(input.idempotencyKey, input.threadId, messageId),
         ...(options.preserveDraft ? [] : [this.support.deleteDraftStatement(input.threadId)]),
