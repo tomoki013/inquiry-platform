@@ -21,6 +21,10 @@ const configSchema = z.object({
    * the project's mail settings (`app_mail_settings.inquiry_receipt`), which
    * win when set; kept for deployments configured with v0.10.0. */
   inquiryReceipt: z.boolean().default(true),
+  /** Opt-in customer receipt containing only the original message body. */
+  inquiryReceiptQuoteBody: z.boolean().default(false),
+  /** Copy the receipt to the private notification recipient for email reply-all. */
+  inquiryReceiptCopyToNotification: z.boolean().default(false),
   /** This project's closing line instead of the deployment's
    * (`Branding.replyClosing`); an empty string means none. */
   replyClosing: z.string().trim().max(200).optional(),
@@ -39,6 +43,8 @@ export interface ProjectMailDelivery {
   reportReceiptTemplate?: string;
   inquiryReceiptTemplate?: string;
   inquiryReceipt?: boolean;
+  inquiryReceiptQuoteBody?: boolean;
+  inquiryReceiptCopyToNotification?: boolean;
   replyClosing?: string;
 }
 
@@ -75,6 +81,9 @@ export function projectMailResolver(
       inquiryReceiptTemplate: parsed.success ? parsed.data.inquiryReceiptTemplate : undefined,
       // An unreadable route sends no receipt rather than one in the wrong voice.
       inquiryReceipt: parsed.success ? parsed.data.inquiryReceipt : false,
+      inquiryReceiptQuoteBody: parsed.success && parsed.data.inquiryReceiptQuoteBody,
+      inquiryReceiptCopyToNotification:
+        parsed.success && parsed.data.inquiryReceiptCopyToNotification,
       replyClosing: parsed.success ? parsed.data.replyClosing : undefined,
     };
     cache.set(appId, delivery);

@@ -288,3 +288,82 @@ describe("a project's receipt settings", () => {
     expect(h.mail.sent.at(-1)?.text).toMatch(/^山田 様/);
   });
 });
+
+describe("opt-in receipt email workflow", () => {
+  it("quotes only the original body, copies the operator and threads both reply-all senders", async () => {
+    const mail = new FakeMailProvider();
+    mail.reportsMessageId = false;
+    const h = await harness({
+      receipts: true,
+      mail,
+      delivery: () => ({
+        mail,
+        inquiryReceiptQuoteBody: true,
+        inquiryReceiptCopyToNotification: true,
+      }),
+    });
+    const appId = await seedApp(h, "orbit");
+    await h.db
+      .prepare(
+        "INSERT INTO app_mail_settings(app_id,signature_text,notification_email,notify_by_email,updated_at) VALUES(?,'','operator@example.net',0,'2026-01-01')",
+      )
+      .bind(appId)
+      .run();
+    const original = "本文だけです。\n{{unmodified_customer_text}}";
+    const threadId = await form(h, { bodyText: original, requesterName: "Private Name" });
+    const receipt = mail.sent[0];
+    expect(receipt?.text).toContain(`お問い合わせ内容\n\n${original}`);
+    expect(receipt?.text).not.toContain("Private Name");
+    expect(receipt?.cc).toEqual(["operator@example.net"]);
+    expect(receipt?.replyTo).toBe("support@example.com");
+    expect(receipt?.messageId).toBeTruthy();
+    for (const [index, from] of ["someone@example.com", "operator@example.net"].entries()) {
+      const result = expectOk<{ threadId: string; newThread: boolean }>(
+        (await h.support.ingestInboundEmail(
+          {
+            from,
+            to: "support@example.com",
+            recipients: ["support@example.com", "someone@example.com", "operator@example.net"],
+            subject: `Re: ${receipt?.subject}`,
+            bodyText: "続きです",
+            messageId: `<followup-${index}@example.net>`,
+            inReplyTo: receipt?.messageId,
+            references: [receipt?.messageId],
+            appSlug: "orbit",
+            automated: false,
+          },
+          mailActor,
+        )) as never,
+      );
+      expect(result.threadId).toBe(threadId);
+      expect(result.newThread).toBe(false);
+    }
+    const withoutHeaders = expectOk<{ threadId: string; newThread: boolean }>(
+      (await h.support.ingestInboundEmail(
+        {
+          from: "operator@example.net",
+          to: "support@example.com",
+          recipients: ["support@example.com"],
+          subject: `Re: ${receipt?.subject}`,
+          bodyText: "ヘッダーなしの回答",
+          messageId: "<operator-no-headers@example.net>",
+          references: [],
+          appSlug: "orbit",
+          automated: false,
+        },
+        mailActor,
+      )) as never,
+    );
+    expect(withoutHeaders.threadId).toBe(threadId);
+    expect(withoutHeaders.newThread).toBe(false);
+    await h.settled();
+    expect(mail.sent).toHaveLength(1);
+  });
+
+  it("keeps quotes and operator copies disabled by default", async () => {
+    const h = await setup();
+    await form(h);
+    expect(h.mail.sent[0]?.text).not.toContain("SVGで保存できますか？");
+    expect(h.mail.sent[0]?.cc).toBeUndefined();
+  });
+});
