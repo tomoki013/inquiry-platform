@@ -24,6 +24,7 @@ import { findReceiptReplyThread, findTicketReplyThread } from "./domain/ticket-t
 import type { AdminCoreEnv } from "./env";
 import { privateCipher, privateDatabase } from "./privacy/crypto";
 import { privateBucket } from "./privacy/files";
+import { projectFeatures } from "./project-features";
 import { projectMailResolver } from "./project-mail";
 import { aggregateDatabase, ProjectRegistry } from "./storage/database";
 import { namespacedSupportKey } from "./storage/files";
@@ -41,6 +42,7 @@ function buildLocalServices(
   registry?: ProjectRegistry,
 ) {
   const branding = parseBranding(env.BRANDING);
+  const features = projectFeatures(env.PROJECT_FEATURES);
   const moderation = ModerationRegistry.fromEnv(env.SIGNED_MODERATION, env);
   const apps = new AppRepository(env.DB);
   const reports = new ReportRepository(env.DB);
@@ -100,6 +102,8 @@ function buildLocalServices(
       return;
     }
     const channel = row.kind === "notification_email" ? "email" : "push";
+    const config = features(row.service_id, payload.category === "report" ? "report" : "inquiry");
+    if (!config.enabled || !(channel === "email" ? config.notifyEmail : config.notifyPush)) return;
     const outcome = await notifications.ticketCreated({
       ...payload,
       deliveryJobId: row.id,
@@ -110,15 +114,34 @@ function buildLocalServices(
     if (outcome.email === "failed" || outcome.push.failed)
       throw new DeliveryError("NOTIFICATION_FAILED");
   });
-  const notify = Object.assign((ref: TicketCreatedRef) => schedule(jobs.enqueueNotification(ref)), {
-    statements: (ref: TicketCreatedRef) => jobs.notificationStatements(ref),
-  });
+  const withChannels = (ref: TicketCreatedRef): TicketCreatedRef => {
+    const config = features(ref.appId, ref.category === "report" ? "report" : "inquiry");
+    return {
+      ...ref,
+      channels: {
+        email: config.enabled && config.notifyEmail && ref.channels?.email !== false,
+        push: config.enabled && config.notifyPush && ref.channels?.push !== false,
+      },
+    };
+  };
+  const notify = Object.assign(
+    (ref: TicketCreatedRef) => schedule(jobs.enqueueNotification(withChannels(ref))),
+    {
+      statements: (ref: TicketCreatedRef) => jobs.notificationStatements(withChannels(ref)),
+    },
+  );
 
   // The receipt is sent by `ReplyService`, built below; `SupportService` only
   // says that somebody opened a conversation.
   let replyService: ReplyService;
-  const supportService = new SupportService(env.DB, support, apps, audit, notify, (threadId) =>
-    schedule(replyService.sendInquiryReceipt(threadId)),
+  const supportService = new SupportService(
+    env.DB,
+    support,
+    apps,
+    audit,
+    notify,
+    (threadId) => schedule(replyService.sendInquiryReceipt(threadId)),
+    features,
   );
 
   inbound = new InboundJobs(
@@ -130,6 +153,7 @@ function buildLocalServices(
     registry
       ? (message, thread, attachment) => namespacedSupportKey(registry, message, thread, attachment)
       : undefined,
+    features,
   );
 
   replyService = new ReplyService(env.DB, support, supportService, templates, apps, audit, mail, {
@@ -142,10 +166,12 @@ function buildLocalServices(
     ownAddresses: [env.NOREPLY_EMAIL, env.REPORT_EMAIL].filter((a): a is string => Boolean(a)),
     resolve: async (appId) => templates.mailSettings(appId),
     delivery,
+    features,
   });
 
   return {
     branding,
+    features,
     jobs,
     inbound,
     moderation,
@@ -160,6 +186,7 @@ function buildLocalServices(
       replyService,
       moderation,
       notify,
+      features,
     ),
     support: supportService,
     reply: replyService,
@@ -205,12 +232,12 @@ export function buildServices(
   env = {
     ...env,
     DB: privateDatabase(env.DB, cipher),
-    PRIVATE_FILES: privateBucket(env.PRIVATE_FILES, cipher),
+    PRIVATE_FILES: env.PRIVATE_FILES ? privateBucket(env.PRIVATE_FILES, cipher) : undefined,
   };
   const registry = new ProjectRegistry(env.DB, cipher);
   const db = privateDatabase(aggregateDatabase(registry, scope), cipher, "platform", false);
   const base = buildLocalServices({ ...env, DB: db }, schedule, registry);
-  const tickets = new TicketService(db, base.moderation);
+  const tickets = new TicketService(db, base.moderation, base.features);
   const missing = () => fail("NOT_FOUND", "対象が見つかりません。");
   type Selector = (...args: unknown[]) => Promise<D1Database | null>;
   const fieldValue = (input: unknown, field: string): unknown =>
@@ -314,6 +341,7 @@ export function buildServices(
       create: slug,
       detail: record("report"),
       sendReceipt: record("report"),
+      replyToReporter: record("report"),
       prepareDecision: record("report", "reportId"),
       completeDecision: record("report", "reportId"),
       changeStatus: record("report", "reportId"),
@@ -349,7 +377,7 @@ export function buildServices(
       source: async (kind, id) =>
         registry.forRecord(kind === "report" ? "report" : "thread", id, await scope),
     },
-    (database) => new TicketService(database, base.moderation),
+    (database) => new TicketService(database, base.moderation, base.features),
     ["row"],
   );
 
@@ -375,17 +403,31 @@ export function buildServices(
   base.reports.retryReceipts = async () => {
     const rows = await db
       .prepare(
-        `SELECT r.id FROM reports r JOIN support_threads t ON t.id=r.support_thread_id AND t.__project_id=r.__project_id WHERE t.requester_email<>'' AND t.status='open' AND NOT EXISTS(SELECT 1 FROM support_reply_sends s WHERE s.idempotency_key='report-receipt-'||r.id AND s.__project_id=r.__project_id) ORDER BY r.created_at LIMIT 25`,
+        `SELECT r.id FROM reports r JOIN support_threads t ON t.id=r.support_thread_id AND t.__project_id=r.__project_id
+         WHERE t.requester_email<>'' AND t.status='open'
+         AND r.app_id NOT IN (SELECT value FROM json_each(?))
+         AND NOT EXISTS(SELECT 1 FROM support_reply_sends s WHERE s.idempotency_key='report-receipt-'||r.id AND s.__project_id=r.__project_id)
+         ORDER BY r.created_at LIMIT 25`,
       )
+      .bind(JSON.stringify(base.features.disabled("report", "receipt")))
       .all<{ id: string }>();
     for (const row of rows.results) await base.reports.sendReceipt(row.id);
   };
   base.reply.retryInquiryReceipts = async () => {
     const rows = await db
       .prepare(
-        INQUIRY_RECEIPT_RETRY_SQL.replaceAll("__PROJECT__", "AND x.__project_id=t.__project_id"),
+        INQUIRY_RECEIPT_RETRY_SQL.replaceAll(
+          "__PROJECT__",
+          "AND x.__project_id=t.__project_id",
+        ).replace(
+          "ORDER BY",
+          "AND t.__project_id NOT IN (SELECT value FROM json_each(?)) ORDER BY",
+        ),
       )
-      .bind(new Date(Date.now() - 86_400_000).toISOString())
+      .bind(
+        new Date(Date.now() - 86_400_000).toISOString(),
+        JSON.stringify(base.features.disabled("inquiry", "receipt")),
+      )
       .all<{ id: string }>();
     for (const row of rows.results) await base.reply.sendInquiryReceipt(row.id);
   };

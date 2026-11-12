@@ -37,6 +37,7 @@ import { internalFailure, notFound, validationFailure } from "./failures";
  */
 export interface TicketCreatedRef {
   ticketId: string;
+  appId?: string;
   deliveryJobId?: string;
   category: TicketNotificationCategory;
   /** Both on by default. Inbound mail turns email off: the operator already

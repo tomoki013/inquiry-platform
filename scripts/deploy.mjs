@@ -12,7 +12,7 @@
 //
 //   <deployment-dir>/api.jsonc           required
 //   <deployment-dir>/admin.jsonc         required
-//   <deployment-dir>/mail-ingress.jsonc  required
+//   <deployment-dir>/mail-ingress.jsonc  optional
 //   <deployment-dir>/seed.ts             optional, a DeploymentSeed module
 //
 // Each file is copied next to the placeholder it replaces, as
@@ -21,7 +21,7 @@
 // therefore relative to `apps/<app>/`, exactly as in
 // the placeholders. See docs/operations/deployment.md.
 //
-// `check` is `wrangler deploy --dry-run` for all three and touches nothing.
+// `check` runs `wrangler deploy --dry-run` for each configured Worker.
 // Everything else acts on the Cloudflare account Wrangler is logged in to.
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -55,6 +55,9 @@ function usage() {
 if (!dirArg || !command) usage();
 // Relative to where the command was started, also when run through `pnpm run`.
 const deployment = resolve(process.env.INIT_CWD ?? process.cwd(), dirArg);
+const deploymentApps = APPS.filter(
+  (app) => app !== "mail-ingress" || existsSync(join(deployment, "mail-ingress.jsonc")),
+);
 
 function run(cwd, bin, argv) {
   console.log(`\n$ (${cwd.slice(root.length + 1) || "."}) ${bin} ${argv.join(" ")}`);
@@ -98,7 +101,7 @@ switch (command) {
     break;
   }
   case "check":
-    for (const app of APPS) deploy(app, true);
+    for (const app of deploymentApps) deploy(app, true);
     break;
   case "migrate":
     wrangler("api", ["d1", "migrations", "apply", "DB", "--remote"]);
@@ -129,7 +132,7 @@ switch (command) {
     const normalizedTarget = target === "gateway" ? "admin" : target;
     const apps =
       normalizedTarget === "all"
-        ? APPS
+        ? deploymentApps
         : APPS.includes(normalizedTarget)
           ? [normalizedTarget]
           : usage();

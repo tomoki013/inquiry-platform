@@ -207,13 +207,22 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
   private async view(detail: TicketDetail): Promise<OperatorTicketDetail> {
     const grant = this.grant();
     const assignees = grant ? await this.assignees(grant, [detail.ticket.id]) : new Map();
-    return toDetail(
+    const result = toDetail(
       detail,
       await this.receiptId(detail.ticket),
       assignees.get(detail.ticket.id) ?? null,
       (actorId) => (grant ? ownOperator(grant, actorId) : null),
       detail.ticket.report_id ? await this.signedReports(detail.ticket.service_id) : false,
     );
+    const kind = detail.ticket.report_id ? "report" : "inquiry";
+    const features = this.services.features(detail.ticket.service_id, kind);
+    return {
+      ...result,
+      canReply:
+        features.enabled &&
+        features.reply &&
+        (result.canReply || (kind === "report" && Boolean(detail.ticket.requester_email))),
+    };
   }
 
   /** Whether the project decides its reports through a signed moderation
@@ -481,14 +490,26 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
       if (!actor) return forbidden;
       const ticket = await this.ticket(scoped.app, ticketId);
       if (!ticket) return notFound;
+      const templateId = parsed.data.templateId;
+      if (templateId && !(await this.ownTemplate(scoped.app, templateId))) return notFound;
+      if (ticket.report_id) {
+        const sent = await this.services.reports.replyToReporter(
+          ticket.report_id,
+          {
+            bodyText: parsed.data.body,
+            idempotencyKey: parsed.data.idempotencyKey,
+            ...(templateId ? { templateId } : {}),
+          },
+          actor,
+        );
+        return sent.ok ? this.detail(ticket.id) : sent;
+      }
       if (!ticket.thread_id || !ticket.requester_email) {
         return {
           ok: false,
           error: { code: "CONFLICT", message: "返信先のメール会話がありません。" },
         };
       }
-      const templateId = parsed.data.templateId;
-      if (templateId && !(await this.ownTemplate(scoped.app, templateId))) return notFound;
       const sent = await this.services.reply.send(
         {
           threadId: ticket.thread_id,

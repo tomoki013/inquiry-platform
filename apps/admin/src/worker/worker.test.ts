@@ -599,6 +599,50 @@ describe("domain permissions", () => {
   });
 });
 
+it("exposes only authorized read tools on the opt-in MCP endpoint", async () => {
+  const core = {
+    listReports: vi.fn(async () => ({ ok: true, value: { items: [], total: 0 } })),
+    listSupportThreads: vi.fn(),
+  };
+  const context = { waitUntil: () => undefined } as unknown as ExecutionContext;
+  const settings = env({
+    ENVIRONMENT: "local",
+    DEV_ADMIN_EMAIL: "dev@example.com",
+    DEFAULT_ADMIN_ROLE: "moderator",
+    ENABLE_MCP: "true",
+    ADMIN_CORE: core as unknown as AdminWebEnv["ADMIN_CORE"],
+  });
+  const gateway = createApp();
+  function call(method: string, params?: object, origin?: string) {
+    return gateway.fetch(
+      new Request("https://admin.example.com/mcp", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+          ...(origin ? { Origin: origin } : {}),
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      }),
+      settings,
+      context,
+    );
+  }
+  expect((await call("tools/list", undefined, "https://other.example.com")).status).toBe(403);
+  const listed = await (await call("tools/list")).json<{
+    result: { tools: Array<{ name: string }> };
+  }>();
+  expect(listed.result.tools.map((tool) => tool.name)).toEqual(["list_reports", "get_report"]);
+  expect(await (await call("tools/call", { name: "list_inquiries" })).json()).toMatchObject({
+    error: { code: -32602 },
+  });
+  expect(await (await call("tools/call", { name: "list_reports" })).json()).toMatchObject({
+    result: { isError: false },
+  });
+  expect(core.listReports).toHaveBeenCalledTimes(1);
+  expect(core.listSupportThreads).not.toHaveBeenCalled();
+});
+
 it("uses an identity's deployment-selected scoped binding and rejects an unmapped identity", async () => {
   const selected = {
     listTickets: vi.fn(async () => ({ ok: true, value: { items: [], total: 0 } })),

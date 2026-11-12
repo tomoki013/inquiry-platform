@@ -4,6 +4,7 @@ import type {
   ReportDetail,
   ReportListPage,
   Result,
+  SupportThreadDetail,
 } from "@inquiry-platform/core";
 import {
   addReportNoteInputSchema,
@@ -17,6 +18,7 @@ import {
   nowIso,
   ok,
   reportDecisionSchema,
+  sendSupportReplyInputSchema,
   updateReportResolutionInputSchema,
 } from "@inquiry-platform/core";
 import { z } from "zod";
@@ -25,6 +27,7 @@ import type { AuditRepository } from "../db/audit";
 import type { ReportRepository } from "../db/reports";
 import type { SupportRepository } from "../db/support";
 import { privateText } from "../privacy/crypto";
+import type { ProjectFeatures } from "../project-features";
 import { internalFailure, notFound, validationFailure } from "./failures";
 import { pseudonymise } from "./identity";
 import { ModerationRegistry } from "./moderation";
@@ -32,6 +35,7 @@ import type { NotificationHook } from "./notification-service";
 import type { ReplyService } from "./reply-service";
 import { reportMailSubject } from "./report-threading";
 import { Scope } from "./scope";
+import { TicketService } from "./ticket-service";
 
 /**
  * Moderation, as far as the platform is concerned.
@@ -53,6 +57,7 @@ export class ReportService {
     private readonly moderation: ModerationRegistry = ModerationRegistry.none,
     /** See `SupportService`: an id and a kind, after the batch committed. */
     private readonly notify?: NotificationHook,
+    private readonly features?: ProjectFeatures,
   ) {}
 
   /**
@@ -63,24 +68,34 @@ export class ReportService {
    * once, and answering the retry with a 409 would make the app show a failure
    * for a report that arrived. The existing id comes back instead.
    */
-  async create(raw: unknown, actor: ActorRef): Promise<Result<CreateReportResult>> {
+  async create(
+    raw: unknown,
+    actor: ActorRef,
+    beforeCreate?: (db: D1Database, id: string) => D1PreparedStatement,
+  ): Promise<Result<CreateReportResult>> {
     const parsed = createReportInputSchema.safeParse(raw);
     if (!parsed.success) return validationFailure(parsed.error);
     const input = parsed.data;
 
     try {
+      const app = await this.apps.findBySlug(input.appSlug);
+      if (!app) return fail("NOT_FOUND", "Project が登録されていません。");
+      const config = this.features?.configured(app.id, "report");
+      if (config?.enabled === false) return fail("FORBIDDEN", "通報受付は無効です。");
       const existing = await this.reports.findByExternalId(input.externalReportId);
       if (existing) {
+        if ((await this.reports.findRow(existing.id))?.app_id !== app.id)
+          return fail("CONFLICT", "この通報 ID は既に使用されています。");
         await this.sendReceipt(existing.id);
         return ok({ reportId: existing.id, duplicate: true });
       }
 
-      const app = await this.apps.findBySlug(input.appSlug);
-      if (!app) return fail("NOT_FOUND", `アプリ "${input.appSlug}" は登録されていません。`);
-
       const id = newId();
-      const threadId = newId();
+      const threadId = !config ? newId() : input.reporterEmail && config.receipt ? id : undefined;
+      const ticketId = config ? id : (threadId ?? id);
       const createdAt = input.reportedAt ?? nowIso();
+      const subject = reportMailSubject(app.name, input.externalReportId);
+      const ref = { ticketId, appId: app.id, category: "report" as const };
       const [reporterRefHash, authorRefHash] = await Promise.all([
         input.reporterRefHash
           ? pseudonymise(input.reporterRefHash, this.hashPepper)
@@ -94,21 +109,6 @@ export class ReportService {
       // at all. D1's `batch` rolls the whole sequence back on a failure, which
       // is the only transaction available here and is enough for this.
       await this.db.batch([
-        this.support.insertThreadStatement({
-          id: threadId,
-          appId: app.id,
-          source: "email",
-          requesterEmail: input.reporterEmail,
-          subject: reportMailSubject(app.name, input.externalReportId),
-          at: createdAt,
-        }),
-        this.support.insertMessageStatement({
-          id: newId(),
-          threadId,
-          direction: "internal_note",
-          bodyText: `通報を受け付けました。受付ID: ${input.externalReportId}`,
-          at: createdAt,
-        }),
         this.reports.insertStatement(input, {
           id,
           appId: app.id,
@@ -116,7 +116,46 @@ export class ReportService {
           authorRefHash,
           createdAt,
         }),
-        this.db.prepare("UPDATE reports SET support_thread_id = ? WHERE id = ?").bind(threadId, id),
+        ...(config
+          ? this.reports.ticketStatements(input, {
+              id,
+              appId: app.id,
+              subject,
+              at: createdAt,
+              reporterRefHash,
+              authorRefHash,
+            })
+          : []),
+        ...(threadId
+          ? [
+              this.support.insertThreadStatement({
+                id: threadId,
+                appId: app.id,
+                source: "email",
+                requesterEmail: input.reporterEmail,
+                subject,
+                at: createdAt,
+              }),
+            ]
+          : []),
+        ...(!config && threadId
+          ? [
+              this.support.insertMessageStatement({
+                id: newId(),
+                threadId,
+                direction: "internal_note",
+                bodyText: `通報を受け付けました。受付ID: ${input.externalReportId}`,
+                at: createdAt,
+              }),
+            ]
+          : []),
+        ...(threadId
+          ? [
+              this.db
+                .prepare("UPDATE reports SET support_thread_id = ? WHERE id = ?")
+                .bind(threadId, id),
+            ]
+          : []),
         this.reports.eventStatement({ reportId: id, eventType: "created", toStatus: "open" }),
         ...(input.evidenceExpected
           ? [this.reports.eventStatement({ reportId: id, eventType: "attachment_pending" })]
@@ -132,11 +171,11 @@ export class ReportService {
             contentType: input.contentType,
           },
         }),
-        ...(this.notify?.statements?.({ ticketId: threadId, category: "report" }) ?? []),
+        ...(this.notify?.statements?.(ref) ?? []),
+        ...(beforeCreate ? [beforeCreate(this.db, id)] : []),
       ]);
 
-      // The ticket is the thread's row: `ticket_report_insert` retyped it.
-      this.notify?.({ ticketId: threadId, category: "report" });
+      this.notify?.(ref);
       await this.sendReceipt(id);
       return ok({ reportId: id, duplicate: false });
     } catch (error) {
@@ -145,11 +184,60 @@ export class ReportService {
       const existing = await this.reports
         .findByExternalId(input.externalReportId)
         .catch(() => null);
-      if (existing) {
+      if (
+        existing &&
+        (await this.reports.findRow(existing.id).catch(() => null))?.app_slug === input.appSlug
+      ) {
         await this.sendReceipt(existing.id);
         return ok({ reportId: existing.id, duplicate: true });
       }
       return internalFailure("report.create", error);
+    }
+  }
+
+  async replyToReporter(
+    reportId: string,
+    raw: unknown,
+    actor: ActorRef,
+  ): Promise<Result<SupportThreadDetail>> {
+    const input = raw && typeof raw === "object" ? raw : {};
+    const parsed = sendSupportReplyInputSchema.safeParse({ ...input, threadId: reportId });
+    if (!parsed.success) return validationFailure(parsed.error);
+    try {
+      const report = await this.reports.findRow(reportId);
+      if (!report) return notFound("通報");
+      const config = this.features?.(report.app_id, "report");
+      if (config?.enabled === false || config?.reply === false)
+        return fail("FORBIDDEN", "通報への返信は無効です。");
+      if (parsed.data.templateId && config?.templates === false)
+        return fail("FORBIDDEN", "定型文は無効です。");
+      if (report.support_thread_id)
+        return this.reply.send({ ...parsed.data, threadId: report.support_thread_id }, actor);
+
+      const ticket = await new TicketService(this.db).row(reportId);
+      if (!ticket?.requester_email) return fail("CONFLICT", "通報者の連絡先がありません。");
+      await this.db.batch([
+        this.support.insertThreadStatement(
+          {
+            id: ticket.id,
+            appId: report.app_id,
+            source: "email",
+            subject: ticket.subject,
+            requesterEmail: ticket.requester_email,
+            at: nowIso(),
+          },
+          true,
+        ),
+        this.db
+          .prepare(`UPDATE reports SET support_thread_id=? WHERE id=? AND support_thread_id IS NULL
+          AND EXISTS(SELECT 1 FROM support_threads WHERE id=? AND app_id=?)`)
+          .bind(ticket.id, reportId, ticket.id, report.app_id),
+      ]);
+      const linked = await this.reports.findRow(reportId);
+      if (!linked?.support_thread_id) return fail("CONFLICT", "通報のメール会話を作成できません。");
+      return this.reply.send({ ...parsed.data, threadId: linked.support_thread_id }, actor);
+    } catch (error) {
+      return internalFailure("report.replyToReporter", error);
     }
   }
 
@@ -295,19 +383,30 @@ export class ReportService {
     try {
       const row = await this.reports.findRow(reportId);
       if (!row?.support_thread_id) return;
+      const config = this.features?.(row.app_id, "report");
+      if (config?.enabled === false || config?.receipt === false) return;
       const thread = await this.support.findThread(row.support_thread_id);
       if (!thread?.requester_email) return;
-      const own = await this.reply.projectReportReceipt(thread.id, row.external_report_id);
+      const own =
+        config?.templates === false
+          ? null
+          : await this.reply.projectReportReceipt(thread.id, row.external_report_id);
       await this.reply.send(
         {
           threadId: thread.id,
           bodyText:
-            own ??
+            own?.body ??
             `通報を受け付けました。お知らせいただきありがとうございます。\n\n受付ID: ${row.external_report_id}\n\n運営で内容を確認し、必要な対応を行います。追加の情報がある場合は、このメールにご返信ください。\n\n間違って通報した場合は、このメールにそのまま返信してお知らせください。アプリで内容を「表示に戻す」にしても通報は取り消されません。また、内容を削除しても通報は取り消されず、削除した内容は元に戻せませんので、削除せずにこのメールへご返信ください。`,
           idempotencyKey: `report-receipt-${reportId}`,
         },
         { type: "system", id: "report-receipt" },
-        { preserveDraft: true, initialMessage: true, automatic: true },
+        {
+          preserveDraft: true,
+          initialMessage: true,
+          automatic: true,
+          ...(config ? { countsAsResponse: false } : {}),
+          ...(config && own?.subject ? { subject: own.subject } : {}),
+        },
       );
     } catch (error) {
       // The report is durable even if receipt lookup or delivery fails.

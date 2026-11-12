@@ -20,6 +20,7 @@ export type AdminPermission =
   | "support:manage"
   | "moderation:read"
   | "moderation:review"
+  | "moderation:reply"
   | "moderation:decide"
   | "audit:read"
   | "platform:configure"
@@ -40,6 +41,7 @@ const operate: AdminPermission[] = [
   "support:reply",
   "support:manage",
   "moderation:review",
+  "moderation:reply",
   "tickets:operate",
 ];
 const granted: Record<AdminRole, ReadonlySet<AdminPermission>> = {
@@ -50,6 +52,7 @@ const granted: Record<AdminRole, ReadonlySet<AdminPermission>> = {
   moderator: new Set([
     "moderation:read",
     "moderation:review",
+    "moderation:reply",
     "moderation:decide",
     "audit:read",
     "self:notifications",
@@ -104,6 +107,7 @@ export function permissionFor(method: string, pathname: string): AdminPermission
   if (CONFIGURATION_PATHS.some((pattern) => pattern.test(pathname))) return "platform:configure";
   if (/^\/api\/reports\/[^/]+\/(?:decision|resolution|status)(?:\/|$)/.test(pathname))
     return "moderation:decide";
+  if (/^\/api\/reports\/[^/]+\/reply$/.test(pathname)) return "moderation:reply";
   if (/^\/api\/reports(?:\/|$)/.test(pathname)) return "moderation:review";
   if (/^\/api\/support\/threads\/[^/]+\/(?:reply|draft|apply-template)(?:\/|$)/.test(pathname))
     return "support:reply";

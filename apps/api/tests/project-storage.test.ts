@@ -115,6 +115,47 @@ beforeEach(async () => {
 });
 
 describe("project storage migration", () => {
+  it("creates a verified standalone report in an already active project without creating support data", async () => {
+    await activate("orbit");
+    const appId = await db.prepare("SELECT id FROM apps WHERE slug='orbit'").first<string>("id");
+    if (!appId) throw new Error("Missing project fixture");
+    const ctx = createExecutionContext();
+    Object.defineProperty(ctx, "props", { value: { caller: "console", projects: ["orbit"] } });
+    const intake = new Intake(ctx, {
+      ...testEnv,
+      PROJECT_FEATURES: {
+        [appId]: {
+          inquiry: { enabled: false },
+          report: {
+            turnstile: {
+              secretBinding: "TURNSTILE_SECRET_ORBIT",
+              hostnames: ["form.example.com"],
+              action: "report",
+              trustedCallers: ["console"],
+            },
+          },
+        },
+      },
+    });
+    const submitted = await intake.submitReport(report("orbit"));
+    if (!submitted.ok) throw new Error(submitted.error.message);
+    expect(await intake.submitReport(report("orbit"))).toMatchObject({
+      ok: true,
+      value: { ...submitted.value, duplicate: true },
+    });
+    await waitOnExecutionContext(ctx);
+    expect(await db.prepare("SELECT id,type FROM p_orbit_cases").first()).toEqual({
+      id: submitted.value.reportId,
+      type: "REPORT",
+    });
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM p_orbit_support_tickets").first("n")).toBe(
+      0,
+    );
+    expect(await db.prepare("SELECT source_id FROM intake_verifications").first("source_id")).toBe(
+      submitted.value.reportId,
+    );
+  });
+
   it("preserves every column, stable IDs, histories and retry keys, and is replay-safe", async () => {
     const old = await h.support.createThread(
       {

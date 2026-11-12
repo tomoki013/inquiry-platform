@@ -9,6 +9,7 @@ import { FileStore } from "../db/files";
 import { SupportRepository } from "../db/support";
 import type { AdminCoreEnv } from "../env";
 import { json } from "../http";
+import type { ProjectFeatures } from "../project-features";
 import { DeliveryError, type DeliveryJobs, type JobRow } from "./delivery-jobs";
 import { sha256Hex } from "./identity";
 import type { SupportService } from "./support-service";
@@ -27,6 +28,7 @@ export class InboundJobs {
       threadId: string,
       attachmentId: string,
     ) => Promise<string>,
+    private readonly features?: ProjectFeatures,
   ) {}
   private async service(projectSlug: string): Promise<string> {
     if (projectSlug) {
@@ -45,6 +47,8 @@ export class InboundJobs {
     );
   }
   async store(request: Request): Promise<Response> {
+    const bucket = this.env.PRIVATE_FILES;
+    if (!bucket) return json({ error: "MAIL_QUEUE_UNAVAILABLE" }, 503);
     const projectSlug = request.headers.get("X-Mail-Project") ?? "";
     const to = request.headers.get("X-Mail-To") ?? "";
     if (projectSlug && !/^[a-z0-9-]{1,64}$/.test(projectSlug))
@@ -58,21 +62,23 @@ export class InboundJobs {
       if (error instanceof RangeError) return json({ error: "TOO_LARGE" }, 413);
       throw error;
     }
-    const { id, key } = await persistInboundMail(this.env.PRIVATE_FILES, bytes, to, projectSlug);
+    const { id, key } = await persistInboundMail(bucket, bytes, to, projectSlug);
     const serviceId = await this.service(projectSlug);
     const existing = await this.env.DB.prepare("SELECT state FROM delivery_jobs WHERE id=?")
       .bind(id)
       .first<{ state: string }>();
     if (existing?.state === "completed") {
-      await this.env.PRIVATE_FILES.delete(key);
+      await bucket.delete(key);
       return json({ jobId: id }, 202);
     }
     await this.jobs.statement(id, serviceId, "inbound_email", { key, to, projectSlug }).run();
     return json({ jobId: id }, 202);
   }
   async process(row: JobRow): Promise<() => Promise<void>> {
+    const bucket = this.env.PRIVATE_FILES;
+    if (!bucket) throw new DeliveryError("MAIL_STORAGE_UNAVAILABLE");
     const payload = JSON.parse(row.payload) as { key: string; to: string; projectSlug: string };
-    const object = await this.env.PRIVATE_FILES.get(payload.key);
+    const object = await bucket.get(payload.key);
     if (!object) throw new DeliveryError("RAW_MAIL_MISSING");
     if (Date.now() - Date.parse(object.customMetadata?.createdAt ?? "") > RETENTION)
       throw new DeliveryError("MAIL_EXPIRED");
@@ -99,13 +105,23 @@ export class InboundJobs {
       },
       { type: "email", id: "mail-ingress" },
     );
-    if (!result.ok) throw new DeliveryError("MAIL_INGEST_FAILED");
+    if (!result.ok) {
+      if (result.error.code === "FORBIDDEN") return () => bucket.delete(payload.key);
+      throw new DeliveryError("MAIL_INGEST_FAILED");
+    }
     const attachmentDb = this.attachmentDb
       ? await this.attachmentDb(result.value.messageId)
       : this.env.DB;
     if (!attachmentDb) throw new DeliveryError("PROJECT_UNAVAILABLE");
     const repo = this.attachmentDb ? new SupportRepository(attachmentDb) : this.repo;
-    const files = new FileStore(this.env.PRIVATE_FILES);
+    const thread = await repo.findThread(result.value.threadId);
+    if (
+      thread &&
+      this.features?.(thread.service_id, thread.report_id ? "report" : "inquiry").attachments ===
+        false
+    )
+      return () => bucket.delete(payload.key);
+    const files = new FileStore(bucket);
     for (const [index, attachment] of parsed.attachments.entries()) {
       if (!attachment.bytes.byteLength || attachment.bytes.byteLength > MAX_ATTACHMENT_BYTES)
         continue;
@@ -130,21 +146,23 @@ export class InboundJobs {
         })
         .run();
     }
-    return () => this.env.PRIVATE_FILES.delete(payload.key);
+    return () => bucket.delete(payload.key);
   }
   async reconcile(): Promise<void> {
+    const bucket = this.env.PRIVATE_FILES;
+    if (!bucket) return;
     const cursor = (
       await this.env.DB.prepare(
         "SELECT value FROM platform_settings WHERE key='inbound_reconcile_cursor'",
       ).first<{ value: string }>()
     )?.value;
-    const page = await this.env.PRIVATE_FILES.list({
+    const page = await bucket.list({
       prefix: PREFIX,
       limit: 50,
       ...(cursor ? { cursor } : {}),
     });
     for (const item of page.objects) {
-      const object = await this.env.PRIVATE_FILES.head(item.key);
+      const object = await bucket.head(item.key);
       const meta = object?.customMetadata;
       if (!meta?.to || !meta.createdAt) continue;
       const id = item.key.slice(PREFIX.length);
@@ -152,7 +170,7 @@ export class InboundJobs {
         .bind(id)
         .first<{ state: string }>();
       if (row?.state === "completed") {
-        await this.env.PRIVATE_FILES.delete(item.key);
+        await bucket.delete(item.key);
         continue;
       }
       const expired = Date.now() - Date.parse(meta.createdAt) > RETENTION;
@@ -185,7 +203,7 @@ export class InboundJobs {
         )
           .bind(new Date().toISOString(), id)
           .run();
-        await this.env.PRIVATE_FILES.delete(item.key);
+        await bucket.delete(item.key);
       }
     }
     await this.env.DB.prepare(

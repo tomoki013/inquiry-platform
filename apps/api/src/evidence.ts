@@ -6,6 +6,7 @@ import type { AdminCoreEnv } from "./env";
 import { json, readBounded } from "./http";
 import { privateCipher, privateDatabase } from "./privacy/crypto";
 import { privateBucket } from "./privacy/files";
+import { projectFeatures } from "./project-features";
 import { ProjectRegistry } from "./storage/database";
 
 /**
@@ -21,6 +22,7 @@ export async function putReportEvidence(
   reportId: string,
   request: Request,
 ): Promise<Response> {
+  if (!env.PRIVATE_FILES) return json({ error: "NOT_FOUND" }, 404);
   const cipher = privateCipher(env);
   const files = new FileStore(privateBucket(env.PRIVATE_FILES, cipher));
   const database = await new ProjectRegistry(privateDatabase(env.DB, cipher), cipher).forRecord(
@@ -31,6 +33,8 @@ export async function putReportEvidence(
   const reports = new ReportRepository(database);
   const report = await reports.findRow(reportId);
   if (!report) return json({ error: "NOT_FOUND" }, 404);
+  if (!projectFeatures(env.PROJECT_FEATURES)(report.app_id, "report").attachments)
+    return json({ error: "FORBIDDEN" }, 403);
   const body = await readBounded(request);
   if (!body) return json({ error: "TOO_LARGE" }, 413);
 

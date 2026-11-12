@@ -60,6 +60,7 @@ export const contactSubmissionSchema = z.object({
   email: z.string().optional(),
   name: z.string().optional(),
   channel: z.enum(["web_form", "app"]),
+  turnstileToken: z.string().min(1).max(2048).optional(),
 }) satisfies z.ZodType<ContactSubmission>;
 
 export const reportSubmissionSchema = z.object({
@@ -77,6 +78,7 @@ export const reportSubmissionSchema = z.object({
   evidenceExpected: z.boolean().optional(),
   reportedAt: z.string().optional(),
   priority: z.enum(["low", "normal", "high"]).optional(),
+  turnstileToken: z.string().min(1).max(2048).optional(),
 }) satisfies z.ZodType<ReportSubmission>;
 
 /** Compile-time proof that the SDK's copy of the internal statuses is this

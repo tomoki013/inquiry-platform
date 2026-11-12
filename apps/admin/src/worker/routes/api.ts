@@ -1,5 +1,6 @@
 import type { AdminIdentity } from "@inquiry-platform/core";
 import {
+  can,
   INTERNAL_ORIGIN,
   INTERNAL_PATHS,
   permissionsForRole,
@@ -178,6 +179,10 @@ export function registerApiRoutes(app: AdminApi): void {
 
   app.get("/api/reports/:id", async (c) =>
     respond(c, await c.get("core").getReport(c.req.param("id"))),
+  );
+
+  app.post("/api/reports/:id/reply", async (c) =>
+    respond(c, await c.get("core").replyToReporter(c.req.param("id"), await body(c), actor(c))),
   );
 
   app.post("/api/reports/:id/status", async (c) =>
@@ -407,6 +412,19 @@ export function registerApiRoutes(app: AdminApi): void {
   );
 
   app.get("/api/apps/:id", async (c) => respond(c, await c.get("core").getApp(c.req.param("id"))));
+
+  app.get("/api/apps/:id/features", async (c) => {
+    const result = await c.get("core").getAppFeatures(c.req.param("id"));
+    if (!result.ok) return respond(c, result);
+    const { role } = c.get("identity");
+    return respond(c, {
+      ok: true,
+      value: {
+        ...(can(role, "support:read") ? { inquiry: result.value.inquiry } : {}),
+        ...(can(role, "moderation:read") ? { report: result.value.report } : {}),
+      },
+    });
+  });
 
   app.patch("/api/apps/:id", async (c) =>
     respond(

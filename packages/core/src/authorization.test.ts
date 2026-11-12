@@ -37,6 +37,7 @@ describe("permissionFor", () => {
     ["PATCH", "/api/tickets/t1", "tickets:operate"],
     ["POST", "/api/tickets/t1/notes", "tickets:operate"],
     ["POST", "/api/support/threads/s1/reply", "support:reply"],
+    ["POST", "/api/reports/r1/reply", "moderation:reply"],
     ["POST", "/api/reports/r1/decision/prepare", "moderation:decide"],
     ["POST", "/api/tickets/masters", "platform:configure"],
     ["POST", "/api/apps", "platform:configure"],
@@ -69,6 +70,8 @@ it("separates support operation, moderation review and irreversible decisions", 
   expect(can("operator", "moderation:decide")).toBe(false);
   expect(can("support", "moderation:read")).toBe(false);
   expect(can("moderator", "support:reply")).toBe(false);
+  expect(can("moderator", "moderation:reply")).toBe(true);
+  expect(can("support", "moderation:reply")).toBe(false);
   expect(can("moderator", "moderation:decide")).toBe(true);
   expect(permissionFor("GET", "/api/activity")).toBe("audit:read");
   expect(permissionFor("POST", "/api/reports/r1/review")).toBe("moderation:review");

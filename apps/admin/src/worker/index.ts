@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import type { AdminWebEnv } from "./env";
 import { failure } from "./http";
 import { coreFor, resolveIdentity } from "./identity";
+import { readOnlyMcp } from "./mcp";
 import { type AdminApi, registerApiRoutes } from "./routes/api";
 import { requireSafeMutation, securityHeaders } from "./security";
 
@@ -78,6 +79,14 @@ export function createApp() {
   });
 
   registerApiRoutes(app as AdminApi);
+
+  app.all("/mcp", (c) => {
+    if (c.env.ENABLE_MCP !== "true") return c.notFound();
+    return readOnlyMcp(c.req.raw, c.get("identity").role, c.env.ADMIN_ORIGIN, async (path) => {
+      const request = new Request(new URL(path, c.req.url), { headers: c.req.raw.headers });
+      return app.fetch(request, c.env, c.executionCtx);
+    });
+  });
 
   // No HTML fallback. A typo, an attempted UI route, and an unknown API route
   // all receive the same machine-readable 404 contract.

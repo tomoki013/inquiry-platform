@@ -198,6 +198,7 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
     return this.unscoped(() => this.tickets.saveMaster(input, actor));
   }
   async ticketDashboard() {
+    if (this.env.ENABLE_DASHBOARD === "false") return fail("FORBIDDEN", "集計機能は無効です。");
     return this.tickets.dashboard(await this.scope());
   }
 
@@ -291,6 +292,11 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
   sendSupportReply(input: unknown, actor: ActorRef): Promise<Result<SupportThreadDetail>> {
     return this.within(this.threadIn(threadIdOf(input)), "問い合わせ", () =>
       this.services.reply.send(input, actor),
+    );
+  }
+  replyToReporter(reportId: string, input: unknown, actor: ActorRef) {
+    return this.within(this.reportIn(reportId), "通報", () =>
+      this.services.reports.replyToReporter(reportId, input, actor),
     );
   }
   mailProviderConfigured(): Promise<boolean> {
@@ -393,6 +399,26 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
   getApp(appId: string): Promise<Result<AppDetail>> {
     return this.within(this.appIn(appId), "アプリ", () => this.services.apps.detail(appId));
   }
+
+  getAppFeatures(appId: string) {
+    return this.getApp(appId).then((app) => {
+      if (!app.ok) return app;
+      const expose = (kind: "inquiry" | "report") => {
+        const { turnstile, receiptSignature, replySignature, ...features } = this.services.features(
+          appId,
+          kind,
+        );
+        return {
+          ...features,
+          receiptSignature: features.signature && receiptSignature !== false,
+          replySignature: features.signature && replySignature !== false,
+          turnstile: Boolean(turnstile),
+          mailConfigured: this.services.reply.mailConfiguredForApp(appId),
+        };
+      };
+      return { ok: true, value: { inquiry: expose("inquiry"), report: expose("report") } } as const;
+    });
+  }
   /** A new app would fall outside every scope, so only an unscoped console adds one. */
   createApp(input: unknown, actor: ActorRef): Promise<Result<AppDetail>> {
     return this.unscoped(() => this.services.apps.create(input, actor));
@@ -464,6 +490,7 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
   }
 
   async getDashboard(): Promise<Result<DashboardSummary>> {
+    if (this.env.ENABLE_DASHBOARD === "false") return fail("FORBIDDEN", "集計機能は無効です。");
     return this.services.dashboard.summary(await this.scope());
   }
 
@@ -486,6 +513,12 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
   }
 
   async scheduled(): Promise<void> {
+    await this.env.DB.prepare(
+      "UPDATE intake_verifications SET token_hash=NULL WHERE token_hash IS NOT NULL AND expires_at<=?",
+    )
+      .bind(Date.now())
+      .run()
+      .catch(() => console.log(JSON.stringify({ event: "intake.verification_cleanup_failed" })));
     await this.services.inbound
       .reconcile()
       .catch(() => console.log(JSON.stringify({ event: "delivery.reconcile_failed" })));
@@ -512,6 +545,7 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
       if (typeof input.project !== "string") return json({ error: "INVALID_PROJECT" }, 400);
       return json(await migratePrivateStorage(this.env, input.project), 200);
     }
+    if (!this.env.PRIVATE_FILES) return json({ error: "NOT_FOUND" }, 404);
     const files = new FileStore(privateBucket(this.env.PRIVATE_FILES, privateCipher(this.env)));
     const ref = /\/internal\/reports\/([^/]+)/.exec(url.pathname)?.[1];
     const message = /\/internal\/support\/messages\/([^/]+)/.exec(url.pathname)?.[1];

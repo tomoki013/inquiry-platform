@@ -30,6 +30,7 @@ import {
 import { z } from "zod";
 import { SupportRepository } from "../db/support";
 import { privateText } from "../privacy/crypto";
+import type { ProjectFeatures } from "../project-features";
 import { internalFailure, notFound, validationFailure } from "./failures";
 import { ModerationRegistry } from "./moderation";
 import { Scope } from "./scope";
@@ -58,20 +59,31 @@ const atRisk = [
     return `(t.${c} IS NULL AND t.closed_at IS NULL AND ${clockExpression(c, m, 0.8)})`;
   })
   .join(" OR ");
-const SELECT = `SELECT t.*,s.name AS service_name,CASE WHEN t.type='REPORT' THEN 'OK' WHEN ${breached} THEN 'BREACHED' WHEN ${atRisk} THEN 'AT_RISK' ELSE 'OK' END AS sla_state,
+const SELECT = `SELECT t.*,s.name AS service_name,CASE WHEN t.type='REPORT' OR t.service_id IN (SELECT value FROM json_each(?)) THEN 'OK' WHEN ${breached} THEN 'BREACHED' WHEN ${atRisk} THEN 'AT_RISK' ELSE 'OK' END AS sla_state,
  (SELECT source_id FROM ticket_sources WHERE ticket_id=t.id AND source_type='report' LIMIT 1) AS report_id,
  COALESCE((SELECT source_id FROM ticket_sources WHERE ticket_id=t.id AND source_type='support' AND source_id=t.id),(SELECT source_id FROM ticket_sources WHERE ticket_id=t.id AND source_type='support' LIMIT 1)) AS thread_id,
  CASE WHEN EXISTS(SELECT 1 FROM ticket_sources WHERE ticket_id=t.id AND source_type='report') THEN 'report'
       ELSE COALESCE((SELECT st.source FROM ticket_sources ts JOIN support_threads st ON st.id=ts.source_id WHERE ts.ticket_id=t.id AND ts.source_type='support' LIMIT 1), 'internal') END AS operator_source
  FROM tickets t JOIN services s ON s.id=t.service_id`;
-const clockBindings = (at: string) => Array(6).fill(at) as string[];
 
 /** Operations only. No mail provider: notes cannot send mail. */
 export class TicketService {
   constructor(
     private readonly db: D1Database,
     _moderation: ModerationRegistry = ModerationRegistry.none,
+    private readonly features?: ProjectFeatures,
   ) {}
+  private clockBindings(at: string) {
+    return [
+      JSON.stringify(this.features?.disabled("inquiry", "sla") ?? []),
+      at,
+      at,
+      at,
+      at,
+      at,
+      at,
+    ];
+  }
   private event(
     ticketId: string,
     eventType: string,
@@ -97,7 +109,7 @@ export class TicketService {
     const at = nowIso();
     return this.db
       .prepare(`${SELECT} WHERE t.id=? OR t.ticket_number=?`)
-      .bind(...clockBindings(at), id, id)
+      .bind(...this.clockBindings(at), id, id)
       .first<Ticket>();
   }
   async source(kind: string, id: string): Promise<Result<{ id: string }>> {
@@ -187,7 +199,7 @@ export class TicketService {
             .prepare(
               `SELECT q.*,(SELECT json_group_array(m.body) FROM ticket_messages m WHERE m.ticket_id=q.id) AS private_bodies ${from} ORDER BY priority,CASE sla_state WHEN 'BREACHED' THEN 0 WHEN 'AT_RISK' THEN 1 ELSE 2 END,created_at,id LIMIT 100 OFFSET ?`,
             )
-            .bind(...clockBindings(at), ...values, offset)
+            .bind(...this.clockBindings(at), ...values, offset)
             .all<Ticket & { private_bodies: string }>();
           for (const row of result.results) {
             const bodies = JSON.parse(row.private_bodies || "[]") as string[];
@@ -218,8 +230,10 @@ export class TicketService {
           .prepare(
             `SELECT * ${from} ORDER BY priority,CASE sla_state WHEN 'BREACHED' THEN 0 WHEN 'AT_RISK' THEN 1 ELSE 2 END,created_at,id LIMIT ? OFFSET ?`,
           )
-          .bind(...clockBindings(at), ...values, input.limit, input.offset),
-        this.db.prepare(`SELECT COUNT(*) AS total ${from}`).bind(...clockBindings(at), ...values),
+          .bind(...this.clockBindings(at), ...values, input.limit, input.offset),
+        this.db
+          .prepare(`SELECT COUNT(*) AS total ${from}`)
+          .bind(...this.clockBindings(at), ...values),
       ]);
       return ok({
         items: r[0]?.results as unknown as Ticket[],
@@ -341,6 +355,8 @@ export class TicketService {
         .bind(p.data.service_id)
         .first();
       if (!service) return notFound("Service");
+      if (this.features?.(p.data.service_id, "inquiry").enabled === false)
+        return fail("FORBIDDEN", "問い合わせ受付は無効です。");
       const id = newId(),
         at = nowIso(),
         repo = new SupportRepository(this.db);
@@ -381,6 +397,19 @@ export class TicketService {
     try {
       const row = await this.row(input.id);
       if (!row) return notFound("Ticket");
+      const config = this.features?.(row.service_id, row.report_id ? "report" : "inquiry");
+      if (
+        config?.assignment === false &&
+        (input.assignee_id !== undefined || input.assignment_group_id !== undefined)
+      )
+        return fail("FORBIDDEN", "担当の割り当ては無効です。");
+      if (
+        config?.classification === false &&
+        (input.category_id !== undefined ||
+          input.component_id !== undefined ||
+          input.type !== undefined)
+      )
+        return fail("FORBIDDEN", "チケットの分類は無効です。");
       if (row.merged_into) return fail("CONFLICT", "統合先のTicketを操作してください。");
       if (row.revision !== input.revision)
         return fail("CONFLICT", "別の操作が反映されました。再読み込みしてください。");
@@ -633,6 +662,11 @@ export class TicketService {
         target = await this.row(p.data.target_id);
       if (!source || !target) return notFound("Ticket");
       if (
+        this.features?.(source.service_id, source.report_id ? "report" : "inquiry").relations ===
+        false
+      )
+        return fail("FORBIDDEN", "チケットの関連付けは無効です。");
+      if (
         source.service_id !== target.service_id ||
         Boolean(source.report_id) !== Boolean(target.report_id)
       )
@@ -663,6 +697,8 @@ export class TicketService {
       const a = await this.row(p.data.id),
         b = await this.row(p.data.target_id);
       if (!a || !b) return notFound("Ticket");
+      if (this.features?.(a.service_id, "inquiry").relations === false)
+        return fail("FORBIDDEN", "チケットの統合は無効です。");
       if (a.service_id !== b.service_id || a.report_id || b.report_id)
         return fail("CONFLICT", "問い合わせの統合は同じProject内で行ってください。");
       if (
@@ -737,19 +773,24 @@ export class TicketService {
         .prepare(
           `SELECT COUNT(*) AS open,SUM(acknowledged_at IS NULL) AS unacknowledged,SUM(priority IN ('P1','P2')) AS urgent,SUM(sla_state<>'OK') AS slaRisk,SUM(next_action_at<?) AS overdue,SUM(status='WAITING_CUSTOMER') AS waitingCustomer ${sql}`,
         )
-        .bind(at, ...clockBindings(at), ...only)
+        .bind(at, ...this.clockBindings(at), ...only)
         .first<Record<string, number>>();
       const queue = await this.db
         .prepare(
           `SELECT * ${sql} ORDER BY priority,CASE sla_state WHEN 'BREACHED' THEN 0 WHEN 'AT_RISK' THEN 1 ELSE 2 END,created_at LIMIT 10`,
         )
-        .bind(...clockBindings(at), ...only)
+        .bind(...this.clockBindings(at), ...only)
         .all<Ticket>();
       const attention = await this.db
         .prepare(
           `SELECT * ${sql} AND (sla_state<>'OK' OR next_action_at<? OR assignee_id IS NULL OR (status IN ('WAITING_CUSTOMER','WAITING_INTERNAL') AND updated_at<?)) ORDER BY priority,created_at LIMIT 10`,
         )
-        .bind(...clockBindings(at), ...only, at, new Date(Date.now() - 3 * 86400000).toISOString())
+        .bind(
+          ...this.clockBindings(at),
+          ...only,
+          at,
+          new Date(Date.now() - 3 * 86400000).toISOString(),
+        )
         .all<Ticket>();
       return ok({
         open: counts?.open ?? 0,

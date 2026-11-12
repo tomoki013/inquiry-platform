@@ -48,6 +48,8 @@ export interface ContactSubmission {
   /** Only what the person typed. Never inferred. */
   name?: string;
   channel: "web_form" | "app";
+  /** Widget response when the Project requires Turnstile for this intake. */
+  turnstileToken?: string;
 }
 
 /**
@@ -78,6 +80,8 @@ export interface ReportSubmission {
   /** ISO 8601. Defaults to when the platform receives it. */
   reportedAt?: string;
   priority?: "low" | "normal" | "high";
+  /** Widget response when the Project requires Turnstile for this intake. */
+  turnstileToken?: string;
 }
 
 export interface ContactReceipt {

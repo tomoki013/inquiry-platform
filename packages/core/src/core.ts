@@ -108,6 +108,11 @@ export interface AdminCoreApi {
   createReport(input: CreateReportInput, actor: ActorRef): Promise<Result<CreateReportResult>>;
   listReports(input: ListReportsInput): Promise<Result<ReportListPage>>;
   getReport(reportId: string): Promise<Result<ReportDetail>>;
+  replyToReporter(
+    reportId: string,
+    input: unknown,
+    actor: ActorRef,
+  ): Promise<Result<SupportThreadDetail>>;
   changeReportStatus(
     input: ChangeReportStatusInput,
     actor: ActorRef,
@@ -191,6 +196,12 @@ export interface AdminCoreApi {
   // ---- Apps -------------------------------------------------------------
   listApps(input: ListAppsInput): Promise<Result<AppSummary[]>>;
   getApp(appId: string): Promise<Result<AppDetail>>;
+  getAppFeatures(appId: string): Promise<
+    Result<{
+      inquiry: Record<string, boolean>;
+      report: Record<string, boolean>;
+    }>
+  >;
   createApp(input: CreateAppInput, actor: ActorRef): Promise<Result<AppDetail>>;
   updateApp(appId: string, input: UpdateAppInput, actor: ActorRef): Promise<Result<AppDetail>>;
   archiveApp(appId: string, actor: ActorRef): Promise<Result<AppDetail>>;
