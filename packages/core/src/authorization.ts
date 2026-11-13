@@ -104,6 +104,8 @@ export function permissionFor(method: string, pathname: string): AdminPermission
     return "tickets:read";
   }
   if (!WRITE_METHODS.has(verb)) return null;
+  if (/^\/api\/support\/(?:inquiry-share|threads\/[^/]+\/inquiry-share)$/.test(pathname))
+    return "support:reply";
   if (CONFIGURATION_PATHS.some((pattern) => pattern.test(pathname))) return "platform:configure";
   if (/^\/api\/reports\/[^/]+\/(?:decision|resolution|status)(?:\/|$)/.test(pathname))
     return "moderation:decide";

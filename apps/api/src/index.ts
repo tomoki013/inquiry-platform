@@ -39,6 +39,7 @@ import { Scope } from "./domain/scope";
 import type { AdminCoreEnv } from "./env";
 import { putReportEvidence } from "./evidence";
 import { json, readBounded } from "./http";
+import { createInquiryShare, revokeInquiryShare, takeInquiryShare } from "./inquiry-share";
 import { privateCipher } from "./privacy/crypto";
 import { privateBucket } from "./privacy/files";
 import { migratePrivateStorage } from "./privacy/maintenance";
@@ -310,6 +311,31 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
       this.services.reply.getDraft(threadId),
     );
   }
+  createInquiryShare(threadId: string, input: unknown, actorId: string) {
+    return this.within(this.threadIn(threadId), "問い合わせ", async () => {
+      const thread = await this.services.support.threadForReply(threadId);
+      if (!thread || thread.report_id) return notFound("問い合わせ");
+      try {
+        return await createInquiryShare(this.env, actorId, input, thread);
+      } catch (error) {
+        return internalFailure("inquiryShare.create", error);
+      }
+    });
+  }
+  async takeInquiryShare(token: string, actorId: string) {
+    try {
+      return await takeInquiryShare(this.env, actorId, token, await this.scope());
+    } catch (error) {
+      return internalFailure("inquiryShare.take", error);
+    }
+  }
+  async revokeInquiryShare(actorId: string) {
+    try {
+      return await revokeInquiryShare(this.env, actorId);
+    } catch (error) {
+      return internalFailure("inquiryShare.revoke", error);
+    }
+  }
   createInquiryReplyDraft(threadId: string, bodyText: unknown, actor: ActorRef) {
     return this.within(this.threadIn(threadId), "問い合わせ", () =>
       this.services.reply.saveDraft({ threadId, bodyText }, actor),
@@ -531,6 +557,10 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
   }
 
   async scheduled(): Promise<void> {
+    await this.env.DB.prepare("DELETE FROM inquiry_mcp_shares WHERE expires_at<=?")
+      .bind(Date.now())
+      .run()
+      .catch(() => console.log(JSON.stringify({ event: "inquiry_share.cleanup_failed" })));
     await this.env.DB.prepare(
       "UPDATE intake_verifications SET token_hash=NULL WHERE token_hash IS NOT NULL AND expires_at<=?",
     )

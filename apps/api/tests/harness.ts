@@ -106,6 +106,7 @@ export async function migrate(): Promise<void> {
  */
 export async function reset(): Promise<void> {
   const tables = [
+    "inquiry_mcp_shares",
     "intake_verifications",
     "delivery_progress",
     "delivery_jobs",

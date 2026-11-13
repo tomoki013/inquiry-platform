@@ -167,6 +167,16 @@ export interface AdminCoreApi {
 
   // ---- Reply drafts and templates ---------------------------------------
   getSupportDraft(threadId: string): Promise<Result<SupportDraft | null>>;
+  createInquiryShare(
+    threadId: string,
+    input: unknown,
+    actorId: string,
+  ): Promise<Result<{ token: string; expiresAt: string }>>;
+  takeInquiryShare(
+    token: string,
+    actorId: string,
+  ): Promise<Result<{ messages: { speaker: "customer" | "support"; text: string }[] }>>;
+  revokeInquiryShare(actorId: string): Promise<Result<null>>;
   createInquiryReplyDraft(
     threadId: string,
     bodyText: unknown,
