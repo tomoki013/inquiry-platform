@@ -57,7 +57,8 @@ export async function verifyAccessJwt(request: Request, env: AdminWebEnv): Promi
       audience: env.ACCESS_AUD,
       algorithms: ["RS256"],
     });
-    return { ok: true, claims: toClaims(payload) };
+    const claims = toClaims(payload);
+    return claims ? { ok: true, claims } : { ok: false, reason: "invalid" };
   } catch {
     // Nothing about *why* goes anywhere near the response or the log: a
     // verification error message can quote the token.
@@ -70,9 +71,10 @@ function bearer(request: Request): string | undefined {
   return value?.startsWith("Bearer ") ? value.slice("Bearer ".length).trim() : undefined;
 }
 
-function toClaims(payload: JWTPayload): AccessClaims {
+function toClaims(payload: JWTPayload): AccessClaims | null {
+  if (typeof payload.sub !== "string" || !payload.sub.trim()) return null;
   const email = typeof payload.email === "string" ? payload.email : undefined;
-  return { sub: typeof payload.sub === "string" ? payload.sub : "unknown", email };
+  return { sub: payload.sub, email };
 }
 
 function cookie(request: Request, name: string): string | undefined {

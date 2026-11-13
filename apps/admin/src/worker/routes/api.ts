@@ -110,6 +110,7 @@ export function registerApiRoutes(app: AdminApi): void {
         email: identity.email,
         role: identity.role,
         permissions: permissionsForRole(identity.role),
+        inquiryMcp: c.env.ENABLE_INQUIRY_MCP === "true" && can(identity.role, "support:reply"),
         // Drives the composer: with no provider the send button is disabled and
         // says why, and everything else on the screen still works.
         mailConfigured: await c.get("core").mailProviderConfigured(),
@@ -307,6 +308,19 @@ export function registerApiRoutes(app: AdminApi): void {
   app.get("/api/support/threads/:id/draft", async (c) =>
     respond(c, await c.get("core").getSupportDraft(c.req.param("id"))),
   );
+  app.post("/api/support/threads/:id/inquiry-share", async (c) => {
+    if (c.env.ENABLE_INQUIRY_MCP !== "true") return c.notFound();
+    return respond(
+      c,
+      await c
+        .get("core")
+        .createInquiryShare(c.req.param("id"), await body(c), c.get("identity").id),
+    );
+  });
+  app.delete("/api/support/inquiry-share", async (c) => {
+    if (c.env.ENABLE_INQUIRY_MCP !== "true") return c.notFound();
+    return respond(c, await c.get("core").revokeInquiryShare(c.get("identity").id));
+  });
   app.post("/api/support/threads/:id/reply-draft", async (c) =>
     respond(
       c,

@@ -599,99 +599,66 @@ describe("domain permissions", () => {
   });
 });
 
-it("exposes only authorized read tools on the opt-in MCP endpoint", async () => {
-  const core = {
-    listReports: vi.fn(async () => ({ ok: true, value: { items: [], total: 0 } })),
-    listSupportThreads: vi.fn(),
-  };
+it("exposes only reviewed excerpts through the dedicated inquiry MCP", async () => {
+  const take = vi.fn(async () => ({
+    ok: true,
+    value: {
+      messages: [
+        { speaker: "customer", text: "画面が開きません。", sender: "private@example.com" },
+      ],
+      threadId: "private-ticket",
+    },
+  }));
+  const get = vi.fn();
+  const gateway = createApp();
   const context = { waitUntil: () => undefined } as unknown as ExecutionContext;
-  const settings = env({
-    ENVIRONMENT: "local",
-    DEV_ADMIN_EMAIL: "dev@example.com",
-    DEFAULT_ADMIN_ROLE: "moderator",
-    ENABLE_MCP: "true",
-    ADMIN_CORE: core as unknown as AdminWebEnv["ADMIN_CORE"],
-  });
-  const gateway = createApp();
-  function call(method: string, params?: object, origin?: string) {
+  const code = "a".repeat(64);
+  function call(method: string, params?: object, role = "support", path = "/inquiry-mcp") {
     return gateway.fetch(
-      new Request("https://admin.example.com/mcp", {
+      new Request(`https://admin.example.com${path}`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json, text/event-stream",
-          ...(origin ? { Origin: origin } : {}),
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-      }),
-      settings,
-      context,
-    );
-  }
-  expect((await call("tools/list", undefined, "https://other.example.com")).status).toBe(403);
-  const listed = await (await call("tools/list")).json<{
-    result: { tools: Array<{ name: string }> };
-  }>();
-  expect(listed.result.tools.map((tool) => tool.name)).toEqual(["list_reports", "get_report"]);
-  expect(await (await call("tools/call", { name: "list_inquiries" })).json()).toMatchObject({
-    error: { code: -32602 },
-  });
-  expect(await (await call("tools/call", { name: "list_reports" })).json()).toMatchObject({
-    result: { isError: false },
-  });
-  expect(core.listReports).toHaveBeenCalledTimes(1);
-  expect(core.listSupportThreads).not.toHaveBeenCalled();
-});
-
-it("routes an authorized MCP draft through the API and exposes no send operation", async () => {
-  const save = vi.fn(async () => ({ ok: true, value: { threadId: "t1" } }));
-  const core = {
-    getSupportThread: vi.fn(async () => ({ ok: true, value: {} })),
-    createInquiryReplyDraft: save,
-    sendSupportReply: vi.fn(),
-  };
-  const gateway = createApp();
-  const call = (name: string, role: "support" | "viewer") =>
-    gateway.fetch(
-      new Request("https://admin.example.com/mcp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Origin: "https://admin.example.com" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "tools/call",
-          params: { name, arguments: { id: "t1", bodyText: "お問い合わせありがとうございます。" } },
-        }),
       }),
       env({
         ENVIRONMENT: "local",
         DEV_ADMIN_EMAIL: "dev@example.com",
         DEFAULT_ADMIN_ROLE: role,
-        ENABLE_MCP: "true",
-        ENABLE_MCP_REPLY_DRAFTS: "true",
-        ADMIN_CORE: core as unknown as AdminWebEnv["ADMIN_CORE"],
+        ENABLE_INQUIRY_MCP: "true",
+        ADMIN_CORE: {
+          takeInquiryShare: take,
+          getSupportThread: get,
+        } as unknown as AdminWebEnv["ADMIN_CORE"],
       }),
-      { waitUntil: () => undefined } as unknown as ExecutionContext,
+      context,
     );
-  expect(await (await call("create_inquiry_reply_draft", "viewer")).json()).toMatchObject({
-    error: { code: -32602 },
-  });
-  expect(await (await call("create_report_reply_draft", "support")).json()).toMatchObject({
-    error: { code: -32602 },
-  });
-  expect(await (await call("send_inquiry_reply", "support")).json()).toMatchObject({
-    error: { code: -32602 },
-  });
-  expect(save).not.toHaveBeenCalled();
-  expect(await (await call("create_inquiry_reply_draft", "support")).json()).toMatchObject({
-    result: { isError: false },
-  });
-  expect(save).toHaveBeenCalledExactlyOnceWith(
-    "t1",
-    "お問い合わせありがとうございます。",
-    expect.objectContaining({ type: "admin" }),
-  );
-  expect(core.sendSupportReply).not.toHaveBeenCalled();
+  }
+  expect((await call("tools/list", undefined, "support", "/mcp")).status).toBe(404);
+  expect((await call("tools/list", undefined, "viewer")).status).toBe(404);
+  const list = await (await call("tools/list")).json<{
+    result: { tools: Array<{ name: string }> };
+  }>();
+  expect(list.result.tools.map((tool) => tool.name)).toEqual(["read_approved_inquiry"]);
+  expect(
+    await (
+      await call("tools/call", { name: "get_inquiry", arguments: { id: "private-ticket" } })
+    ).json(),
+  ).toMatchObject({ error: { code: -32602 } });
+  expect(
+    await (
+      await call("tools/call", {
+        name: "read_approved_inquiry",
+        arguments: { shareCode: code, id: "private-ticket" },
+      })
+    ).json(),
+  ).toMatchObject({ error: { code: -32602 } });
+  const result = await (
+    await call("tools/call", { name: "read_approved_inquiry", arguments: { shareCode: code } })
+  ).text();
+  expect(result).toContain("画面が開きません。");
+  expect(result).not.toContain("private");
+  expect(take).toHaveBeenCalledExactlyOnceWith(code, "local:dev@example.com");
+  expect(get).not.toHaveBeenCalled();
 });
 
 it("uses an identity's deployment-selected scoped binding and rejects an unmapped identity", async () => {

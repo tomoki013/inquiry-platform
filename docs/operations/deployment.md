@@ -67,9 +67,11 @@ Core の `vars.PROJECT_FEATURES` は、Project の不変 ID をキーにして `
 
 Secret は Core に登録する。Project の画面は公開 sitekey と同じ action を使い、バックエンドから SDK の `turnstileToken` を添えて送る。サーバー間受付を許可するときは専用 binding を作り、その `caller` を `trustedCallers` に指定する。公開フォームと共有する binding の caller は指定しない。
 
-MCP を使う環境では gateway の `ENABLE_MCP: "true"` を設定する。`/mcp` は Cloudflare Access の認証を経由し、同じ運用 API の権限で問い合わせ・通報の一覧と詳細を公開する。Access 認証のヘッダーを付けられる Streamable HTTP クライアントから利用する。 [MCP のトランスポート仕様](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
+問い合わせの専用 MCP は、migration `0023_inquiry_mcp_shares.sql` の適用後、Gateway に `ENABLE_INQUIRY_MCP: "true"` を設定すると `/inquiry-mcp` で利用できる。Core の個人情報保護用暗号化キーが必要。管理画面を別 Worker で運用している場合はこのパスも Gateway に転送する。Access で管理画面と同じ操作者として認証できる Streamable HTTP クライアントを使う。 [MCP のトランスポート仕様](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
 
-返信案を管理画面の下書きに保存する場合は、gateway に `ENABLE_MCP_REPLY_DRAFTS: "true"` も設定する。MCP クライアントで対象の問い合わせや通報を開いて返信案を作り、確認後に `create_inquiry_reply_draft` または `create_report_reply_draft` へ ID と本文を渡す。既存の下書きがあれば競合として返る。保存には対象 Project のスコープと返信権限が必要で、操作を監査に記録する。送信は管理画面の返信操作で行う。
+管理画面で問い合わせを1件開き、共有用に書き直したやり取りだけを確認して共有コードを発行する。氏名・連絡先・住所・識別番号や第三者を特定できる情報は操作者が取り除く。基盤は記録済みの氏名とメールアドレス、典型的なメールアドレスや電話番号を追加で検出する。入力文に残るあらゆる個人情報を自動で判定することはできない。
+
+`read_approved_inquiry` はその操作者の10分間・1回限りのコードで確認済みの発言だけを返す。新しいコードを作ると前のコードは無効になる。受け取った文章で返信案を作り、`{{userName}}` のような箇所は管理画面に戻って差し替える。専用 MCP が持つツールはこの読み取り操作のみ。
 
 ### Project ごとの送信キーとブランド（v0.3.2+）
 
