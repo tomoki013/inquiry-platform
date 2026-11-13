@@ -108,6 +108,7 @@ export interface AdminCoreApi {
   createReport(input: CreateReportInput, actor: ActorRef): Promise<Result<CreateReportResult>>;
   listReports(input: ListReportsInput): Promise<Result<ReportListPage>>;
   getReport(reportId: string): Promise<Result<ReportDetail>>;
+  getReportConversation(reportId: string): Promise<Result<SupportThreadDetail | null>>;
   replyToReporter(
     reportId: string,
     input: unknown,
@@ -166,6 +167,16 @@ export interface AdminCoreApi {
 
   // ---- Reply drafts and templates ---------------------------------------
   getSupportDraft(threadId: string): Promise<Result<SupportDraft | null>>;
+  createInquiryReplyDraft(
+    threadId: string,
+    bodyText: unknown,
+    actor: ActorRef,
+  ): Promise<Result<SupportDraft>>;
+  createReportReplyDraft(
+    reportId: string,
+    bodyText: unknown,
+    actor: ActorRef,
+  ): Promise<Result<SupportDraft>>;
   /** Autosaved, and deliberately not audited: a log line per debounced
    * keystroke would bury the entries that matter. The send is audited. */
   saveSupportDraft(input: SaveSupportDraftInput): Promise<Result<SupportDraft>>;

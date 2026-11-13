@@ -4,6 +4,7 @@ import type {
   ReportDetail,
   ReportListPage,
   Result,
+  SupportDraft,
   SupportThreadDetail,
 } from "@inquiry-platform/core";
 import {
@@ -18,6 +19,7 @@ import {
   nowIso,
   ok,
   reportDecisionSchema,
+  saveSupportDraftInputSchema,
   sendSupportReplyInputSchema,
   updateReportResolutionInputSchema,
 } from "@inquiry-platform/core";
@@ -211,34 +213,66 @@ export class ReportService {
         return fail("FORBIDDEN", "通報への返信は無効です。");
       if (parsed.data.templateId && config?.templates === false)
         return fail("FORBIDDEN", "定型文は無効です。");
-      if (report.support_thread_id)
-        return this.reply.send({ ...parsed.data, threadId: report.support_thread_id }, actor);
-
-      const ticket = await new TicketService(this.db).row(reportId);
-      if (!ticket?.requester_email) return fail("CONFLICT", "通報者の連絡先がありません。");
-      await this.db.batch([
-        this.support.insertThreadStatement(
-          {
-            id: ticket.id,
-            appId: report.app_id,
-            source: "email",
-            subject: ticket.subject,
-            requesterEmail: ticket.requester_email,
-            at: nowIso(),
-          },
-          true,
-        ),
-        this.db
-          .prepare(`UPDATE reports SET support_thread_id=? WHERE id=? AND support_thread_id IS NULL
-          AND EXISTS(SELECT 1 FROM support_threads WHERE id=? AND app_id=?)`)
-          .bind(ticket.id, reportId, ticket.id, report.app_id),
-      ]);
-      const linked = await this.reports.findRow(reportId);
-      if (!linked?.support_thread_id) return fail("CONFLICT", "通報のメール会話を作成できません。");
-      return this.reply.send({ ...parsed.data, threadId: linked.support_thread_id }, actor);
+      const thread = await this.reportConversation(report);
+      if (!thread.ok) return thread;
+      return this.reply.send({ ...parsed.data, threadId: thread.value }, actor);
     } catch (error) {
       return internalFailure("report.replyToReporter", error);
     }
+  }
+
+  async createReplyDraft(
+    reportId: string,
+    bodyText: unknown,
+    actor: ActorRef,
+  ): Promise<Result<SupportDraft>> {
+    const parsed = saveSupportDraftInputSchema.safeParse({ threadId: reportId, bodyText });
+    if (!parsed.success) return validationFailure(parsed.error);
+    if (!parsed.data.bodyText.trim())
+      return fail("VALIDATION_ERROR", "返信本文を入力してください。");
+    try {
+      const report = await this.reports.findRow(reportId);
+      if (!report) return notFound("通報");
+      const config = this.features?.(report.app_id, "report");
+      if (config?.enabled === false || config?.reply === false || config?.drafts === false)
+        return fail("FORBIDDEN", "通報の返信下書きは無効です。");
+      const thread = await this.reportConversation(report);
+      if (!thread.ok) return thread;
+      return this.reply.saveDraft({ ...parsed.data, threadId: thread.value }, actor, reportId);
+    } catch (error) {
+      return internalFailure("report.createReplyDraft", error);
+    }
+  }
+
+  private async reportConversation(
+    report: NonNullable<Awaited<ReturnType<ReportRepository["findRow"]>>>,
+  ): Promise<Result<string>> {
+    if (report.support_thread_id) return ok(report.support_thread_id);
+    const source = await new TicketService(this.db).source("report", report.id);
+    if (!source.ok) return source;
+    const ticket = await new TicketService(this.db).row(source.value.id);
+    if (!ticket?.requester_email) return fail("CONFLICT", "通報者の連絡先がありません。");
+    await this.db.batch([
+      this.support.insertThreadStatement(
+        {
+          id: ticket.id,
+          appId: report.app_id,
+          source: "email",
+          subject: ticket.subject,
+          requesterEmail: ticket.requester_email,
+          at: nowIso(),
+        },
+        true,
+      ),
+      this.db
+        .prepare(`UPDATE reports SET support_thread_id=? WHERE id=? AND support_thread_id IS NULL
+        AND EXISTS(SELECT 1 FROM support_threads WHERE id=? AND app_id=?)`)
+        .bind(ticket.id, report.id, ticket.id, report.app_id),
+    ]);
+    const linked = await this.reports.findRow(report.id);
+    return linked?.support_thread_id
+      ? ok(linked.support_thread_id)
+      : fail("CONFLICT", "通報のメール会話を作成できません。");
   }
 
   async prepareDecision(raw: unknown, actor: ActorRef): Promise<Result<ModerationProposal>> {

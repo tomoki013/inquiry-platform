@@ -14,6 +14,7 @@ export interface AdminWebEnv {
   ADMIN_ORIGIN: string;
   ENVIRONMENT: string;
   ENABLE_MCP?: string;
+  ENABLE_MCP_REPLY_DRAFTS?: string;
 
   /**
    * The role of anybody Access lets in and `ADMIN_ROLES` does not name.

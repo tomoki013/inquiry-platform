@@ -196,7 +196,7 @@ describe("Intake: features per Project", () => {
     expect(await testEnv.DB.prepare("SELECT COUNT(*) AS n FROM delivery_jobs").first("n")).toBe(0);
   });
 
-  it("creates a report conversation on the first reply and keeps the report's ticket and decision", async () => {
+  it("creates a report conversation on the first draft and keeps the report's ticket and decision", async () => {
     const orbit = await id("orbit");
     const configured = {
       ...testEnv,
@@ -206,6 +206,7 @@ describe("Intake: features per Project", () => {
           inquiry: { enabled: false },
           report: {
             reply: true,
+            drafts: true,
             receipt: false,
             notifyEmail: false,
             notifyPush: false,
@@ -228,6 +229,25 @@ describe("Intake: features per Project", () => {
     expect(await testEnv.DB.prepare("SELECT COUNT(*) AS n FROM support_threads").first("n")).toBe(
       0,
     );
+    const draft = await core.createReportReplyDraft(reportId, "通報を確認しました。", actor);
+    if (!draft.ok) throw new Error(draft.error.message);
+    expect(draft).toMatchObject({ ok: true, value: { bodyText: "通報を確認しました。" } });
+    expect(await core.createReportReplyDraft(reportId, "別の文面", actor)).toMatchObject({
+      ok: false,
+      error: { code: "CONFLICT" },
+    });
+    expect(await core.getSupportDraft(draft.value.threadId)).toEqual(draft);
+    expect(await core.createInquiryReplyDraft(draft.value.threadId, "対象外", actor)).toMatchObject(
+      { ok: false, error: { code: "NOT_FOUND" } },
+    );
+    expect(
+      await testEnv.DB.prepare(
+        "SELECT count(*) AS n FROM audit_logs WHERE action='reply.draft_created' AND target_type='report' AND target_id=?",
+      )
+        .bind(reportId)
+        .first("n"),
+    ).toBe(1);
+    expect(send).not.toHaveBeenCalled();
     const sent = await core.replyToReporter(
       reportId,
       {

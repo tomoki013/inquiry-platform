@@ -342,6 +342,7 @@ export function buildServices(
       detail: record("report"),
       sendReceipt: record("report"),
       replyToReporter: record("report"),
+      createReplyDraft: record("report"),
       prepareDecision: record("report", "reportId"),
       completeDecision: record("report", "reportId"),
       changeStatus: record("report", "reportId"),

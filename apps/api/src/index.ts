@@ -310,6 +310,24 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
       this.services.reply.getDraft(threadId),
     );
   }
+  createInquiryReplyDraft(threadId: string, bodyText: unknown, actor: ActorRef) {
+    return this.within(this.threadIn(threadId), "問い合わせ", () =>
+      this.services.reply.saveDraft({ threadId, bodyText }, actor),
+    );
+  }
+  createReportReplyDraft(reportId: string, bodyText: unknown, actor: ActorRef) {
+    return this.within(this.reportIn(reportId), "通報", () =>
+      this.services.reports.createReplyDraft(reportId, bodyText, actor),
+    );
+  }
+  async getReportConversation(reportId: string): Promise<Result<SupportThreadDetail | null>> {
+    const report = await this.getReport(reportId);
+    if (!report.ok) return report;
+    const threadId = report.value.supportThreadId;
+    if (!threadId) return ok(null);
+    const thread = await this.getSupportThread(threadId);
+    return thread.ok && thread.value.reportId !== reportId ? notFound("通報の会話") : thread;
+  }
   saveSupportDraft(input: unknown): Promise<Result<SupportDraft>> {
     return this.within(this.threadIn(threadIdOf(input)), "問い合わせ", () =>
       this.services.reply.saveDraft(input),

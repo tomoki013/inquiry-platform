@@ -643,6 +643,57 @@ it("exposes only authorized read tools on the opt-in MCP endpoint", async () => 
   expect(core.listSupportThreads).not.toHaveBeenCalled();
 });
 
+it("routes an authorized MCP draft through the API and exposes no send operation", async () => {
+  const save = vi.fn(async () => ({ ok: true, value: { threadId: "t1" } }));
+  const core = {
+    getSupportThread: vi.fn(async () => ({ ok: true, value: {} })),
+    createInquiryReplyDraft: save,
+    sendSupportReply: vi.fn(),
+  };
+  const gateway = createApp();
+  const call = (name: string, role: "support" | "viewer") =>
+    gateway.fetch(
+      new Request("https://admin.example.com/mcp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: "https://admin.example.com" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name, arguments: { id: "t1", bodyText: "お問い合わせありがとうございます。" } },
+        }),
+      }),
+      env({
+        ENVIRONMENT: "local",
+        DEV_ADMIN_EMAIL: "dev@example.com",
+        DEFAULT_ADMIN_ROLE: role,
+        ENABLE_MCP: "true",
+        ENABLE_MCP_REPLY_DRAFTS: "true",
+        ADMIN_CORE: core as unknown as AdminWebEnv["ADMIN_CORE"],
+      }),
+      { waitUntil: () => undefined } as unknown as ExecutionContext,
+    );
+  expect(await (await call("create_inquiry_reply_draft", "viewer")).json()).toMatchObject({
+    error: { code: -32602 },
+  });
+  expect(await (await call("create_report_reply_draft", "support")).json()).toMatchObject({
+    error: { code: -32602 },
+  });
+  expect(await (await call("send_inquiry_reply", "support")).json()).toMatchObject({
+    error: { code: -32602 },
+  });
+  expect(save).not.toHaveBeenCalled();
+  expect(await (await call("create_inquiry_reply_draft", "support")).json()).toMatchObject({
+    result: { isError: false },
+  });
+  expect(save).toHaveBeenCalledExactlyOnceWith(
+    "t1",
+    "お問い合わせありがとうございます。",
+    expect.objectContaining({ type: "admin" }),
+  );
+  expect(core.sendSupportReply).not.toHaveBeenCalled();
+});
+
 it("uses an identity's deployment-selected scoped binding and rejects an unmapped identity", async () => {
   const selected = {
     listTickets: vi.fn(async () => ({ ok: true, value: { items: [], total: 0 } })),
