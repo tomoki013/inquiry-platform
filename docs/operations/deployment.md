@@ -69,6 +69,8 @@ Secret は Core に登録する。Project の画面は公開 sitekey と同じ a
 
 MCP を使う環境では gateway の `ENABLE_MCP: "true"` を設定する。`/mcp` は Cloudflare Access の認証を経由し、同じ運用 API の権限で問い合わせ・通報の一覧と詳細を公開する。Access 認証のヘッダーを付けられる Streamable HTTP クライアントから利用する。 [MCP のトランスポート仕様](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
 
+返信案を管理画面の下書きに保存する場合は、gateway に `ENABLE_MCP_REPLY_DRAFTS: "true"` も設定する。MCP クライアントで対象の問い合わせや通報を開いて返信案を作り、確認後に `create_inquiry_reply_draft` または `create_report_reply_draft` へ ID と本文を渡す。既存の下書きがあれば競合として返る。保存には対象 Project のスコープと返信権限が必要で、操作を監査に記録する。送信は管理画面の返信操作で行う。
+
 ### Project ごとの送信キーとブランド（v0.3.2+）
 
 共通 API を使いながら送信契約を分けるには、Core の `vars.PROJECT_MAIL_PROVIDERS`

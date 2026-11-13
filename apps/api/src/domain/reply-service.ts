@@ -147,7 +147,11 @@ export class ReplyService {
    * and would be a running record of somebody composing. The send is audited;
    * the drafting is not.
    */
-  async saveDraft(raw: unknown): Promise<Result<SupportDraft>> {
+  async saveDraft(
+    raw: unknown,
+    createBy?: ActorRef,
+    reportId?: string,
+  ): Promise<Result<SupportDraft>> {
     const parsed = saveSupportDraftInputSchema.safeParse(raw);
     if (!parsed.success) return validationFailure(parsed.error);
     try {
@@ -155,6 +159,29 @@ export class ReplyService {
       if (!thread) return notFound("問い合わせ");
       if (this.featuresFor(thread)?.drafts === false)
         return fail("FORBIDDEN", "下書きは無効です。");
+      if (createBy) {
+        if ((thread.report_id ?? undefined) !== reportId) return notFound("会話");
+        const features = this.featuresFor(thread);
+        if (features?.enabled === false || features?.reply === false)
+          return fail("FORBIDDEN", "返信は無効です。");
+        if (!thread.requester_email) return fail("CONFLICT", "返信先が登録されていません。");
+        const body = await this.withoutSignature(thread.id, parsed.data.bodyText);
+        if (!body.trim()) return fail("VALIDATION_ERROR", "返信本文を入力してください。");
+        const saved = await this.support.saveDraft(
+          thread.id,
+          body,
+          this.audit.statement(
+            {
+              actor: createBy,
+              action: "reply.draft_created",
+              targetType: reportId ? "report" : "support_thread",
+              targetId: reportId ?? thread.id,
+            },
+            true,
+          ),
+        );
+        return saved ? ok(saved) : fail("CONFLICT", "既存の下書きを管理画面で確認してください。");
+      }
       return ok(
         await this.support.saveDraft(
           parsed.data.threadId,

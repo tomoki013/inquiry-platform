@@ -487,17 +487,31 @@ export class SupportRepository {
 
   /** One row per thread — the primary key is `thread_id`, so an upsert is the
    * only shape this can take and a second draft cannot appear. */
-  async saveDraft(threadId: string, bodyText: string): Promise<SupportDraft> {
+  async saveDraft(threadId: string, bodyText: string): Promise<SupportDraft>;
+  async saveDraft(
+    threadId: string,
+    bodyText: string,
+    audit: D1PreparedStatement,
+  ): Promise<SupportDraft | null>;
+  async saveDraft(
+    threadId: string,
+    bodyText: string,
+    audit?: D1PreparedStatement,
+  ): Promise<SupportDraft | null> {
     const at = nowIso();
-    await this.db
+    const statement = this.db
       .prepare(
         `INSERT INTO support_drafts (thread_id, body_text, created_at, updated_at)
          VALUES (?, ?, ?, ?)
-         ON CONFLICT(thread_id) DO UPDATE SET body_text = excluded.body_text,
-                                              updated_at = excluded.updated_at`,
+         ON CONFLICT(thread_id) ${audit ? "DO NOTHING" : "DO UPDATE SET body_text = excluded.body_text, updated_at = excluded.updated_at"}`,
       )
-      .bind(threadId, privateText(this.db, bodyText), at, at)
-      .run();
+      .bind(threadId, privateText(this.db, bodyText), at, at);
+    if (audit) {
+      const [saved] = await this.db.batch([statement, audit]);
+      if (!saved?.meta.changes) return null;
+    } else {
+      await statement.run();
+    }
     return { threadId, bodyText, updatedAt: at };
   }
 

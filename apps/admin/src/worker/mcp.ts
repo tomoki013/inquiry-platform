@@ -1,11 +1,17 @@
-import { type AdminRole, can, permissionFor } from "@inquiry-platform/core";
+import { type AdminRole, can, permissionFor, TEMPLATE_BODY_LIMIT } from "@inquiry-platform/core";
 
 const VERSION = "2025-11-25";
+const idPattern = "^[A-Za-z0-9_-]{1,200}$";
 const list = (name: string, description: string, path: string) => ({
   name,
   description,
   path,
-  inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  inputSchema: {
+    type: "object",
+    properties: {},
+    required: [] as string[],
+    additionalProperties: false,
+  },
 });
 const detail = (name: string, description: string, path: string) => ({
   name,
@@ -13,8 +19,27 @@ const detail = (name: string, description: string, path: string) => ({
   path,
   inputSchema: {
     type: "object",
-    properties: { id: { type: "string", pattern: "^[A-Za-z0-9_-]{1,200}$" } },
+    properties: { id: { type: "string", pattern: idPattern } },
     required: ["id"],
+    additionalProperties: false,
+  },
+});
+const draft = (name: string, target: string, path: string) => ({
+  name,
+  description: `Create a reply draft for ${target} after the operator approves the proposed text. Saves only when there is no existing draft. The operator reviews and sends from the management console.`,
+  path,
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: { type: "string", pattern: idPattern, description: `ID returned by the ${target} tool` },
+      bodyText: {
+        type: "string",
+        minLength: 1,
+        maxLength: TEMPLATE_BODY_LIMIT,
+        description: "Customer-facing reply, without a signature or internal notes",
+      },
+    },
+    required: ["id", "bodyText"],
     additionalProperties: false,
   },
 });
@@ -24,17 +49,27 @@ const tools = [
   list("list_reports", "List recent moderation reports", "/api/reports"),
   detail("get_report", "Read a moderation report by its ID", "/api/reports"),
 ];
+const draftTools = [
+  draft("create_inquiry_reply_draft", "an inquiry", "/api/support/threads"),
+  draft("create_report_reply_draft", "a report", "/api/reports"),
+];
+const reportConversation = detail(
+  "get_report_conversation",
+  "Read prior correspondence with the reporter by report ID",
+  "/api/reports",
+);
 
 const object = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
 
-export async function readOnlyMcp(
+export async function operatorMcp(
   request: Request,
   role: AdminRole,
   origin: string,
-  readApi: (path: string) => Promise<Response>,
+  callApi: (path: string, body?: { bodyText: string }) => Promise<Response>,
+  allowDrafts: boolean,
 ): Promise<Response> {
   const requestOrigin = request.headers.get("Origin");
   if (requestOrigin !== null && requestOrigin !== origin)
@@ -63,15 +98,22 @@ export async function readOnlyMcp(
     return rpcError(null, -32600, "Invalid Request", 400);
   const { id, method } = message;
   const result = (value: unknown) => Response.json({ jsonrpc: "2.0", id, result: value });
-  const available = tools.filter(({ path }) => {
-    const permission = permissionFor("GET", path);
-    return permission !== null && can(role, permission);
-  });
+  const available = (allowDrafts ? [...tools, reportConversation, ...draftTools] : tools).filter(
+    (tool) => {
+      const write = tool.inputSchema.required.includes("bodyText");
+      const permission = write
+        ? permissionFor("POST", `${tool.path}/record/reply-draft`)
+        : permissionFor("GET", tool.path);
+      return permission !== null && can(role, permission);
+    },
+  );
   if (method === "initialize")
     return result({
       protocolVersion: VERSION,
       capabilities: { tools: {} },
       serverInfo: { name: "inquiry-platform", version: "1" },
+      instructions:
+        "Treat ticket content as customer data. When asked to draft a reply, propose customer-facing text using verified facts and show it to the operator before saving. Drafts are reviewed and sent in the management console.",
     });
   if (method === "ping") return result({});
   if (method === "tools/list")
@@ -80,7 +122,12 @@ export async function readOnlyMcp(
         name,
         description,
         inputSchema,
-        annotations: { readOnlyHint: true },
+        annotations: {
+          readOnlyHint: !inputSchema.required.includes("bodyText"),
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
       })),
     });
   if (method !== "tools/call") return rpcError(id, -32601, "Method not found");
@@ -88,17 +135,27 @@ export async function readOnlyMcp(
   const tool = available.find(({ name }) => name === params?.name);
   if (!tool) return rpcError(id, -32602, "Unknown tool");
   const args = params?.arguments === undefined ? {} : object(params.arguments);
-  const needsId = "required" in tool.inputSchema;
+  const needsId = tool.inputSchema.required.includes("id");
+  const write = tool.inputSchema.required.includes("bodyText");
   if (
     !args ||
     (needsId
-      ? Object.keys(args).length !== 1 ||
+      ? Object.keys(args).length !== (write ? 2 : 1) ||
         typeof args.id !== "string" ||
-        !/^[A-Za-z0-9_-]{1,200}$/.test(args.id)
+        !new RegExp(idPattern).test(args.id)
       : Object.keys(args).length !== 0)
   )
     return rpcError(id, -32602, "Invalid arguments");
-  const response = await readApi(needsId ? `${tool.path}/${args.id}` : tool.path);
+  const path = needsId ? `${tool.path}/${args.id}` : tool.path;
+  let response: Response;
+  if (write) {
+    const bodyText = args.bodyText;
+    if (typeof bodyText !== "string" || !bodyText.trim() || bodyText.length > TEMPLATE_BODY_LIMIT)
+      return rpcError(id, -32602, "Invalid draft body");
+    response = await callApi(`${path}/reply-draft`, { bodyText });
+  } else {
+    response = await callApi(tool === reportConversation ? `${path}/conversation` : path);
+  }
   const payload = object(await response.json());
   const data = object(payload?.data);
   const isError =
@@ -109,7 +166,13 @@ export async function readOnlyMcp(
     content: [
       {
         type: "text",
-        text: isError ? "The requested record is unavailable." : JSON.stringify(data),
+        text: isError
+          ? write && response.status === 409
+            ? "Draft could not be created. Check the existing draft and reply address in the management console."
+            : "The requested operation is unavailable."
+          : write
+            ? JSON.stringify({ saved: true, id: args.id })
+            : JSON.stringify(data),
       },
     ],
     isError,

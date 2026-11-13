@@ -184,6 +184,17 @@ export function registerApiRoutes(app: AdminApi): void {
   app.post("/api/reports/:id/reply", async (c) =>
     respond(c, await c.get("core").replyToReporter(c.req.param("id"), await body(c), actor(c))),
   );
+  app.post("/api/reports/:id/reply-draft", async (c) =>
+    respond(
+      c,
+      await c
+        .get("core")
+        .createReportReplyDraft(c.req.param("id"), (await body(c)).bodyText, actor(c)),
+    ),
+  );
+  app.get("/api/reports/:id/conversation", async (c) =>
+    respond(c, await c.get("core").getReportConversation(c.req.param("id"))),
+  );
 
   app.post("/api/reports/:id/status", async (c) =>
     respond(
@@ -295,6 +306,14 @@ export function registerApiRoutes(app: AdminApi): void {
 
   app.get("/api/support/threads/:id/draft", async (c) =>
     respond(c, await c.get("core").getSupportDraft(c.req.param("id"))),
+  );
+  app.post("/api/support/threads/:id/reply-draft", async (c) =>
+    respond(
+      c,
+      await c
+        .get("core")
+        .createInquiryReplyDraft(c.req.param("id"), (await body(c)).bodyText, actor(c)),
+    ),
   );
 
   app.put("/api/support/threads/:id/draft", async (c) =>

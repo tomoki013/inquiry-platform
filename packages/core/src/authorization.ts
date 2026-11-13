@@ -107,7 +107,8 @@ export function permissionFor(method: string, pathname: string): AdminPermission
   if (CONFIGURATION_PATHS.some((pattern) => pattern.test(pathname))) return "platform:configure";
   if (/^\/api\/reports\/[^/]+\/(?:decision|resolution|status)(?:\/|$)/.test(pathname))
     return "moderation:decide";
-  if (/^\/api\/reports\/[^/]+\/reply$/.test(pathname)) return "moderation:reply";
+  if (/^\/api\/reports\/[^/]+\/(?:reply|reply-draft)$/.test(pathname)) return "moderation:reply";
+  if (/^\/api\/support\/threads\/[^/]+\/reply-draft$/.test(pathname)) return "support:reply";
   if (/^\/api\/reports(?:\/|$)/.test(pathname)) return "moderation:review";
   if (/^\/api\/support\/threads\/[^/]+\/(?:reply|draft|apply-template)(?:\/|$)/.test(pathname))
     return "support:reply";
