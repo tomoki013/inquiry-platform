@@ -131,6 +131,60 @@ export class ReportRepository {
       );
   }
 
+  /** A report can own its ticket number without opening an email conversation. */
+  ticketStatements(
+    input: CreateReportInput,
+    values: {
+      id: string;
+      appId: string;
+      subject: string;
+      at: string;
+      reporterRefHash?: string;
+      authorRefHash?: string;
+    },
+  ): D1PreparedStatement[] {
+    const { id, appId, subject, at, reporterRefHash } = values;
+    const priority = input.priority === "high" ? "P2" : input.priority === "low" ? "P4" : "P3";
+    return [
+      this.db.prepare("INSERT INTO ticket_numbers(ticket_id) VALUES(?)").bind(id),
+      this.db
+        .prepare(`INSERT INTO tickets(
+        id,ticket_number,type,status,priority,impact,urgency,service_id,assignment_group_id,subject,
+        requester_id,requester_email,created_at,updated_at,sla_ack_minutes,sla_response_minutes,sla_resolution_minutes
+      ) SELECT ?, 'TK-' || printf('%06d', n.seq), 'REPORT', 'NEW', s.priority, ?, ?, ?,
+        'moderation', ?, ?, ?, ?, ?, s.ack, s.response, s.resolution
+        FROM ticket_numbers n CROSS JOIN ticket_sla_settings s WHERE n.ticket_id=? AND s.priority=?`)
+        .bind(
+          id,
+          input.priority === "high" ? "HIGH" : input.priority === "low" ? "LOW" : "MEDIUM",
+          input.priority === "low" ? "LOW" : "MEDIUM",
+          appId,
+          privateText(this.db, subject),
+          reporterRefHash ?? null,
+          privateText(this.db, input.reporterEmail ?? null),
+          at,
+          at,
+          id,
+          priority,
+        ),
+      this.db.prepare("INSERT INTO ticket_sources VALUES('report',?,?)").bind(id, id),
+      this.db
+        .prepare("INSERT INTO ticket_reports VALUES(?,?,?,?,?,?,?)")
+        .bind(
+          id,
+          id,
+          values.authorRefHash ?? null,
+          input.contentExternalId ?? null,
+          input.reasonCode,
+          privateText(this.db, input.detail ?? null),
+          at,
+        ),
+      this.db
+        .prepare("INSERT INTO ticket_events VALUES(?,?,'TICKET_CREATED',NULL,'{}',?)")
+        .bind(`created:${id}`, id, at),
+    ];
+  }
+
   eventStatement(event: {
     reportId: string;
     eventType: ReportEventType;

@@ -16,6 +16,7 @@ import { privateText } from "../privacy/crypto";
 
 interface ThreadRow {
   report_id: string | null;
+  service_id: string;
   id: string;
   app_id: string | null;
   source: string;
@@ -68,7 +69,8 @@ interface SupportAttachmentRow {
 }
 
 const SELECT_THREAD = `
-  SELECT t.*, a.slug AS app_slug, a.name AS app_name, (SELECT r.id FROM reports r WHERE r.support_thread_id=t.id LIMIT 1) AS report_id
+  SELECT t.*, ${THREAD_SERVICE} AS service_id, a.slug AS app_slug, a.name AS app_name,
+    (SELECT r.id FROM reports r WHERE r.support_thread_id=t.id LIMIT 1) AS report_id
     FROM support_threads t LEFT JOIN apps a ON a.id = t.app_id`;
 
 function toSummary(row: ThreadRow): SupportThreadSummary {
@@ -138,18 +140,21 @@ export class SupportRepository {
       .first<{ id: string; thread_id: string }>();
   }
 
-  insertThreadStatement(values: {
-    id: string;
-    appId?: string;
-    source: SupportSource;
-    requesterEmail?: string;
-    requesterName?: string;
-    subject: string;
-    at: string;
-  }): D1PreparedStatement {
+  insertThreadStatement(
+    values: {
+      id: string;
+      appId?: string;
+      source: SupportSource;
+      requesterEmail?: string;
+      requesterName?: string;
+      subject: string;
+      at: string;
+    },
+    ifMissing = false,
+  ): D1PreparedStatement {
     return this.db
       .prepare(
-        `INSERT INTO support_threads
+        `INSERT ${ifMissing ? "OR IGNORE " : ""}INTO support_threads
            (id, app_id, source, requester_email, requester_name, subject, status,
             unread_count, created_at, updated_at, last_message_at)
          VALUES (?, ?, ?, ?, ?, ?, 'open', 0, ?, ?, ?)`,

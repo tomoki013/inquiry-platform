@@ -71,6 +71,10 @@ A Project that wants to carry out moderation decisions itself implements the
 here) as a `WorkerEntrypoint` and is registered in the deployment's
 `SIGNED_MODERATION`.
 
+## Turnstile on public intake
+
+When the deployment requires Turnstile for an intake, render its widget in the Project's form and pass the response as `turnstileToken` to `createContact` or `createReport`. The platform verifies it before saving. Keep the same submission key when retrying the same input. A submission that already succeeded returns its original receipt. A new submission needs a fresh token.
+
 ## Your own console: `ProjectOperator`
 
 A Project that runs its own admin binds a second entrypoint to work its own

@@ -29,6 +29,7 @@ import type { AuditRepository } from "../db/audit";
 import type { SupportRepository } from "../db/support";
 import type { ProjectMailSettings, TemplateRepository } from "../db/templates";
 import { privateText } from "../privacy/crypto";
+import type { ProjectFeatures } from "../project-features";
 import type { ProjectMailDelivery } from "../project-mail";
 import { internalFailure, notFound, validationFailure } from "./failures";
 import { sha256Hex } from "./identity";
@@ -64,6 +65,7 @@ export interface ReplyAddresses {
   /** Project-scoped overrides from the platform's mail settings repository. */
   resolve?: (appId: string | undefined) => Promise<ProjectMailSettings>;
   delivery?: (appId: string | undefined) => ProjectMailDelivery;
+  features?: ProjectFeatures;
 }
 
 /**
@@ -101,6 +103,10 @@ export class ReplyService {
     return (this.addresses.delivery?.(appId)?.mail ?? this.mail).configured;
   }
 
+  private featuresFor(thread: { service_id: string; report_id: string | null }) {
+    return this.addresses.features?.(thread.service_id, thread.report_id ? "report" : "inquiry");
+  }
+
   private async addressesFor(appId: string | undefined) {
     const override = (await this.addresses.resolve?.(appId)) ?? {};
     const delivery = this.addresses.delivery?.(appId);
@@ -118,7 +124,10 @@ export class ReplyService {
 
   async getDraft(threadId: string): Promise<Result<SupportDraft | null>> {
     try {
-      if (!(await this.support.findThread(threadId))) return notFound("問い合わせ");
+      const thread = await this.support.findThread(threadId);
+      if (!thread) return notFound("問い合わせ");
+      if (this.featuresFor(thread)?.drafts === false)
+        return fail("FORBIDDEN", "下書きは無効です。");
       const draft = await this.support.draft(threadId);
       return ok(
         draft
@@ -142,7 +151,10 @@ export class ReplyService {
     const parsed = saveSupportDraftInputSchema.safeParse(raw);
     if (!parsed.success) return validationFailure(parsed.error);
     try {
-      if (!(await this.support.findThread(parsed.data.threadId))) return notFound("問い合わせ");
+      const thread = await this.support.findThread(parsed.data.threadId);
+      if (!thread) return notFound("問い合わせ");
+      if (this.featuresFor(thread)?.drafts === false)
+        return fail("FORBIDDEN", "下書きは無効です。");
       return ok(
         await this.support.saveDraft(
           parsed.data.threadId,
@@ -156,6 +168,9 @@ export class ReplyService {
 
   async deleteDraft(threadId: string): Promise<Result<null>> {
     try {
+      const thread = await this.support.findThread(threadId);
+      if (thread && this.featuresFor(thread)?.drafts === false)
+        return fail("FORBIDDEN", "下書きは無効です。");
       await this.db.batch([this.support.deleteDraftStatement(threadId)]);
       return ok(null);
     } catch (error) {
@@ -260,7 +275,10 @@ export class ReplyService {
    * else answers `null`, and the caller sends the generic receipt — a receipt
    * is never withheld over its wording.
    */
-  async projectReportReceipt(threadId: string, reportId: string): Promise<string | null> {
+  async projectReportReceipt(
+    threadId: string,
+    reportId: string,
+  ): Promise<{ body: string; subject?: string } | null> {
     const thread = await this.support.findThread(threadId);
     const appId = thread?.app_id ?? undefined;
     const key = appId ? this.addresses.delivery?.(appId)?.reportReceiptTemplate : undefined;
@@ -268,12 +286,17 @@ export class ReplyService {
     const template = await this.templates.findByKey(key);
     if (!template?.isActive || template.appId !== appId) return null;
     const app = await this.apps.findById(appId);
-    const rendered = renderTemplate(template.body, {
+    const values = {
       appName: app?.name ?? undefined,
       userName: thread.requester_name ?? undefined,
       supportUrl: app?.support_url ?? (await this.addressesFor(appId)).defaultSupportUrl,
-    }).replace(/\{\{\s*reportId\s*\}\}/g, reportId);
-    return unresolvedVariables(rendered).length === 0 && rendered.trim() ? rendered : null;
+    };
+    const render = (text: string) =>
+      renderTemplate(text, values).replace(/\{\{\s*reportId\s*\}\}/g, reportId);
+    const body = render(template.body);
+    if (unresolvedVariables(body).length > 0 || !body.trim()) return null;
+    const subject = template.subject ? render(template.subject) : undefined;
+    return { body, ...(subject && unresolvedVariables(subject).length === 0 ? { subject } : {}) };
   }
 
   /**
@@ -291,6 +314,8 @@ export class ReplyService {
     try {
       const thread = await this.support.findThread(threadId);
       if (!thread?.requester_email || thread.status !== "open") return;
+      const features = this.featuresFor(thread);
+      if (features?.receipt === false || features?.enabled === false) return;
       const settings = (await this.addresses.resolve?.(thread.app_id ?? undefined)) ?? {};
       const route = this.addresses.delivery?.(thread.app_id ?? undefined);
       // The project's own setting first; the route's is the older place for it.
@@ -317,11 +342,14 @@ export class ReplyService {
         .first<{ ticket_number: string }>();
       const number = ticket?.ticket_number;
       const numberLine = number ? `受付番号: ${number}` : "";
-      const projectReceipt = await this.inquiryReceiptTemplate(
-        thread,
-        number,
-        settings.inquiryReceiptTemplate ?? route?.inquiryReceiptTemplate,
-      );
+      const projectReceipt =
+        features?.templates === false
+          ? null
+          : await this.inquiryReceiptTemplate(
+              thread,
+              number,
+              settings.inquiryReceiptTemplate ?? route?.inquiryReceiptTemplate,
+            );
       const body =
         projectReceipt?.body ??
         [
@@ -466,6 +494,8 @@ export class ReplyService {
     try {
       const thread = await this.support.findThread(parsed.data.threadId);
       if (!thread) return notFound("問い合わせ");
+      if (this.featuresFor(thread)?.templates === false)
+        return fail("FORBIDDEN", "定型文は無効です。");
       const template = await this.templates.find(parsed.data.templateId);
       if (!template || (template.appId && template.appId !== thread.app_id))
         return notFound("定型文");
@@ -607,7 +637,18 @@ export class ReplyService {
         return await this.supportService.detail(input.threadId);
       }
 
-      if (actor.type === "admin") {
+      const thread = await this.support.findThread(input.threadId);
+      if (!thread) return notFound("問い合わせ");
+      const features = this.featuresFor(thread);
+      if (
+        features?.enabled === false ||
+        (options.automatic ? features?.receipt : features?.reply) === false
+      )
+        return fail("FORBIDDEN", "このメール機能は無効です。");
+      if (input.templateId && features?.templates === false)
+        return fail("FORBIDDEN", "定型文は無効です。");
+
+      if (actor.type === "admin" && !thread.report_id) {
         const tickets = new TicketService(this.db);
         const source = await tickets.source("support", input.threadId);
         if (!source.ok) return source;
@@ -626,15 +667,13 @@ export class ReplyService {
           }
         }
       }
-      const thread = await this.support.findThread(input.threadId);
-      if (!thread) return notFound("問い合わせ");
       if (thread.status === "spam") {
         return fail(
           "CONFLICT",
           "迷惑メールに分類された問い合わせには返信できません。先に分類を解除してください。",
         );
       }
-      if (thread.status === "resolved" && !input.reopenIfResolved) {
+      if (!thread.report_id && thread.status === "resolved" && !input.reopenIfResolved) {
         return fail("CONFLICT", "この問い合わせは解決済みです。再開してから返信してください。");
       }
       if (!thread.requester_email) return fail("VALIDATION_ERROR", "返信先が登録されていません。");
@@ -694,9 +733,13 @@ export class ReplyService {
               template?.subject,
             );
 
-      const signature =
-        (await this.templates.signature(thread.app_id ?? undefined))?.trim() ||
-        addresses.defaultSignature.trim();
+      const includeSignature =
+        features?.signature !== false &&
+        (options.automatic ? features?.receiptSignature : features?.replySignature) !== false;
+      const signature = includeSignature
+        ? (await this.templates.signature(thread.app_id ?? undefined))?.trim() ||
+          addresses.defaultSignature.trim()
+        : "";
       const body = await this.withoutSignature(input.threadId, input.bodyText);
       if (!body.trim()) return fail("VALIDATION_ERROR", "返信本文を入力してください。");
       const linkedReport = await this.db
@@ -711,7 +754,7 @@ export class ReplyService {
           ? `\n\nお問い合わせ内容\n\n${options.quotedBody}`
           : "";
       const content = `${body}${reportFooter}${quote}`.trimEnd();
-      const closing = addresses.replyClosing;
+      const closing = includeSignature ? addresses.replyClosing : "";
       const text = `${content}${closing && !content.endsWith(closing) ? `\n\n${closing}` : ""}\n\n${signature}`;
       const existingAttempt = await this.db
         .prepare(

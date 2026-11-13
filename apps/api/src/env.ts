@@ -16,7 +16,7 @@ export interface AdminCoreEnv {
    * declared in `services` under that name. See `domain/moderation.ts`.
    */
   SIGNED_MODERATION?: Record<string, string>;
-  PRIVATE_FILES: R2Bucket;
+  PRIVATE_FILES?: R2Bucket;
 
   SUPPORT_EMAIL: string;
   SUPPORT_FROM_NAME: string;
@@ -30,6 +30,9 @@ export interface AdminCoreEnv {
   /** Project id → dedicated Secret binding, signature and optional logo.
    * Configured routes refuse mail when their own Secret is missing. */
   PROJECT_MAIL_PROVIDERS?: unknown;
+  /** Immutable service ID → inquiry and report features. Values live in deployment config. */
+  PROJECT_FEATURES?: unknown;
+  ENABLE_DASHBOARD?: string;
 
   /**
    * Legacy operator-client origin. Used only as a fallback when

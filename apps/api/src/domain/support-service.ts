@@ -9,6 +9,7 @@ import {
   assignSupportAppInputSchema,
   createSupportMessageInputSchema,
   createSupportThreadInputSchema,
+  fail,
   ingestInboundEmailInputSchema,
   listSupportThreadsInputSchema,
   newId,
@@ -20,6 +21,7 @@ import {
 import type { AppRepository } from "../db/apps";
 import type { AuditRepository } from "../db/audit";
 import type { SupportRepository } from "../db/support";
+import type { ProjectFeatures } from "../project-features";
 import { internalFailure, notFound, validationFailure } from "./failures";
 import type { NotificationHook } from "./notification-service";
 import { findReportReplyThread } from "./report-threading";
@@ -54,7 +56,20 @@ export class SupportService {
      * class still has no way to send anything itself (see above).
      */
     private readonly opened?: (threadId: string) => void,
+    private readonly features?: ProjectFeatures,
   ) {}
+
+  private async featureProject(appId: string | undefined) {
+    return (
+      appId ??
+      (await this.db
+        .prepare(
+          "SELECT COALESCE((SELECT value FROM platform_settings WHERE key='default_service_id'),'unassigned') AS id",
+        )
+        .first<string>("id")) ??
+      undefined
+    );
+  }
 
   /**
    * One inbound email, already parsed and flattened to text by the mail Worker.
@@ -98,6 +113,17 @@ export class SupportService {
       const messageId = newId();
       const statements: D1PreparedStatement[] = [];
 
+      const existing = existingThreadId ? await this.support.findThread(existingThreadId) : null;
+      if (existingThreadId && (!existing || (appId && existing.app_id !== appId))) {
+        return notFound("問い合わせ");
+      }
+      const serviceId = existing?.service_id ?? (await this.featureProject(appId));
+      const config = this.features?.(serviceId, existing?.report_id ? "report" : "inquiry");
+      if (config?.enabled === false || config?.inbound === false)
+        return fail("FORBIDDEN", "この受付先ではメールの取り込みを利用できません。");
+      if (!existingThreadId && config?.newFromEmail === false)
+        return fail("FORBIDDEN", "メールからの新規問い合わせ受付は無効です。");
+
       if (!existingThreadId) {
         statements.push(
           this.support.insertThreadStatement({
@@ -112,11 +138,8 @@ export class SupportService {
         );
       }
 
-      if (existingThreadId) {
-        const existing = await this.support.findThread(existingThreadId);
-        if (existing?.status === "resolved" || existing?.status === "pending_user") {
-          statements.push(this.support.statusStatement(existingThreadId, "open"));
-        }
+      if (existing && (existing.status === "resolved" || existing.status === "pending_user")) {
+        statements.push(this.support.statusStatement(existing.id, "open"));
       }
 
       statements.push(
@@ -153,6 +176,7 @@ export class SupportService {
         statements.push(
           ...(this.notify?.statements?.({
             ticketId: threadId,
+            appId: serviceId,
             category: "inquiry",
             channels: { email: false },
           }) ?? []),
@@ -161,8 +185,13 @@ export class SupportService {
       // Push only: the operator already receives the mail itself, and a
       // second mail saying "there is mail" would be noise.
       if (!existingThreadId) {
-        this.notify?.({ ticketId: threadId, category: "inquiry", channels: { email: false } });
-        if (!input.automated) this.opened?.(threadId);
+        this.notify?.({
+          ticketId: threadId,
+          appId: serviceId,
+          category: "inquiry",
+          channels: { email: false },
+        });
+        if (!input.automated && config?.receipt !== false) this.opened?.(threadId);
       }
       return ok({ threadId, messageId, duplicate: false, newThread: !existingThreadId });
     } catch (error) {
@@ -172,7 +201,11 @@ export class SupportService {
 
   /** A project's web support form, and anything else that starts a conversation
    * without an email round trip. */
-  async createThread(raw: unknown, actor: ActorRef): Promise<Result<SupportThreadDetail>> {
+  async createThread(
+    raw: unknown,
+    actor: ActorRef,
+    beforeCreate?: (db: D1Database, id: string) => D1PreparedStatement,
+  ): Promise<Result<SupportThreadDetail>> {
     const parsed = createSupportThreadInputSchema.safeParse(raw);
     if (!parsed.success) return validationFailure(parsed.error);
     const input = parsed.data;
@@ -189,6 +222,9 @@ export class SupportService {
 
       const appId = input.appSlug ? (await this.apps.findBySlug(input.appSlug))?.id : undefined;
       if (input.appSlug && !appId) return notFound("Project");
+      const serviceId = await this.featureProject(appId);
+      const config = this.features?.(serviceId, "inquiry");
+      if (config?.enabled === false) return fail("FORBIDDEN", "問い合わせ受付は無効です。");
       const at = input.createdAt ?? nowIso();
       const threadId = newId();
       const messageId = newId();
@@ -222,13 +258,19 @@ export class SupportService {
           targetId: threadId,
           metadata: { newThread: true, source: input.source, length: input.bodyText.length },
         }),
-        ...(this.notify?.statements?.({ ticketId: threadId, category: "inquiry" }) ?? []),
+        ...(this.notify?.statements?.({
+          ticketId: threadId,
+          appId: serviceId,
+          category: "inquiry",
+        }) ?? []),
+        ...(beforeCreate ? [beforeCreate(this.db, threadId)] : []),
       ]);
 
-      this.notify?.({ ticketId: threadId, category: "inquiry" });
+      this.notify?.({ ticketId: threadId, appId: serviceId, category: "inquiry" });
       // Only a person's own form. A thread an operator opens on someone's
       // behalf is not something to confirm receipt of.
-      if (input.source === "web_form" && input.requesterEmail) this.opened?.(threadId);
+      if (input.source === "web_form" && input.requesterEmail && config?.receipt !== false)
+        this.opened?.(threadId);
       return await this.detail(threadId);
     } catch (error) {
       if (input.providerMessageId) {

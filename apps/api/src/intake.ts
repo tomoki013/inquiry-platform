@@ -11,7 +11,9 @@ import type {
 } from "@inquiry-platform/core";
 import {
   contactSubmissionSchema,
+  fail,
   intakePropsSchema,
+  ok,
   reportSubmissionSchema,
   toPublicStatus,
 } from "@inquiry-platform/core";
@@ -24,7 +26,9 @@ import type { AdminCoreEnv } from "./env";
 import { putReportEvidence } from "./evidence";
 import { json } from "./http";
 import { recordMailReceipt } from "./mail-receipts";
+import type { Domain } from "./project-features";
 import { buildServices } from "./services";
+import { prepareVerification } from "./turnstile";
 
 const forbidden = {
   ok: false as const,
@@ -81,6 +85,32 @@ export class Intake extends WorkerEntrypoint<AdminCoreEnv> implements IntakeApi 
     return { type: "app", id: grant.caller };
   }
 
+  private async verification(
+    projectId: string,
+    domain: Domain,
+    caller: string,
+    key: string,
+    input: ContactSubmission | ReportSubmission,
+  ) {
+    const config = this.services.features(projectId, domain);
+    if (!config.enabled) return fail("FORBIDDEN", "この受付は無効です。");
+    if (!config.turnstile) return ok(null);
+    const verification = await prepareVerification(
+      this.env.DB,
+      this.env,
+      config.turnstile,
+      { projectId, domain, caller, key },
+      input,
+    );
+    const existing = await verification.existing();
+    if (!existing.ok) return existing;
+    if (!existing.value) {
+      const checked = await verification.verify();
+      if (!checked.ok) return checked;
+    }
+    return ok({ verification, sourceId: existing.value });
+  }
+
   async submitContact(raw: ContactSubmission): Promise<Result<ContactReceipt>> {
     const grant = this.grant();
     if (!grant) return forbidden;
@@ -92,17 +122,34 @@ export class Intake extends WorkerEntrypoint<AdminCoreEnv> implements IntakeApi 
     }
 
     try {
-      const registered =
-        input.projectSlug === undefined ||
-        (await new AppRepository(this.env.DB).findBySlug(input.projectSlug)) !== null;
-      if (!registered) return unknownProject;
       const projectSlug = input.projectSlug;
+      const projectId = projectSlug
+        ? (await new AppRepository(this.env.DB).findBySlug(projectSlug))?.id
+        : await this.env.DB.prepare(
+            "SELECT COALESCE((SELECT value FROM platform_settings WHERE key='default_service_id'),'unassigned') AS id",
+          ).first<string>("id");
+      if (!projectId) return unknownProject;
+      const verified = await this.verification(
+        projectId,
+        "inquiry",
+        grant.caller,
+        input.idempotencyKey,
+        input,
+      );
+      if (!verified.ok) return verified;
+      const protection = verified.value;
+      if (protection?.sourceId)
+        return ok({
+          ...(await this.receipt("support", protection.sourceId)),
+          receiptId: protection.sourceId,
+          duplicate: true,
+        });
       const projectDb = await this.services.registry.forSlug(projectSlug);
       // The same key the support form has always used, so a retry that
       // straddles the switch to this entrypoint is still one ticket.
       const providerMessageId = `form-${input.idempotencyKey}`;
       const seen = await new SupportRepository(projectDb).messageExists(providerMessageId);
-      if (seen) {
+      if (seen && !protection) {
         const owner = await new SupportRepository(projectDb).detail(seen.thread_id, false);
         if (owner && (owner.appSlug ?? undefined) !== projectSlug) return taken;
         const existing = await this.services.support.detail(seen.thread_id);
@@ -118,6 +165,7 @@ export class Intake extends WorkerEntrypoint<AdminCoreEnv> implements IntakeApi 
         };
       }
 
+      let pendingId: string | undefined;
       const created = await this.services.support.createThread(
         {
           appSlug: projectSlug,
@@ -130,7 +178,28 @@ export class Intake extends WorkerEntrypoint<AdminCoreEnv> implements IntakeApi 
           sender: input.email,
         },
         this.actor(grant),
+        protection
+          ? (db, id) => {
+              pendingId = id;
+              return protection.verification.statement(db, id);
+            }
+          : undefined,
       );
+      if (protection) {
+        const stored = await protection.verification.existing();
+        if (!stored.ok) return stored;
+        if (!stored.value)
+          return (await protection.verification.tokenUsed())
+            ? fail("VALIDATION_ERROR", "Turnstile をもう一度実行してください。")
+            : created.ok
+              ? taken
+              : created;
+        return ok({
+          ...(await this.receipt("support", stored.value)),
+          receiptId: stored.value,
+          duplicate: pendingId !== stored.value,
+        });
+      }
       if (!created.ok) return created;
       return {
         ok: true,
@@ -154,6 +223,23 @@ export class Intake extends WorkerEntrypoint<AdminCoreEnv> implements IntakeApi 
     if (!grant.projects.includes(input.projectSlug)) return forbidden;
 
     try {
+      const app = await new AppRepository(this.env.DB).findBySlug(input.projectSlug);
+      if (!app) return unknownProject;
+      const verified = await this.verification(
+        app.id,
+        "report",
+        grant.caller,
+        input.externalReportId.trim(),
+        input,
+      );
+      if (!verified.ok) return verified;
+      const protection = verified.value;
+      if (protection?.sourceId)
+        return ok({
+          ...(await this.receipt("report", protection.sourceId)),
+          reportId: protection.sourceId,
+          duplicate: true,
+        });
       const reports = new ReportRepository(await this.services.registry.forSlug(input.projectSlug));
       const existing = await reports.findByExternalId(input.externalReportId.trim());
       if (existing && (await reports.findRow(existing.id))?.app_slug !== input.projectSlug) {
@@ -179,7 +265,23 @@ export class Intake extends WorkerEntrypoint<AdminCoreEnv> implements IntakeApi 
           reportedAt: input.reportedAt,
         },
         this.actor(grant),
+        protection?.verification.statement,
       );
+      if (protection) {
+        const stored = await protection.verification.existing();
+        if (!stored.ok) return stored;
+        if (!stored.value)
+          return (await protection.verification.tokenUsed())
+            ? fail("VALIDATION_ERROR", "Turnstile をもう一度実行してください。")
+            : created.ok
+              ? taken
+              : created;
+        return ok({
+          ...(await this.receipt("report", stored.value)),
+          reportId: stored.value,
+          duplicate: !created.ok || created.value.duplicate,
+        });
+      }
       if (!created.ok) return created;
       return {
         ok: true,

@@ -3,6 +3,7 @@ import { aggregateDatabase, ProjectRegistry } from "../storage/database";
 
 /** The original receipt date survives retries; support attachments are not affected. */
 export async function expireReportEvidence(env: AdminCoreEnv, now = new Date()): Promise<void> {
+  if (!env.PRIVATE_FILES) return;
   const cutoff = new Date(now.getTime() - 30 * 86400_000).toISOString();
   const registry = new ProjectRegistry(env.DB);
   const rows = await aggregateDatabase(registry)

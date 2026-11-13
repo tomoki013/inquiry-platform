@@ -2,6 +2,7 @@ import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test"
 import type { IntakeProps } from "@inquiry-platform/core";
 import { createInquiryClient, type IntakeBinding } from "@inquiry-platform/sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AdminCore } from "../src/index";
 import { Intake } from "../src/intake";
 import { harness, seedApp, testEnv } from "./harness";
 
@@ -109,6 +110,189 @@ describe("Intake: the receipt for a contact", () => {
       `受付番号: ${result.ok ? result.value.ticketNumber : ""}`,
     );
     expect(sent[0]?.headers).toMatchObject({ "Auto-Submitted": "auto-replied" });
+  });
+});
+
+describe("Intake: features per Project", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  async function id(slug: string) {
+    const found = await testEnv.DB.prepare("SELECT id FROM apps WHERE slug=?")
+      .bind(slug)
+      .first<string>("id");
+    if (!found) throw new Error(`Missing fixture ${slug}`);
+    return found;
+  }
+
+  it("preserves a branded receipt at one site and disables automatic mail and notification jobs at another", async () => {
+    const prism = await id("prism");
+    const margin = await id("margin");
+    const sent: Array<{ text: string; from: string }> = [];
+    vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ id: `sent-${sent.length}` }));
+    });
+    const { client, ctx } = bind(
+      { ...projectApi, projects: ["prism", "margin"] },
+      {
+        ...testEnv,
+        MAIL_API_KEY_PRISM: "test-key",
+        PROJECT_MAIL_PROVIDERS: {
+          [prism]: {
+            apiKeyBinding: "MAIL_API_KEY_PRISM",
+            supportEmail: "prism@example.com",
+            defaultSignature: "Prism team",
+          },
+        },
+        PROJECT_FEATURES: {
+          [prism]: {
+            inquiry: { receipt: true, signature: true },
+          },
+          [margin]: { inquiry: { receipt: false, notifyEmail: false, notifyPush: false } },
+        },
+      },
+    );
+    expect((await client.createContact(contact())).ok).toBe(true);
+    expect(
+      (await client.createContact(contact({ projectSlug: "margin", idempotencyKey: "req-margin" })))
+        .ok,
+    ).toBe(true);
+    await waitOnExecutionContext(ctx);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.text).toContain("Prism team");
+    expect(sent[0]?.from).toContain("prism@example.com");
+    expect(await testEnv.DB.prepare("SELECT COUNT(*) AS n FROM delivery_jobs").first("n")).toBe(0);
+  });
+
+  it("opens an independent report ticket without an inquiry, mail conversation or notification job", async () => {
+    const orbit = await id("orbit");
+    const { client, ctx } = bind(projectApi, {
+      ...testEnv,
+      PRIVATE_FILES: undefined,
+      PROJECT_FEATURES: {
+        [orbit]: {
+          inquiry: { enabled: false },
+          report: { reply: false, receipt: false, notifyEmail: false, notifyPush: false },
+        },
+      },
+    });
+    expect(await client.createContact(contact({ projectSlug: "orbit" }))).toMatchObject({
+      ok: false,
+      error: { code: "FORBIDDEN" },
+    });
+    const first = await client.createReport(report({ reporterEmail: "reporter@example.com" }));
+    expect(first).toMatchObject({
+      ok: true,
+      value: { ticketNumber: expect.stringMatching(/^TK-/) },
+    });
+    await waitOnExecutionContext(ctx);
+    expect(await testEnv.DB.prepare("SELECT type, status FROM tickets").first()).toEqual({
+      type: "REPORT",
+      status: "NEW",
+    });
+    expect(await testEnv.DB.prepare("SELECT COUNT(*) AS n FROM support_threads").first("n")).toBe(
+      0,
+    );
+    expect(await testEnv.DB.prepare("SELECT COUNT(*) AS n FROM delivery_jobs").first("n")).toBe(0);
+  });
+
+  it("creates a report conversation on the first reply and keeps the report's ticket and decision", async () => {
+    const orbit = await id("orbit");
+    const configured = {
+      ...testEnv,
+      MAIL_API_KEY: "test-key",
+      PROJECT_FEATURES: {
+        [orbit]: {
+          inquiry: { enabled: false },
+          report: {
+            reply: true,
+            receipt: false,
+            notifyEmail: false,
+            notifyPush: false,
+          },
+        },
+      },
+    };
+    const send = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      Response.json({ id: "provider-reply" }),
+    );
+    vi.stubGlobal("fetch", send);
+    const { client } = bind(projectApi, configured);
+    const created = await client.createReport(report({ reporterEmail: "reporter@example.com" }));
+    if (!created.ok) throw new Error(created.error.message);
+    const { reportId, ticketNumber } = created.value;
+    const core = new AdminCore(createExecutionContext(), configured);
+    const actor = { type: "admin", id: "reviewer" } as const;
+    expect((await core.changeReportStatus({ reportId, to: "reviewing" }, actor)).ok).toBe(true);
+    expect((await core.changeReportStatus({ reportId, to: "actioned" }, actor)).ok).toBe(true);
+    expect(await testEnv.DB.prepare("SELECT COUNT(*) AS n FROM support_threads").first("n")).toBe(
+      0,
+    );
+    const sent = await core.replyToReporter(
+      reportId,
+      {
+        bodyText: "通報を確認しました。",
+        idempotencyKey: "report-reply-1",
+      },
+      actor,
+    );
+    expect(sent).toMatchObject({ ok: true, value: { reportId } });
+    expect(send.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    expect(
+      await testEnv.DB.prepare("SELECT ticket_number, type, status FROM tickets").all(),
+    ).toMatchObject({
+      results: [{ ticket_number: ticketNumber, type: "REPORT", status: "RESOLVED" }],
+    });
+    expect(await core.getReport(reportId)).toMatchObject({
+      ok: true,
+      value: { status: "actioned" },
+    });
+  });
+
+  it("checks Turnstile before saving, rejects token reuse, and returns the committed receipt on retry", async () => {
+    const prism = await id("prism");
+    let hostname = "other.example.com";
+    const siteverify = vi.fn(async () =>
+      Response.json({ success: true, hostname, action: "inquiry" }),
+    );
+    vi.stubGlobal("fetch", siteverify);
+    const { client, ctx } = bind(projectApi, {
+      ...testEnv,
+      TURNSTILE_SECRET_PRISM: "test-key",
+      PROJECT_FEATURES: {
+        [prism]: {
+          inquiry: {
+            receipt: false,
+            notifyEmail: false,
+            notifyPush: false,
+            turnstile: {
+              secretBinding: "TURNSTILE_SECRET_PRISM",
+              hostnames: ["form.example.com"],
+              action: "inquiry",
+            },
+          },
+        },
+      },
+    });
+    expect((await client.createContact(contact())).ok).toBe(false);
+    expect((await client.createContact(contact({ turnstileToken: "wrong-host" }))).ok).toBe(false);
+    expect(await testEnv.DB.prepare("SELECT COUNT(*) AS n FROM tickets").first("n")).toBe(0);
+    hostname = "form.example.com";
+    const first = await client.createContact(contact({ turnstileToken: "one-time" }));
+    expect(first).toMatchObject({ ok: true, value: { duplicate: false } });
+    expect(await client.createContact(contact())).toMatchObject({
+      ok: true,
+      value: { duplicate: true, receiptId: first.ok ? first.value.receiptId : "" },
+    });
+    expect(await client.createContact(contact({ message: "別の本文" }))).toMatchObject({
+      ok: false,
+      error: { code: "CONFLICT" },
+    });
+    expect(
+      await client.createContact(contact({ idempotencyKey: "other", turnstileToken: "one-time" })),
+    ).toMatchObject({ ok: false, error: { code: "VALIDATION_ERROR" } });
+    expect(siteverify).toHaveBeenCalledTimes(2);
+    await waitOnExecutionContext(ctx);
   });
 });
 

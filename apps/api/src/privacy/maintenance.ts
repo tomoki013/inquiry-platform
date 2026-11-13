@@ -123,13 +123,15 @@ export async function migratePrivateStorage(
       await env.DB.batch(statements);
       return { rows: rows.length, files: 0, done: false };
     }
-  const files = privateBucket(env.PRIVATE_FILES, cipher);
+  const bucket = env.PRIVATE_FILES;
+  const files = bucket ? privateBucket(bucket, cipher) : undefined;
   for (const logical of ["support_attachments", "report_attachments"] as const) {
     const objects = (
       await env.DB.prepare(`SELECT r2_key FROM ${names[logical]}`).all<{ r2_key: string }>()
     ).results;
     for (const row of objects) {
-      const object = await env.PRIVATE_FILES.get(row.r2_key);
+      if (!bucket || !files) throw new Error("PrivateFilesRequired");
+      const object = await bucket.get(row.r2_key);
       if (!object || object.customMetadata?.privateStorage === "v1") continue;
       await files.put(row.r2_key, await object.arrayBuffer(), {
         httpMetadata: object.httpMetadata,
@@ -139,23 +141,25 @@ export async function migratePrivateStorage(
       return { rows: 0, files: 1, done: false };
     }
   }
-  const journal = await env.PRIVATE_FILES.list({
-    prefix: "inbound-jobs/",
-    include: ["customMetadata"],
-    limit: 1000,
-  });
-  if (journal.truncated) throw new Error("PrivateJournalPaginationRequired");
-  for (const row of journal.objects) {
-    if (row.customMetadata?.projectSlug !== slug || row.customMetadata.privateStorage === "v1")
-      continue;
-    const object = await env.PRIVATE_FILES.get(row.key);
-    if (!object) continue;
-    await files.put(row.key, await object.arrayBuffer(), {
-      httpMetadata: object.httpMetadata,
-      customMetadata: object.customMetadata,
-      onlyIf: { etagMatches: object.etag },
+  if (bucket && files) {
+    const journal = await bucket.list({
+      prefix: "inbound-jobs/",
+      include: ["customMetadata"],
+      limit: 1000,
     });
-    return { rows: 0, files: 1, done: false };
+    if (journal.truncated) throw new Error("PrivateJournalPaginationRequired");
+    for (const row of journal.objects) {
+      if (row.customMetadata?.projectSlug !== slug || row.customMetadata.privateStorage === "v1")
+        continue;
+      const object = await bucket.get(row.key);
+      if (!object) continue;
+      await files.put(row.key, await object.arrayBuffer(), {
+        httpMetadata: object.httpMetadata,
+        customMetadata: object.customMetadata,
+        onlyIf: { etagMatches: object.etag },
+      });
+      return { rows: 0, files: 1, done: false };
+    }
   }
   // Seal future writes only after the dual-read backfill has completed.
   // Trigger-generated event metadata contains IDs/codes, so it is excluded.

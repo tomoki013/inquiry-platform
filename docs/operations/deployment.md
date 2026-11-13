@@ -10,11 +10,11 @@
 <deployment-dir>/
   api.jsonc           Core（apps/api）の Wrangler 設定
   admin.jsonc         API gateway（apps/admin）の Wrangler 設定
-  mail-ingress.jsonc  受信メール（apps/mail-ingress）の Wrangler 設定
+  mail-ingress.jsonc  任意。受信メール（apps/mail-ingress）の Wrangler 設定
   seed.ts             任意。初期データ（DeploymentSeed、apps/api/seed/types.ts）
 ```
 
-3 つの `.jsonc` は `apps/*/wrangler.jsonc` をコピーして値を埋める。ファイルは `apps/<app>/` にコピーされてから使われるので、`main`・`migrations_dir` などのパスは参照設定と同じまま（`apps/<app>/` からの相対）にする。
+`.jsonc` は `apps/*/wrangler.jsonc` をコピーして値を埋める。ファイルは `apps/<app>/` にコピーされてから使われるので、`main`・`migrations_dir` などのパスは参照設定と同じまま（`apps/<app>/` からの相対）にする。
 
 | 設定 | 何を入れるか |
 |---|---|
@@ -33,6 +33,41 @@
 Project slug と転送先を解決する JSON 配列です。
 
 `BRANDING` の項目は `packages/core/src/branding.ts` を参照（すべて任意。未設定なら中立な既定値）。UI のアイコンや画面は設定しない。利用者の UI は別途用意する。
+
+### サイトごとの機能選択
+
+Core の `vars.PROJECT_FEATURES` は、Project の不変 ID をキーにして `inquiry`（問い合わせ）と `report`（通報）を設定する。設定を追加する前に migration `0022_intake_verifications.sql` を適用する。既存サイトは設定を省略して従来の動作を維持できる。種別の設定を明示すると、基本操作が有効になり、追加機能は `true` を指定したものだけが有効になる。以下はメールと通知を使わず通報だけを受け付ける構成。
+
+```json
+{
+  "example-project-id": {
+    "inquiry": { "enabled": false },
+    "report": {}
+  }
+}
+```
+
+- `enabled` は新規受付を制御する。既存チケットは権限に従って引き続き閲覧・管理できる。明示設定した通報は最初から通報チケットとして保存し、自動受付メールや最初の手動返信で必要になる時点で連絡用の会話を作る。
+- `reply`、`receipt`、`inbound`、`notifyEmail`、`notifyPush` は手動返信、自動受付メール、受信メール、運用者通知をそれぞれ制御する。`receipt: true` の場合も既存のメール設定による無効化は有効。明示設定した問い合わせでメールからの新規起票を使うには `newFromEmail: true` を指定する。
+- `attachments`、`drafts`、`templates`、`signature` は添付・証跡、下書き、テンプレートの適用、署名を制御する。`receiptSignature` と `replySignature` で署名を使う操作を絞れる。文面やブランド、配送先は既存の Project 設定を使う。
+- `sla`、`assignment`、`classification`、`relations` は SLA 評価、担当割り当て、分類、関連付け・統合を制御する。全体のダッシュボードは Core の `ENABLE_DASHBOARD: "false"` で停止できる。
+- 運用クライアントは `GET /api/apps/{id}/features` で Project の設定と送信設定の有無を取得できる。通報への返信は `POST /api/reports/{id}/reply` に `bodyText` と `idempotencyKey` を送る。添付・証跡と受信メールを使わない新規デプロイでは R2 binding を省ける。
+
+ブラウザの受付に Turnstile を要求する場合は、対象の `inquiry` または `report` に次の項目を追加する。
+
+```json
+{
+  "turnstile": {
+    "secretBinding": "TURNSTILE_SECRET_EXAMPLE",
+    "hostnames": ["form.example.com"],
+    "action": "inquiry"
+  }
+}
+```
+
+Secret は Core に登録する。Project の画面は公開 sitekey と同じ action を使い、バックエンドから SDK の `turnstileToken` を添えて送る。サーバー間受付を許可するときは専用 binding を作り、その `caller` を `trustedCallers` に指定する。公開フォームと共有する binding の caller は指定しない。
+
+MCP を使う環境では gateway の `ENABLE_MCP: "true"` を設定する。`/mcp` は Cloudflare Access の認証を経由し、同じ運用 API の権限で問い合わせ・通報の一覧と詳細を公開する。Access 認証のヘッダーを付けられる Streamable HTTP クライアントから利用する。 [MCP のトランスポート仕様](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
 
 ### Project ごとの送信キーとブランド（v0.3.2+）
 
@@ -135,10 +170,10 @@ node scripts/deploy.mjs <deployment-dir> check
 
 | コマンド | 何をするか |
 |---|---|
-| `check` | 3 Worker の `wrangler deploy --dry-run`。何も変更しない。bindings と vars を目で確認する |
+| `check` | 設定済み Worker の `wrangler deploy --dry-run`。bindings と vars を目で確認する |
 | `migrate` | `wrangler d1 migrations apply DB --remote` |
 | `seed [--dry-run]` | `seed.ts` を SQL にして `wrangler d1 execute DB --remote`。`--dry-run` は SQL を表示するだけ |
-| `deploy <api\|gateway\|mail-ingress\|all> [--dry-run]` | デプロイ。`all` は api → gateway → mail-ingress の順（Service Binding の依存順） |
+| `deploy <api\|gateway\|mail-ingress\|all> [--dry-run]` | デプロイ。`all` は api → gateway → 設定がある場合は mail-ingress の順 |
 
 設定ファイルは `apps/<app>/wrangler.deployment.jsonc` にコピーされる（git 管理外）。
 
@@ -146,7 +181,7 @@ node scripts/deploy.mjs <deployment-dir> check
 
 Service Binding は相手の Worker が存在しないと作れないので、この順に行う。
 
-1. **D1 と R2**: `wrangler d1 create <name>`、`wrangler r2 bucket create <name>`。id を `api.jsonc` に入れる。R2 は非公開のまま（証跡は Access の背後の API gateway 経由でしか読まない）。
+1. **D1 と R2**。D1 は `wrangler d1 create <name>` で作り、ID を `api.jsonc` に入れる。添付・証跡や受信メールを使う場合は非公開の R2 を作って bind する。
 2. **Migration**: `deploy.mjs <dir> migrate`。
 3. **Secret**（Core。`apps/api` で `wrangler secret put <NAME> --config wrangler.deployment.jsonc`、または Cloudflare のダッシュボード）:
    - `HASH_PEPPER`（必須。`openssl rand -hex 32`。通報が入った後に変えると仮名 ID が繋がらなくなる）

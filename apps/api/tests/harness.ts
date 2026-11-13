@@ -28,7 +28,7 @@ import { SupportService } from "../src/domain/support-service";
 import type { AdminCoreEnv } from "../src/env";
 import type { ProjectMailDelivery } from "../src/project-mail";
 
-export const testEnv = env as unknown as AdminCoreEnv;
+export const testEnv = env as unknown as AdminCoreEnv & { PRIVATE_FILES: R2Bucket };
 
 /**
  * Every migration file, in filename order.
@@ -106,6 +106,7 @@ export async function migrate(): Promise<void> {
  */
 export async function reset(): Promise<void> {
   const tables = [
+    "intake_verifications",
     "delivery_progress",
     "delivery_jobs",
     "project_storage_checks",

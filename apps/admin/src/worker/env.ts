@@ -13,6 +13,7 @@ export interface AdminWebEnv {
   /** Allowed Origin for cookie-authenticated browser clients. */
   ADMIN_ORIGIN: string;
   ENVIRONMENT: string;
+  ENABLE_MCP?: string;
 
   /**
    * The role of anybody Access lets in and `ADMIN_ROLES` does not name.
