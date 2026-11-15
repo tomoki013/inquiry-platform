@@ -103,6 +103,34 @@ await tickets.reply(ticket.id, { body, idempotencyKey }, { id: operatorId });
 await tickets.setSignature("My App\nhttps://my-app.example", { id: operatorId });
 ```
 
+### Copying yourself on a reply
+
+`reply` takes `ccSelf: true` to put the operator's own private address on the
+mail's Cc. The address is the project's notification recipient
+(`mailSettings[].notificationEmail`) or, without one, the deployment's
+`NOTIFICATION_EMAIL`. The request never names an address: recipient, Cc,
+sender and subject all stay the platform's decision.
+
+```ts
+const sent = await tickets.reply(ticket.id, { body, idempotencyKey, ccSelf: true }, { id: operatorId });
+if (sent.ok && sent.value.selfCopy === "not_configured") {
+  // Sent to the person, without your copy: no operator address is set.
+}
+```
+
+`selfCopy` is `copied`, `not_configured` (no address; the reply is still sent)
+or `is_recipient` (the address is the person's or the support address, which
+get the mail anyway). It is present only when `ccSelf` was asked for and this
+call sent the reply; a retried `idempotencyKey` answers without it. Nobody is
+copied twice: if the person's mail already had the address on it, reply-all
+keeps one. Each timeline message carries `recipient` (the person, then every
+Cc), so the copy shows there too. The audit log records the number of Cc
+addresses and the `selfCopy` outcome, never the addresses.
+
+A reply is threaded (`In-Reply-To`) onto the latest mail in the
+conversation, whichever side sent it, so a second reply in a row follows your
+first one.
+
 Who may use the console is your admin's authentication; the platform records
 `operator.id` (an opaque id of your choosing, never an address) in its audit
 log. Point notification links at your console with the deployment seed's

@@ -164,6 +164,7 @@ function buildLocalServices(
     legacySignatures: branding.legacySignatures,
     replyClosing: branding.replyClosing,
     ownAddresses: [env.NOREPLY_EMAIL, env.REPORT_EMAIL].filter((a): a is string => Boolean(a)),
+    operatorEmail: env.NOTIFICATION_EMAIL,
     resolve: async (appId) => templates.mailSettings(appId),
     delivery,
     features,

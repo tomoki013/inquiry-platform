@@ -257,6 +257,8 @@ export async function harness(
     receipts?: boolean;
     /** `Branding.replyClosing` for this deployment. */
     replyClosing?: string;
+    /** The deployment's private operator address (`NOTIFICATION_EMAIL`). */
+    operatorEmail?: string;
   } = {},
 ): Promise<Harness> {
   if (!options.database) await migrate();
@@ -322,6 +324,7 @@ export async function harness(
       defaultSignature: TEST_BRANDING.defaultSignature,
       legacySignatures: TEST_BRANDING.legacySignatures,
       replyClosing: options.replyClosing,
+      operatorEmail: options.operatorEmail,
       resolve: (appId) => templateRepo.mailSettings(appId),
       delivery: options.delivery,
     },

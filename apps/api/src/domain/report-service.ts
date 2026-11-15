@@ -34,7 +34,7 @@ import { internalFailure, notFound, validationFailure } from "./failures";
 import { pseudonymise } from "./identity";
 import { ModerationRegistry } from "./moderation";
 import type { NotificationHook } from "./notification-service";
-import type { ReplyService } from "./reply-service";
+import type { ReplyService, SelfCopyOutcome } from "./reply-service";
 import { reportMailSubject } from "./report-threading";
 import { Scope } from "./scope";
 import { TicketService } from "./ticket-service";
@@ -201,7 +201,8 @@ export class ReportService {
     reportId: string,
     raw: unknown,
     actor: ActorRef,
-  ): Promise<Result<SupportThreadDetail>> {
+    options: { ccSelf?: boolean } = {},
+  ): Promise<Result<SupportThreadDetail & { selfCopy?: SelfCopyOutcome }>> {
     const input = raw && typeof raw === "object" ? raw : {};
     const parsed = sendSupportReplyInputSchema.safeParse({ ...input, threadId: reportId });
     if (!parsed.success) return validationFailure(parsed.error);
@@ -215,7 +216,11 @@ export class ReportService {
         return fail("FORBIDDEN", "定型文は無効です。");
       const thread = await this.reportConversation(report);
       if (!thread.ok) return thread;
-      return this.reply.send({ ...parsed.data, threadId: thread.value }, actor);
+      return this.reply.send(
+        { ...parsed.data, threadId: thread.value },
+        actor,
+        options.ccSelf ? { ccSelf: true } : {},
+      );
     } catch (error) {
       return internalFailure("report.replyToReporter", error);
     }
