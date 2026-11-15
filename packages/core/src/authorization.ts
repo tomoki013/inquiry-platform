@@ -92,6 +92,8 @@ const CONFIGURATION_PATHS = [
  */
 export function permissionFor(method: string, pathname: string): AdminPermission | null {
   const verb = method.toUpperCase();
+  if (/^\/api\/inquiry-sharing\/[^/]+\/[^/]+$/.test(pathname))
+    return verb === "GET" || verb === "POST" ? "support:reply" : null;
   if (pathname.startsWith("/api/notifications/") || pathname === "/api/notifications") {
     return READ_METHODS.has(verb) || WRITE_METHODS.has(verb) ? "self:notifications" : null;
   }

@@ -9,7 +9,7 @@ import {
 import type { Hono } from "hono";
 import type { AdminWebEnv } from "../env";
 import { failure, requestId, respond } from "../http";
-import { actorFor } from "../identity";
+import { actorFor, inquiryShareCore } from "../identity";
 
 type Variables = { identity: AdminIdentity; core: AdminWebEnv["ADMIN_CORE"] };
 export type AdminApi = Hono<{ Bindings: AdminWebEnv; Variables: Variables }>;
@@ -111,6 +111,9 @@ export function registerApiRoutes(app: AdminApi): void {
         role: identity.role,
         permissions: permissionsForRole(identity.role),
         inquiryMcp: c.env.ENABLE_INQUIRY_MCP === "true" && can(identity.role, "support:reply"),
+        ...(c.env.ENABLE_INQUIRY_MCP === "true" && can(identity.role, "support:reply")
+          ? { inquiryShareServices: await c.get("core").inquiryShareServices() }
+          : {}),
         // Drives the composer: with no provider the send button is disabled and
         // says why, and everything else on the screen still works.
         mailConfigured: await c.get("core").mailProviderConfigured(),
@@ -320,6 +323,29 @@ export function registerApiRoutes(app: AdminApi): void {
   app.delete("/api/support/inquiry-share", async (c) => {
     if (c.env.ENABLE_INQUIRY_MCP !== "true") return c.notFound();
     return respond(c, await c.get("core").revokeInquiryShare(c.get("identity").id));
+  });
+  app.get("/api/inquiry-sharing/:project/:ticket", async (c) => {
+    if (c.env.ENABLE_INQUIRY_MCP !== "true") return c.notFound();
+    if (c.get("identity").role !== "admin") return c.notFound();
+    const project = inquiryShareCore(c.env, c.req.param("project"));
+    if (!project) return c.notFound();
+    const result = await project.inquiryShareContext(c.req.param("ticket"));
+    return respond(
+      c,
+      result.ok ? { ok: true, value: { messages: result.value.messages } } : result,
+    );
+  });
+  app.post("/api/inquiry-sharing/:project/:ticket", async (c) => {
+    if (c.env.ENABLE_INQUIRY_MCP !== "true") return c.notFound();
+    if (c.get("identity").role !== "admin") return c.notFound();
+    const project = inquiryShareCore(c.env, c.req.param("project"));
+    if (!project) return c.notFound();
+    const context = await project.inquiryShareContext(c.req.param("ticket"));
+    if (!context.ok) return respond(c, context);
+    return respond(
+      c,
+      await project.createInquiryShare(context.value.threadId, await body(c), c.get("identity").id),
+    );
   });
   app.post("/api/support/threads/:id/reply-draft", async (c) =>
     respond(

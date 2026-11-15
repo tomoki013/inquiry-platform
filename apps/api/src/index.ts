@@ -315,6 +315,8 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
     return this.within(this.threadIn(threadId), "問い合わせ", async () => {
       const thread = await this.services.support.threadForReply(threadId);
       if (!thread || thread.report_id) return notFound("問い合わせ");
+      if (!this.services.features.sharing().includes(thread.service_id))
+        return notFound("問い合わせ");
       try {
         return await createInquiryShare(this.env, actorId, input, thread);
       } catch (error) {
@@ -322,9 +324,46 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
       }
     });
   }
+  async inquiryShareServices() {
+    const scope = await this.scope();
+    return this.services.features.sharing().filter((id) => scope.has(id));
+  }
+  inquiryShareContext(ticketId: string) {
+    return this.within(this.ticketIn(ticketId), "問い合わせ", async () => {
+      const ticket = await this.tickets.row(ticketId);
+      if (
+        !ticket?.thread_id ||
+        ticket.report_id ||
+        ticket.merged_into ||
+        !this.services.features.sharing().includes(ticket.service_id)
+      )
+        return notFound("問い合わせ");
+      const detail = await this.services.support.detail(ticket.thread_id);
+      if (!detail.ok) return detail;
+      if (detail.value.reportId || detail.value.id !== ticket.thread_id)
+        return notFound("問い合わせ");
+      return ok({
+        threadId: detail.value.id,
+        messages: detail.value.messages
+          .filter((m) => m.direction !== "internal_note")
+          .slice(-12)
+          .map((m) => ({
+            id: m.id,
+            speaker: m.direction === "inbound" ? ("customer" as const) : ("support" as const),
+            text: m.bodyText,
+          })),
+      });
+    });
+  }
   async takeInquiryShare(token: string, actorId: string) {
     try {
-      return await takeInquiryShare(this.env, actorId, token, await this.scope());
+      return await takeInquiryShare(
+        this.env,
+        actorId,
+        token,
+        await this.scope(),
+        this.services.features.sharing(),
+      );
     } catch (error) {
       return internalFailure("inquiryShare.take", error);
     }

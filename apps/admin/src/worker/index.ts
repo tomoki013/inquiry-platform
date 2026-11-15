@@ -84,8 +84,10 @@ export function createApp() {
     if (c.env.ENABLE_INQUIRY_MCP !== "true") return c.notFound();
     const identity = c.get("identity");
     if (!can(identity.role, "support:reply")) return c.notFound();
+    const core =
+      (identity.role === "admin" ? c.env.INQUIRY_SHARE_REDEEM : undefined) ?? c.get("core");
     return inquiryMcp(c.req.raw, c.env.ADMIN_ORIGIN, (code) =>
-      c.get("core").takeInquiryShare(code, identity.id),
+      core.takeInquiryShare(code, identity.id),
     );
   });
 

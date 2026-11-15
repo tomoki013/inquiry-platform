@@ -14,6 +14,9 @@ export interface AdminWebEnv {
   ADMIN_ORIGIN: string;
   ENVIRONMENT: string;
   ENABLE_INQUIRY_MCP?: string;
+  /** Console slug to a dedicated, deployment-scoped Core binding. */
+  INQUIRY_SHARE_PROJECTS?: Record<string, string>;
+  INQUIRY_SHARE_REDEEM?: Pick<AdminCoreStub, "takeInquiryShare">;
 
   /**
    * The role of anybody Access lets in and `ADMIN_ROLES` does not name.
