@@ -105,11 +105,26 @@ await tickets.setSignature("My App\nhttps://my-app.example", { id: operatorId })
 
 ### Copying yourself on a reply
 
-`reply` takes `ccSelf: true` to put the operator's own private address on the
-mail's Cc. The address is the project's notification recipient
-(`mailSettings[].notificationEmail`) or, without one, the deployment's
-`NOTIFICATION_EMAIL`. The request never names an address: recipient, Cc,
-sender and subject all stay the platform's decision.
+`reply` takes `ccSelf: true` to send the operator the mail exactly as it went
+out, **without showing the person the operator's private address**:
+
+1. The reply's Cc gets the project's **support address** (the From address,
+   which the person already knows). Not the operator's own address — that was
+   the behaviour until SDK 0.11.0.
+2. That copy comes back to the support address through Email Routing and
+   mail-ingress. It is recognised as ours — by the `X-Inquiry-Copy` header we
+   write, by the `Message-ID` we sent under, or by the one the provider
+   reported, and only when it is also from the address the reply was sent
+   from — and it becomes **neither a ticket nor a message**.
+3. mail-ingress forwards it (`message.forward`) to the operator's address: the
+   project's notification recipient (`mailSettings[].notificationEmail`) or,
+   without one, the deployment's `NOTIFICATION_EMAIL`. The person never sees
+   it. Email Routing forwards only to a **verified destination address**; see
+   the deployment notes for what happens until it is verified.
+
+The request never names an address: recipient, Cc, sender and subject all stay
+the platform's decision, and an operator still cannot put the support address
+on a Cc of their own (`cc` override).
 
 ```ts
 const sent = await tickets.reply(ticket.id, { body, idempotencyKey, ccSelf: true }, { id: operatorId });
@@ -118,13 +133,13 @@ if (sent.ok && sent.value.selfCopy === "not_configured") {
 }
 ```
 
-`selfCopy` is `copied`, `not_configured` (no address; the reply is still sent)
-or `is_recipient` (the address is the person's or the support address, which
-get the mail anyway). It is present only when `ccSelf` was asked for and this
-call sent the reply; a retried `idempotencyKey` answers without it. Nobody is
-copied twice: if the person's mail already had the address on it, reply-all
-keeps one. Each timeline message carries `recipient` (the person, then every
-Cc), so the copy shows there too. The audit log records the number of Cc
+`selfCopy` is `copied`, `not_configured` (no operator address; the reply is
+still sent, without the support address on Cc) or `is_recipient` (the
+operator's address is on the To or Cc already; nothing is added). It is present
+only when `ccSelf` was asked for and this call sent the reply; a retried
+`idempotencyKey` answers without it. Each timeline message carries `recipient`
+(the To, then every Cc, as the person saw them), so the support address shows
+there too. The audit log records the number of Cc
 addresses and the `selfCopy` outcome, never the addresses.
 
 A reply is threaded (`In-Reply-To`) onto the latest mail in the
@@ -162,13 +177,19 @@ const preview = await tickets.previewReply(ticket.id);
 //   from: "Example Support <support@example.com>",
 //   to: ["person@example.org"],
 //   cc: ["colleague@example.org"],          // reply-all
-//   self: { address: "ops@example.net", outcome: "copied" }, // what ccSelf adds
+//   self: {                                  // what ccSelf would do
+//     cc: "support@example.com",             //   added to the Cc, seen by the person
+//     forwardTo: "ops@example.net",          //   where the copy is forwarded, never seen
+//     address: "ops@example.net",            //   = forwardTo, the earlier field
+//     outcome: "copied",
+//   },
 //   subject: "Re: …",
 //   overridesAllowed: false,
 // }
 ```
 
-`self.address` is `null` when no operator address is configured; `outcome` is
+`self.cc`, `self.forwardTo` and `self.address` are `null` when no operator
+address is configured; `outcome` is
 what `ccSelf: true` would do (`copied` / `not_configured` / `is_recipient`).
 
 A binding whose `props` carry `allowReplyOverrides: true` may send its own

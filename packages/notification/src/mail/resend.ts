@@ -50,6 +50,7 @@ export class ResendMailProvider implements MailProvider {
     const headers: Record<string, string> = {};
     if (mail.messageId) headers["Message-ID"] = mail.messageId;
     if (mail.inReplyTo) headers["In-Reply-To"] = mail.inReplyTo;
+    if (mail.copyId) headers["X-Inquiry-Copy"] = mail.copyId;
     if (mail.automatic) {
       headers["Auto-Submitted"] = "auto-replied";
       headers["X-Auto-Response-Suppress"] = "All";

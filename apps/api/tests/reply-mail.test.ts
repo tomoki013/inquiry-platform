@@ -237,7 +237,7 @@ describe("an operator's copy of their own reply (ccSelf)", () => {
       .run();
   }
 
-  it("copies the project's operator address, records it, and says so", async () => {
+  it("copies the support address for the project's operator, records it, and says so", async () => {
     const h = await harness({ operatorEmail: "deploy-ops@private.example" });
     const appId = await seedApp(h, "orbit");
     await projectOperator(h, appId, "orbit-ops@private.example");
@@ -248,14 +248,20 @@ describe("an operator's copy of their own reply (ccSelf)", () => {
     }>((await send(h, threadId)) as never);
     expect(sent.selfCopy).toBe("copied");
     expect(h.mail.sent[0]?.to).toBe("taro@corp.example");
-    expect(h.mail.sent[0]?.cc).toEqual(["boss@corp.example", "orbit-ops@private.example"]);
+    // The person sees the support address, never the operator's own.
+    expect(h.mail.sent[0]?.cc).toEqual(["boss@corp.example", "support@example.com"]);
+    expect(JSON.stringify(h.mail.sent[0])).not.toContain("private.example");
+    expect(h.mail.sent[0]?.copyId).toBeTruthy();
     expect(sent.messages.at(-1)?.recipient).toBe(
-      "taro@corp.example, boss@corp.example, orbit-ops@private.example",
+      "taro@corp.example, boss@corp.example, support@example.com",
     );
     const ticketMessage = await h.db
       .prepare("SELECT recipient FROM ticket_messages WHERE direction='OUTBOUND'")
       .first<{ recipient: string }>();
-    expect(ticketMessage?.recipient).toContain("orbit-ops@private.example");
+    expect(ticketMessage?.recipient).toContain("support@example.com");
+    expect(ticketMessage?.recipient).not.toContain("orbit-ops@private.example");
+    // Where the copy is forwarded, for mail-ingress.
+    expect(await h.reply.selfCopyForwardTo(appId)).toBe("orbit-ops@private.example");
     const [audit] = (await h.audit.list({ limit: 100, offset: 0 })).filter(
       (entry) => entry.action === "support.reply_sent",
     );
@@ -270,7 +276,14 @@ describe("an operator's copy of their own reply (ccSelf)", () => {
     expect(expectOk<{ selfCopy?: string }>((await send(h, threadId)) as never).selfCopy).toBe(
       "copied",
     );
-    expect(h.mail.sent[0]?.cc).toEqual(["deploy-ops@private.example"]);
+    expect(h.mail.sent[0]?.cc).toEqual(["support@example.com"]);
+    const preview = expectOk<{ self: unknown }>((await h.reply.previewThread(threadId)) as never);
+    expect(preview.self).toEqual({
+      cc: "support@example.com",
+      forwardTo: "deploy-ops@private.example",
+      address: "deploy-ops@private.example",
+      outcome: "copied",
+    });
   });
 
   it("sends without it, and says why, when there is no operator address", async () => {
@@ -300,14 +313,74 @@ describe("an operator's copy of their own reply (ccSelf)", () => {
       "is_recipient",
     );
 
-    // The person had already copied the operator: reply-all has them once.
+    // The person had already copied the operator: reply-all reaches them, and
+    // nothing is added.
     const copied = await harness({ operatorEmail: "ops@private.example" });
     await seedApp(copied, "orbit");
     const third = await mailThread(copied, ["OPS@private.example"]);
     expect(expectOk<{ selfCopy?: string }>((await send(copied, third)) as never).selfCopy).toBe(
-      "copied",
+      "is_recipient",
     );
     expect(copied.mail.sent[0]?.cc).toEqual(["ops@private.example"]);
+  });
+
+  it("files neither a ticket nor a message when the copy comes back, and still takes the person's reply", async () => {
+    const h = await harness({ operatorEmail: "ops@private.example" });
+    h.mail.reportsMessageId = false;
+    await seedApp(h, "orbit");
+    const threadId = await mailThread(h);
+    expectOk((await send(h, threadId)) as never);
+    const reply = h.mail.sent[0];
+    const count = async () =>
+      (await h.db
+        .prepare(
+          "SELECT (SELECT COUNT(*) FROM support_threads) AS threads, (SELECT COUNT(*) FROM support_messages) AS messages, (SELECT COUNT(*) FROM ticket_messages) AS ticketMessages",
+        )
+        .first<{ threads: number; messages: number; ticketMessages: number }>())!;
+    const before = await count();
+    // As Email Routing hands it back: from our own address, by any of the
+    // marks — our header, our Message-ID, or our header under a Message-ID
+    // the provider replaced.
+    for (const mark of [
+      { messageId: reply?.messageId, copyId: reply?.copyId },
+      { messageId: reply?.messageId },
+      { messageId: "<rewritten-by-provider@example.net>", copyId: reply?.copyId },
+    ]) {
+      const back = expectOk<{ selfCopy?: boolean; newThread: boolean }>(
+        (await h.support.ingestInboundEmail(
+          {
+            from: "support@example.com",
+            to: "support@example.com",
+            recipients: ["taro@corp.example", "support@example.com"],
+            subject: reply?.subject ?? "",
+            bodyText: "確認します",
+            inReplyTo: "<q1@corp.example>",
+            appSlug: "orbit",
+            ...mark,
+          },
+          mailActor,
+        )) as never,
+      );
+      expect(back).toMatchObject({ selfCopy: true, newThread: false });
+    }
+    expect(await count()).toEqual(before);
+    // The same marks from anybody else are just mail.
+    const forged = expectOk<{ selfCopy?: boolean }>(
+      (await h.support.ingestInboundEmail(
+        {
+          from: "taro@corp.example",
+          subject: `Re: ${reply?.subject}`,
+          bodyText: "ありがとうございます",
+          messageId: "<answer@corp.example>",
+          inReplyTo: reply?.messageId,
+          copyId: reply?.copyId,
+          appSlug: "orbit",
+        },
+        mailActor,
+      )) as never,
+    );
+    expect(forged.selfCopy).toBeUndefined();
+    expect((await count()).messages).toBe(before.messages + 1);
   });
 
   it("is off unless asked, and never on a receipt", async () => {
@@ -513,12 +586,17 @@ describe("an operator's own To, Cc and subject (overrides)", () => {
     const preview = expectOk<{ self: { address: string | null; outcome: string } }>(
       (await h.reply.previewThread(threadId)) as never,
     );
-    expect(preview.self).toEqual({ address: "ops@private.example", outcome: "copied" });
+    expect(preview.self).toEqual({
+      cc: "support@example.com",
+      forwardTo: "ops@private.example",
+      address: "ops@private.example",
+      outcome: "copied",
+    });
     const result = expectOk<{ selfCopy?: string }>(
       (await send(h, threadId, { cc: [] }, { ccSelf: true })) as never,
     );
     expect(result.selfCopy).toBe("copied");
-    expect(h.mail.sent[0]?.cc).toEqual(["ops@private.example"]);
+    expect(h.mail.sent[0]?.cc).toEqual(["support@example.com"]);
   });
 
   it("refuses a malformed address, our own address, a blank or two-line subject", async () => {

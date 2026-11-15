@@ -98,6 +98,11 @@ export const ingestInboundEmailInputSchema = z.object({
   recipients: z.array(z.string().max(320)).max(50).default([]),
   /** Machine-sent (auto-reply, bounce, list). Stored, never auto-answered. */
   automated: z.boolean().default(false),
+  /** `X-Inquiry-Copy`, when present. See `findSelfCopy`. */
+  copyId: z
+    .string()
+    .regex(/^[A-Za-z0-9-]{1,64}$/)
+    .optional(),
 });
 export type IngestInboundEmailInput = z.infer<typeof ingestInboundEmailInputSchema>;
 
@@ -188,4 +193,7 @@ export interface IngestInboundEmailResult {
    * platform retried, and this is not a second message. */
   duplicate: boolean;
   newThread: boolean;
+  /** Our own reply coming back: the operator's copy, sent to the support
+   * address (`ccSelf`). Nothing was stored; `messageId` is the reply's. */
+  selfCopy?: boolean;
 }

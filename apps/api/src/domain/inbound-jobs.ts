@@ -101,6 +101,7 @@ export class InboundJobs {
         requesterName: parsed.fromName,
         automated: parsed.automated,
         recipients: parsed.recipients,
+        ...(parsed.copyId ? { copyId: parsed.copyId } : {}),
         ...(payload.projectSlug ? { appSlug: payload.projectSlug } : {}),
       },
       { type: "email", id: "mail-ingress" },
@@ -109,6 +110,9 @@ export class InboundJobs {
       if (result.error.code === "FORBIDDEN") return () => bucket.delete(payload.key);
       throw new DeliveryError("MAIL_INGEST_FAILED");
     }
+    // The operator's copy of our own reply: nothing to store, attachments
+    // included. mail-ingress forwards it to them.
+    if (result.value.selfCopy) return () => bucket.delete(payload.key);
     const attachmentDb = this.attachmentDb
       ? await this.attachmentDb(result.value.messageId)
       : this.env.DB;

@@ -244,9 +244,9 @@ export type OperatorTimelineItem =
       /** `note` is internal: never sent, never shown to the person. */
       direction: "inbound" | "outbound" | "note";
       sender: string | null;
-      /** Who a mail went to, comma-separated: the person first, then every Cc
-       * (including the operator's own copy, `OperatorReply.ccSelf`). `null`
-       * for a note. */
+      /** Who a mail went to, comma-separated, as the person saw it: the To,
+       * then every Cc (with `OperatorReply.ccSelf`, the support address).
+       * `null` for a note. */
       recipient: string | null;
       /** The subject the mail actually went out or came in with. `null` for a
        * note, a form submission, and mail recorded before subjects were kept. */
@@ -368,10 +368,15 @@ export interface OperatorReply {
   /** The project template the reply was written from, if any. Only its subject
    * is used, and only for a ticket without a mail subject of its own. */
   templateId?: string;
-  /** Also send the mail to the operator's own private address, on Cc. The
-   * address is the project's notification recipient (or the deployment's),
-   * never one the request names. Whether it was added is in the answer's
-   * `selfCopy`; an unset address does not stop the reply. */
+  /** Send the operator a copy of the mail as it went out. The person sees the
+   * project's **support address** on Cc — never the operator's private one.
+   * That copy comes back through mail-ingress, is recognised as ours, and is
+   * forwarded to the operator's address (the project's notification recipient,
+   * else the deployment's); it becomes neither a ticket nor a message. Neither
+   * address is ever taken from the request. Whether it was added is in the
+   * answer's `selfCopy`; no operator address does not stop the reply.
+   *
+   * Until SDK 0.11.0 this put the operator's own address on the Cc. */
   ccSelf?: boolean;
   /** The To, in place of the person who wrote in. 1–5 addresses. Needs the
    * binding's `allowReplyOverrides`. The support address is refused. */
@@ -399,20 +404,28 @@ export interface OperatorReplyPreview {
   to: string[];
   /** Reply-all: everybody else on the person's latest mail. */
   cc: string[];
-  /** The operator's own copy (`OperatorReply.ccSelf`): the address it would
-   * add, and what asking for it would do. `address` is `null` when none is
-   * configured. */
-  self: { address: string | null; outcome: OperatorSelfCopy };
+  /** The operator's copy (`OperatorReply.ccSelf`) and what asking for it would
+   * do. `cc` is what the person would see added to the Cc — the support
+   * address — and `forwardTo` where the copy then goes, which they never see.
+   * `address` is the same as `forwardTo`, kept from the earlier shape. All
+   * three are `null` when no operator address is configured. */
+  self: {
+    cc: string | null;
+    forwardTo: string | null;
+    address: string | null;
+    outcome: OperatorSelfCopy;
+  };
   subject: string;
   /** Whether this binding may send `to` / `cc` / `subject`. */
   overridesAllowed: boolean;
 }
 
 /** What became of `OperatorReply.ccSelf`.
- * - `copied`: the operator's address is on the Cc.
+ * - `copied`: the support address is on the Cc, and its copy is forwarded to
+ *   the operator.
  * - `not_configured`: there is no operator address; the reply went without it.
- * - `is_recipient`: the address is the person's or the support address, which
- *   receive the mail already; nothing was added. */
+ * - `is_recipient`: the operator's address is on the To or Cc already, so it
+ *   receives the mail anyway; nothing was added. */
 export type OperatorSelfCopy = "copied" | "not_configured" | "is_recipient";
 
 /** The ticket after a reply. `selfCopy` is present only when the reply asked

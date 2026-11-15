@@ -26,6 +26,7 @@ import { internalFailure, notFound, validationFailure } from "./failures";
 import type { NotificationHook } from "./notification-service";
 import { findReportReplyThread } from "./report-threading";
 import { Scope } from "./scope";
+import { findSelfCopy } from "./self-copy";
 import {
   findReceiptReplyThread,
   findTicketReplyThread,
@@ -92,6 +93,17 @@ export class SupportService {
     const input = parsed.data;
 
     try {
+      // Before the duplicate check: a copy whose Message-ID the provider
+      // reported is also "seen", and must not be filed under our reply.
+      const copy = await findSelfCopy(this.db, input);
+      if (copy)
+        return ok({
+          threadId: copy.threadId,
+          messageId: copy.messageId,
+          duplicate: true,
+          newThread: false,
+          selfCopy: true,
+        });
       if (input.messageId) {
         const seen = await this.support.messageExists(input.messageId);
         if (seen) {

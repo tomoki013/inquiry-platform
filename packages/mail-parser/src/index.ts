@@ -21,6 +21,9 @@ export interface ParsedInboundEmail {
   messageId?: string;
   inReplyTo?: string;
   references: string[];
+  /** `X-Inquiry-Copy`: set on the operator's copy of our own reply. Only ever
+   * a hint — see `findSelfCopy` in the API for what it must also match. */
+  copyId?: string;
   /** Sent by a machine — an auto-reply, a bounce, a mailing list. Stored like
    * any other mail, but never answered automatically: two auto-responders
    * answering each other is a mail loop. */
@@ -56,6 +59,7 @@ export async function parseInboundEmail(
     messageId: parsed.messageId ?? undefined,
     inReplyTo: parsed.inReplyTo ?? undefined,
     references: parseReferences(parsed.references),
+    copyId: copyHeader(parsed.headers ?? []),
     automated: isAutomated(parsed.headers ?? [], parsed.from?.address ?? ""),
     attachments: (parsed.attachments ?? []).map((attachment) => ({
       filename: attachment.filename ?? undefined,
@@ -66,6 +70,12 @@ export async function parseInboundEmail(
           : new TextEncoder().encode(String(attachment.content ?? "")),
     })),
   };
+}
+
+function copyHeader(headers: Array<{ key: string; value: string }>): string | undefined {
+  const value = headers.find((header) => header.key.toLowerCase() === "x-inquiry-copy")?.value;
+  const id = value?.trim();
+  return id && /^[A-Za-z0-9-]{1,64}$/.test(id) ? id : undefined;
 }
 
 /** Mailboxes and the members of groups, as bare lower-case addresses. */

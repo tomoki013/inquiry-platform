@@ -36,6 +36,7 @@ import { internalFailure, notFound, validationFailure } from "./domain/failures"
 import { sha256Hex } from "./domain/identity";
 import { expireReportEvidence } from "./domain/report-retention";
 import { Scope } from "./domain/scope";
+import { findSelfCopy } from "./domain/self-copy";
 import type { AdminCoreEnv } from "./env";
 import { putReportEvidence } from "./evidence";
 import { json, readBounded } from "./http";
@@ -690,6 +691,34 @@ export default class AdminCore extends WorkerEntrypoint<AdminCoreEnv> implements
         attachment.content_type,
         attachment.original_filename,
       );
+    }
+
+    // mail-ingress asks before delivering: is this our own reply's copy for
+    // the operator (`ccSelf`), and where does it go? See `self-copy.ts`.
+    if (url.pathname === "/internal/mail-ingress/self-copy" && request.method === "POST") {
+      if ((await this.scope()).limited) return json({ error: "FORBIDDEN" }, 403);
+      const input = (await request.json().catch(() => null)) as {
+        projectSlug?: unknown;
+        from?: unknown;
+        messageId?: unknown;
+        copyId?: unknown;
+      } | null;
+      const text = (value: unknown, max: number) =>
+        typeof value === "string" && value.length > 0 && value.length <= max ? value : undefined;
+      const from = text(input?.from, 320);
+      if (!from) return json({ error: "VALIDATION_ERROR" }, 400);
+      const copyId = text(input?.copyId, 64);
+      const copy = await findSelfCopy(
+        await this.services.registry.forSlug(text(input?.projectSlug, 64)),
+        {
+          from,
+          messageId: text(input?.messageId, 998),
+          ...(copyId && /^[A-Za-z0-9-]+$/.test(copyId) ? { copyId } : {}),
+        },
+      );
+      if (!copy) return json({ selfCopy: false }, 200);
+      const forwardTo = await this.services.reply.selfCopyForwardTo(copy.appId ?? undefined);
+      return json({ selfCopy: true, forwardTo: forwardTo ?? null }, 200);
     }
 
     if (url.pathname === "/internal/mail-ingress/raw" && request.method === "PUT") {
