@@ -251,9 +251,9 @@ describe("report email", () => {
       admin,
     );
     expect(reply.ok).toBe(true);
-    expect(h.mail.sent[1]?.subject).toBe(
-      `Re: [orbit] 通報の受付・対応について [通報ID:${input.externalReportId}]`,
-    );
+    // Their subject, as a mail client would answer it, with the report ID
+    // their client dropped put back: it files a reply that loses its headers.
+    expect(h.mail.sent[1]?.subject).toBe(`Re: 通報 [通報ID:${input.externalReportId}]`);
     expect(h.mail.sent[1]?.inReplyTo).toBe("<reply@example.com>");
     expect(h.mail.sent[1]?.text).toContain(`受付ID: ${input.externalReportId}`);
   });

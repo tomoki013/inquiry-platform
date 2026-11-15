@@ -26,7 +26,11 @@ import { internalFailure, notFound, validationFailure } from "./failures";
 import type { NotificationHook } from "./notification-service";
 import { findReportReplyThread } from "./report-threading";
 import { Scope } from "./scope";
-import { findReceiptReplyThread, findTicketReplyThread } from "./ticket-threading";
+import {
+  findReceiptReplyThread,
+  findTicketReplyThread,
+  keepingReferences,
+} from "./ticket-threading";
 
 /**
  * Support threads, messages and internal notes.
@@ -112,6 +116,7 @@ export class SupportService {
       const threadId = existingThreadId ?? newId();
       const messageId = newId();
       const statements: D1PreparedStatement[] = [];
+      const received = input.subject.trim();
 
       const existing = existingThreadId ? await this.support.findThread(existingThreadId) : null;
       if (existingThreadId && (!existing || (appId && existing.app_id !== appId))) {
@@ -157,6 +162,11 @@ export class SupportService {
           at,
         }),
         this.support.touchThreadStatement(threadId, "inbound", at),
+        ...this.support.mailSubjectStatements(messageId, threadId, received, {
+          // A new mail inquiry's subject is the thread's own, which a reply
+          // already echoes; only a mail into a conversation moves it on.
+          conversation: existing ? conversationSubject(received, existing.mail_subject) : undefined,
+        }),
         this.audit.statement({
           actor,
           action: "support.received",
@@ -451,4 +461,18 @@ export class SupportService {
   async hasAnyThread(): Promise<boolean> {
     return (await this.support.countAll()) > 0;
   }
+}
+
+/**
+ * The conversation's subject after the person's mail `received` arrives: theirs,
+ * as a mail client would answer it. A reference the conversation carried
+ * (ticket number, receipt or report ID) and their client dropped is put back at
+ * the end — it is what files a later reply that also lost its headers. An
+ * empty subject leaves the conversation's as it was.
+ */
+export function conversationSubject(
+  received: string,
+  previous: string | null | undefined,
+): string | undefined {
+  return received ? keepingReferences(received, previous) : undefined;
 }

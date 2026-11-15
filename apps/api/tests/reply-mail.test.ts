@@ -197,132 +197,6 @@ describe("reply-all", () => {
   });
 });
 
-describe("an operator's copy of their own reply (ccSelf)", () => {
-  async function mailThread(h: Awaited<ReturnType<typeof harness>>, recipients: string[] = []) {
-    return expectOk<{ threadId: string }>(
-      (await h.support.ingestInboundEmail(
-        {
-          from: "taro@corp.example",
-          to: "support@example.com",
-          recipients: ["support@example.com", ...recipients],
-          subject: "ログインできません",
-          bodyText: "入れません",
-          messageId: "<q1@corp.example>",
-          appSlug: "orbit",
-        },
-        mailActor,
-      )) as never,
-    ).threadId;
-  }
-  const send = (
-    h: Awaited<ReturnType<typeof harness>>,
-    threadId: string,
-    options: { ccSelf?: boolean } = { ccSelf: true },
-  ) =>
-    h.reply.send(
-      { threadId, bodyText: "確認します", idempotencyKey: crypto.randomUUID() },
-      admin,
-      options,
-    );
-  async function projectOperator(
-    h: Awaited<ReturnType<typeof harness>>,
-    appId: string,
-    to: string,
-  ) {
-    await h.db
-      .prepare(
-        "INSERT INTO app_mail_settings (app_id, signature_text, notification_email, updated_at) VALUES (?, '', ?, ?)",
-      )
-      .bind(appId, to, new Date().toISOString())
-      .run();
-  }
-
-  it("copies the project's operator address, records it, and says so", async () => {
-    const h = await harness({ operatorEmail: "deploy-ops@private.example" });
-    const appId = await seedApp(h, "orbit");
-    await projectOperator(h, appId, "orbit-ops@private.example");
-    const threadId = await mailThread(h, ["boss@corp.example"]);
-    const sent = expectOk<{
-      selfCopy?: string;
-      messages: { direction: string; recipient?: string }[];
-    }>((await send(h, threadId)) as never);
-    expect(sent.selfCopy).toBe("copied");
-    expect(h.mail.sent[0]?.to).toBe("taro@corp.example");
-    expect(h.mail.sent[0]?.cc).toEqual(["boss@corp.example", "orbit-ops@private.example"]);
-    expect(sent.messages.at(-1)?.recipient).toBe(
-      "taro@corp.example, boss@corp.example, orbit-ops@private.example",
-    );
-    const ticketMessage = await h.db
-      .prepare("SELECT recipient FROM ticket_messages WHERE direction='OUTBOUND'")
-      .first<{ recipient: string }>();
-    expect(ticketMessage?.recipient).toContain("orbit-ops@private.example");
-    const [audit] = (await h.audit.list({ limit: 100, offset: 0 })).filter(
-      (entry) => entry.action === "support.reply_sent",
-    );
-    expect(audit?.metadata).toMatchObject({ cc: 2, selfCopy: "copied" });
-    expect(JSON.stringify(audit)).not.toContain("orbit-ops@private.example");
-  });
-
-  it("falls back to the deployment's operator address", async () => {
-    const h = await harness({ operatorEmail: "deploy-ops@private.example" });
-    await seedApp(h, "orbit");
-    const threadId = await mailThread(h);
-    expect(expectOk<{ selfCopy?: string }>((await send(h, threadId)) as never).selfCopy).toBe(
-      "copied",
-    );
-    expect(h.mail.sent[0]?.cc).toEqual(["deploy-ops@private.example"]);
-  });
-
-  it("sends without it, and says why, when there is no operator address", async () => {
-    const h = await harness();
-    await seedApp(h, "orbit");
-    const threadId = await mailThread(h);
-    expect(expectOk<{ selfCopy?: string }>((await send(h, threadId)) as never).selfCopy).toBe(
-      "not_configured",
-    );
-    expect(h.mail.sent).toHaveLength(1);
-    expect(h.mail.sent[0]?.cc).toBeUndefined();
-  });
-
-  it("never copies the person or the support address, nor anyone twice", async () => {
-    const asPerson = await harness({ operatorEmail: "Taro@corp.example" });
-    await seedApp(asPerson, "orbit");
-    const thread = await mailThread(asPerson);
-    expect(expectOk<{ selfCopy?: string }>((await send(asPerson, thread)) as never).selfCopy).toBe(
-      "is_recipient",
-    );
-    expect(asPerson.mail.sent[0]?.cc).toBeUndefined();
-
-    const asSupport = await harness({ operatorEmail: "support@example.com" });
-    await seedApp(asSupport, "orbit");
-    const other = await mailThread(asSupport);
-    expect(expectOk<{ selfCopy?: string }>((await send(asSupport, other)) as never).selfCopy).toBe(
-      "is_recipient",
-    );
-
-    // The person had already copied the operator: reply-all has them once.
-    const copied = await harness({ operatorEmail: "ops@private.example" });
-    await seedApp(copied, "orbit");
-    const third = await mailThread(copied, ["OPS@private.example"]);
-    expect(expectOk<{ selfCopy?: string }>((await send(copied, third)) as never).selfCopy).toBe(
-      "copied",
-    );
-    expect(copied.mail.sent[0]?.cc).toEqual(["ops@private.example"]);
-  });
-
-  it("is off unless asked, and never on a receipt", async () => {
-    const h = await harness({ operatorEmail: "ops@private.example", receipts: true });
-    await seedApp(h, "orbit");
-    const threadId = await mailThread(h);
-    await h.settled();
-    expect(h.mail.sent[0]?.automatic).toBe(true);
-    expect(h.mail.sent[0]?.cc).toBeUndefined();
-    const plain = expectOk<{ selfCopy?: string }>((await send(h, threadId, {})) as never);
-    expect(plain.selfCopy).toBeUndefined();
-    expect(h.mail.sent.at(-1)?.cc).toBeUndefined();
-  });
-});
-
 describe("provider-confirmed reply parents", () => {
   it("waits for the receipt ID and then replies to the real provider ID", async () => {
     const h = await harness({ receipts: true });
@@ -430,11 +304,9 @@ describe("an operator's own To, Cc and subject (overrides)", () => {
     h: Awaited<ReturnType<typeof harness>>,
     threadId: string,
     overrides: { to?: string[]; cc?: string[]; subject?: string },
-    extra: { ccSelf?: boolean } = {},
   ) =>
     h.reply.send({ threadId, bodyText: "確認します", idempotencyKey: crypto.randomUUID() }, admin, {
       overrides,
-      ...extra,
     });
 
   it("previews what a plain reply gets, and a plain reply gets exactly that", async () => {
@@ -494,31 +366,18 @@ describe("an operator's own To, Cc and subject (overrides)", () => {
       cc: 1,
     });
     expect(audit?.metadata).not.toContain("@");
-    // The thread keeps its own subject for the next plain reply.
+    // The operator's subject is now the conversation's, as in a mail client.
     expectOk((await reply(h, threadId, "続きです")) as never);
-    expect(h.mail.sent[1]?.subject).toBe("Re: ログインできません");
+    expect(h.mail.sent[1]?.subject).toBe("Re: ログインの件（追加のご案内）");
     expect(h.mail.sent[1]?.cc).toEqual(["boss@corp.example"]);
   });
 
-  it("sends no reply-all Cc for an empty list, and still adds the operator's own copy", async () => {
+  it("sends no reply-all Cc for an empty list", async () => {
     const h = await harness();
-    const appId = await seedApp(h, "orbit");
-    await h.db
-      .prepare(
-        "INSERT INTO app_mail_settings (app_id, signature_text, notification_email, updated_at) VALUES (?, '', 'ops@private.example', ?)",
-      )
-      .bind(appId, new Date().toISOString())
-      .run();
+    await seedApp(h, "orbit");
     const threadId = await mailThread(h);
-    const preview = expectOk<{ self: { address: string | null; outcome: string } }>(
-      (await h.reply.previewThread(threadId)) as never,
-    );
-    expect(preview.self).toEqual({ address: "ops@private.example", outcome: "copied" });
-    const result = expectOk<{ selfCopy?: string }>(
-      (await send(h, threadId, { cc: [] }, { ccSelf: true })) as never,
-    );
-    expect(result.selfCopy).toBe("copied");
-    expect(h.mail.sent[0]?.cc).toEqual(["ops@private.example"]);
+    expectOk((await send(h, threadId, { cc: [] })) as never);
+    expect(h.mail.sent[0]?.cc).toBeUndefined();
   });
 
   it("refuses a malformed address, our own address, a blank or two-line subject", async () => {
@@ -570,6 +429,49 @@ describe("an operator's own To, Cc and subject (overrides)", () => {
       )) as never,
     );
     expect(answered).toMatchObject({ threadId, newThread: false });
+  });
+
+  it("answers the person's latest subject, keeping a ticket number they dropped", async () => {
+    const h = await harness({ receipts: true });
+    h.mail.reportsMessageId = false;
+    await seedApp(h, "orbit");
+    const threadId = await formThread(h);
+    await h.settled();
+    const receipt = h.mail.sent[0]?.subject ?? "";
+    const number = receipt.match(/TK-\d+/)?.[0];
+    expect(number).toBeTruthy();
+    // The first reply to a form answers its receipt.
+    expectOk((await reply(h, threadId, "一通目です")) as never);
+    expect(h.mail.sent[1]?.subject).toBe(`Re: ${receipt}`);
+    // Their client changed the subject and lost the number.
+    expectOk(
+      (await h.support.ingestInboundEmail(
+        {
+          from: "someone@example.com",
+          subject: "RE: Re: 書き出しの続き",
+          bodyText: "もう一つ",
+          messageId: "<again@example.com>",
+          inReplyTo: h.mail.sent[1]?.messageId,
+          appSlug: "orbit",
+        },
+        mailActor,
+      )) as never,
+    );
+    expectOk((await reply(h, threadId, "二通目です")) as never);
+    expect(h.mail.sent[2]?.subject).toBe(`Re: 書き出しの続き [${number}]`);
+    const subjects = await h.db
+      .prepare(
+        "SELECT direction, subject FROM ticket_messages WHERE ticket_id=(SELECT ticket_id FROM ticket_sources WHERE source_type='support' AND source_id=?) ORDER BY created_at, rowid",
+      )
+      .bind(threadId)
+      .all<{ direction: string; subject: string | null }>();
+    expect(subjects.results.map((row) => row.subject)).toEqual([
+      null,
+      receipt,
+      `Re: ${receipt}`,
+      "RE: Re: 書き出しの続き",
+      `Re: 書き出しの続き [${number}]`,
+    ]);
   });
 
   it("is ignored for automatic mail", async () => {

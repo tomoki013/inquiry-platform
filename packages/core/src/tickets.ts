@@ -174,6 +174,12 @@ export interface Ticket {
   thread_id: string | null;
   /** Added to operator list/detail queries from the linked support thread. */
   operator_source?: "email" | "web_form" | "internal" | "report";
+  /** Added to the same queries: the subject of the linked conversation's
+   * latest mail, which the next reply answers with `Re:` — or, for a mail
+   * inquiry nothing has been sent on yet, the subject the person wrote. `null`
+   * when no mail has gone either way on a form submission, or there is no
+   * conversation. */
+  mail_subject?: string | null;
 }
 export interface TicketMessage {
   id: string;

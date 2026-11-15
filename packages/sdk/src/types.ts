@@ -213,7 +213,17 @@ export interface OperatorTicketSummary {
   source: OperatorTicketSource;
   resolution: string | null;
   priority: string;
+  /** The ticket's heading: for a form submission its topic, for a mail the
+   * subject it arrived with. Not necessarily what the mails say — see
+   * `mailSubject`. */
   subject: string;
+  /** The conversation's mail subject as it stands: that of its latest mail,
+   * either way, an operator's own subject included. The next reply goes out as
+   * `Re:` this (`previewReply` shows exactly what). For a mail inquiry nothing
+   * has been sent on yet, the subject the person wrote; `null` for a form
+   * submission before its receipt or first reply, and for a ticket with no
+   * conversation. */
+  mailSubject: string | null;
   /** Absent when the person asked for no reply. */
   requesterEmail: string | null;
   slaState: "OK" | "AT_RISK" | "BREACHED";
@@ -234,10 +244,12 @@ export type OperatorTimelineItem =
       /** `note` is internal: never sent, never shown to the person. */
       direction: "inbound" | "outbound" | "note";
       sender: string | null;
-      /** Who a mail went to, comma-separated: the person first, then every Cc
-       * (including the operator's own copy, `OperatorReply.ccSelf`). `null`
+      /** Who a mail went to, comma-separated: the To, then every Cc. `null`
        * for a note. */
       recipient: string | null;
+      /** The subject the mail actually went out or came in with. `null` for a
+       * note, a form submission, and mail recorded before subjects were kept. */
+      subject: string | null;
       body: string;
       createdAt: string;
     }
@@ -355,23 +367,19 @@ export interface OperatorReply {
   /** The project template the reply was written from, if any. Only its subject
    * is used, and only for a ticket without a mail subject of its own. */
   templateId?: string;
-  /** Also send the mail to the operator's own private address, on Cc. The
-   * address is the project's notification recipient (or the deployment's),
-   * never one the request names. Whether it was added is in the answer's
-   * `selfCopy`; an unset address does not stop the reply. */
-  ccSelf?: boolean;
   /** The To, in place of the person who wrote in. 1–5 addresses. Needs the
    * binding's `allowReplyOverrides`. The support address is refused. */
   to?: string[];
   /** The reply-all Cc, in place of the one the platform works out
-   * (`OperatorReplyPreview.cc`); `[]` sends none. Up to 10 addresses. The
-   * operator's own copy is still `ccSelf`, added on top. Needs
+   * (`OperatorReplyPreview.cc`); `[]` sends none. Up to 10 addresses. Needs
    * `allowReplyOverrides`. The support address is refused. */
   cc?: string[];
   /** The subject, in place of `OperatorReplyPreview.subject`. At most 200
    * characters, one line. When the platform's subject carries the ticket
    * number (`[TK-000123]`) and this one does not, the number is added at the
-   * end, so a reply that loses its headers still finds the ticket. Needs
+   * end, so a reply that loses its headers still finds the ticket. Sent as
+   * written — no `Re:` is added — and it becomes the conversation's subject:
+   * the next reply is `Re:` this (`OperatorTicketSummary.mailSubject`). Needs
    * `allowReplyOverrides`. */
   subject?: string;
 }
@@ -384,28 +392,13 @@ export interface OperatorReplyPreview {
   to: string[];
   /** Reply-all: everybody else on the person's latest mail. */
   cc: string[];
-  /** The operator's own copy (`OperatorReply.ccSelf`): the address it would
-   * add, and what asking for it would do. `address` is `null` when none is
-   * configured. */
-  self: { address: string | null; outcome: OperatorSelfCopy };
   subject: string;
   /** Whether this binding may send `to` / `cc` / `subject`. */
   overridesAllowed: boolean;
 }
 
-/** What became of `OperatorReply.ccSelf`.
- * - `copied`: the operator's address is on the Cc.
- * - `not_configured`: there is no operator address; the reply went without it.
- * - `is_recipient`: the address is the person's or the support address, which
- *   receive the mail already; nothing was added. */
-export type OperatorSelfCopy = "copied" | "not_configured" | "is_recipient";
-
-/** The ticket after a reply. `selfCopy` is present only when the reply asked
- * for `ccSelf` and was sent by this call (a retried `idempotencyKey` answers
- * the ticket as it stands, without it). */
-export interface OperatorReplyResult extends OperatorTicketDetail {
-  selfCopy?: OperatorSelfCopy;
-}
+/** The ticket after a reply. */
+export type OperatorReplyResult = OperatorTicketDetail;
 
 /**
  * What the platform's `ProjectOperator` entrypoint answers: a project's own
