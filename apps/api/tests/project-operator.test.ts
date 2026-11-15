@@ -6,7 +6,7 @@ import {
   type IntakeBinding,
   type ProjectOperatorApi,
 } from "@inquiry-platform/sdk";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Intake } from "../src/intake";
 import { ProjectOperator } from "../src/project-operator";
 import { harness, seedApp, testEnv } from "./harness";
@@ -19,10 +19,13 @@ import { harness, seedApp, testEnv } from "./harness";
  * calling app and the person inside it.
  */
 
-function operator(props: ProjectOperatorProps | Record<string, unknown> | undefined) {
+function operator(
+  props: ProjectOperatorProps | Record<string, unknown> | undefined,
+  env: object = testEnv,
+) {
   const ctx = createExecutionContext();
   Object.defineProperty(ctx, "props", { value: props });
-  const entry = new ProjectOperator(ctx, testEnv as never);
+  const entry = new ProjectOperator(ctx, env as never);
   const api: ProjectOperatorApi = {
     listDeliveryJobs: (slug) => entry.listDeliveryJobs(slug),
     retryDeliveryJob: (slug, id, operator) => entry.retryDeliveryJob(slug, id, operator),
@@ -539,5 +542,84 @@ describe("ProjectOperator: a report is decided on the report", () => {
     );
     expect(stale).toMatchObject({ ok: false, error: { code: "CONFLICT" } });
     expect(await reportStatus(id)).toBe("open");
+  });
+});
+
+describe("ProjectOperator: copying the operator on their own reply", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function mailed() {
+    const sent: Array<{ to: string[]; cc?: string[] }> = [];
+    vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push(JSON.parse(String(init?.body)));
+      return Response.json({ id: `resend-${sent.length}` });
+    });
+    return sent;
+  }
+
+  it("puts the private operator address on Cc and answers selfCopy", async () => {
+    const own = await contact("orbit", "o-1", "a@example.com");
+    const sent = mailed();
+    const env = { ...testEnv, MAIL_API_KEY: "test-key", NOTIFICATION_EMAIL: "ops@private.example" };
+    const client = createProjectOperatorClient(operator(orbitConsole, env).api, "orbit");
+    const replied = await client.reply(
+      own.id,
+      { body: "確認します", idempotencyKey: "reply-cc-0001", ccSelf: true },
+      person,
+    );
+    if (!replied.ok) throw new Error(replied.error.message);
+    expect(replied.value.selfCopy).toBe("copied");
+    expect(sent.at(-1)).toMatchObject({ to: ["a@example.com"], cc: ["ops@private.example"] });
+    expect(
+      replied.value.timeline.find(
+        (item) => item.kind === "message" && item.direction === "outbound",
+      ),
+    ).toMatchObject({ recipient: "a@example.com, ops@private.example" });
+
+    // A retried key answers the ticket as it stands, without sending again.
+    const again = await client.reply(
+      own.id,
+      { body: "確認します", idempotencyKey: "reply-cc-0001", ccSelf: true },
+      person,
+    );
+    expect(again.ok && again.value.selfCopy).toBeUndefined();
+    expect(sent).toHaveLength(1);
+  });
+
+  it("still sends, and says so, when there is no operator address", async () => {
+    const own = await contact("orbit", "o-1", "a@example.com");
+    const sent = mailed();
+    const env = { ...testEnv, MAIL_API_KEY: "test-key", NOTIFICATION_EMAIL: undefined };
+    const client = createProjectOperatorClient(operator(orbitConsole, env).api, "orbit");
+    const replied = await client.reply(
+      own.id,
+      { body: "確認します", idempotencyKey: "reply-cc-0002", ccSelf: true },
+      person,
+    );
+    expect(replied).toMatchObject({ ok: true, value: { selfCopy: "not_configured" } });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.cc).toBeUndefined();
+  });
+
+  it("takes no address from the request", async () => {
+    const own = await contact("orbit", "o-1", "a@example.com");
+    const sent = mailed();
+    const env = { ...testEnv, MAIL_API_KEY: "test-key" };
+    const api = operator(orbitConsole, env).api;
+    for (const tampered of [
+      { cc: ["x@attacker.example"] },
+      { ccSelf: "x@attacker.example" },
+      { to: "x@attacker.example" },
+    ]) {
+      expect(
+        await api.reply(
+          "orbit",
+          own.id,
+          { body: "本文", idempotencyKey: "reply-cc-0003", ...tampered } as never,
+          person,
+        ),
+      ).toMatchObject({ ok: false, error: { code: "VALIDATION_ERROR" } });
+    }
+    expect(sent).toHaveLength(0);
   });
 });

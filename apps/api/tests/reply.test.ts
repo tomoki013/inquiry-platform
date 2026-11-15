@@ -339,6 +339,20 @@ describe("sendSupportReply", () => {
     expect(mail?.references).toEqual(["<first@example.com>"]);
   });
 
+  /** inbound → reply → another reply: the second answers our first (by the
+   * Message-ID the provider reported for it), not the customer's older mail,
+   * so mail clients nest it under what we just sent. */
+  it("threads a second reply in a row onto the first one", async () => {
+    await h.reply.send({ threadId, bodyText: "一通目", idempotencyKey: KEY }, admin);
+    await h.reply.send(
+      { threadId, bodyText: "二通目", idempotencyKey: "idem-key-000000099" },
+      admin,
+    );
+    const second = h.mail.sent[1];
+    expect(second?.inReplyTo).toBe("<sent-1@test>");
+    expect(second?.references).toEqual(["<first@example.com>", "<sent-1@test>"]);
+  });
+
   it("does not stack Re: on a subject that already has one", async () => {
     const replyThread = await openThread({
       messageId: "<re@example.com>",

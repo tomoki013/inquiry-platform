@@ -230,6 +230,10 @@ export type OperatorTimelineItem =
       /** `note` is internal: never sent, never shown to the person. */
       direction: "inbound" | "outbound" | "note";
       sender: string | null;
+      /** Who a mail went to, comma-separated: the person first, then every Cc
+       * (including the operator's own copy, `OperatorReply.ccSelf`). `null`
+       * for a note. */
+      recipient: string | null;
       body: string;
       createdAt: string;
     }
@@ -347,6 +351,25 @@ export interface OperatorReply {
   /** The project template the reply was written from, if any. Only its subject
    * is used, and only for a ticket without a mail subject of its own. */
   templateId?: string;
+  /** Also send the mail to the operator's own private address, on Cc. The
+   * address is the project's notification recipient (or the deployment's),
+   * never one the request names. Whether it was added is in the answer's
+   * `selfCopy`; an unset address does not stop the reply. */
+  ccSelf?: boolean;
+}
+
+/** What became of `OperatorReply.ccSelf`.
+ * - `copied`: the operator's address is on the Cc.
+ * - `not_configured`: there is no operator address; the reply went without it.
+ * - `is_recipient`: the address is the person's or the support address, which
+ *   receive the mail already; nothing was added. */
+export type OperatorSelfCopy = "copied" | "not_configured" | "is_recipient";
+
+/** The ticket after a reply. `selfCopy` is present only when the reply asked
+ * for `ccSelf` and was sent by this call (a retried `idempotencyKey` answers
+ * the ticket as it stands, without it). */
+export interface OperatorReplyResult extends OperatorTicketDetail {
+  selfCopy?: OperatorSelfCopy;
 }
 
 /**
@@ -392,7 +415,7 @@ export interface ProjectOperatorApi {
     ticketId: string,
     reply: OperatorReply,
     operator: OperatorRef,
-  ): Promise<IntakeResult<OperatorTicketDetail>>;
+  ): Promise<IntakeResult<OperatorReplyResult>>;
   setSignature(
     projectSlug: string,
     signature: string,

@@ -2,6 +2,7 @@ import type {
   ActorRef,
   AppliedTemplate,
   AppMailSettings,
+  OperatorSelfCopy,
   ReplyTemplate,
   Result,
   SupportDraft,
@@ -49,6 +50,11 @@ export const INQUIRY_RECEIPT_RETRY_SQL = `SELECT t.id FROM support_threads t
   AND NOT EXISTS (SELECT 1 FROM reports x WHERE x.support_thread_id=t.id __PROJECT__)
   ORDER BY t.created_at LIMIT 25`;
 
+/** See `OperatorSelfCopy`. */
+export type SelfCopyOutcome = OperatorSelfCopy;
+
+const COPY_ADDRESS = /^[^\s@<>,]+@[^\s@<>,]+\.[^\s@<>,]+$/;
+
 export interface ReplyAddresses {
   supportEmail: string;
   fromName: string;
@@ -62,6 +68,10 @@ export interface ReplyAddresses {
   replyClosing?: string;
   /** This deployment's other addresses (no-reply, report), never copied on a reply. */
   ownAddresses?: readonly string[];
+  /** The deployment's private operator address (`NOTIFICATION_EMAIL`), used
+   * for an operator's copy of their own reply when the project's mail
+   * settings name none. */
+  operatorEmail?: string;
   /** Project-scoped overrides from the platform's mail settings repository. */
   resolve?: (appId: string | undefined) => Promise<ProjectMailSettings>;
   delivery?: (appId: string | undefined) => ProjectMailDelivery;
@@ -628,6 +638,13 @@ export class ReplyService {
     }
   }
 
+  /** The operator's private address: the project's notification recipient,
+   * else the deployment's. Internal only, like `ProjectMailSettings`. */
+  private async operatorAddress(appId: string | undefined): Promise<string | undefined> {
+    const settings = (await this.addresses.resolve?.(appId)) ?? {};
+    return settings.notificationEmail || this.addresses.operatorEmail;
+  }
+
   // ---- sending -----------------------------------------------------------
 
   async send(
@@ -646,8 +663,12 @@ export class ReplyService {
       /** Internal receipt-only fields, never accepted from a reply request. */
       quotedBody?: string;
       receiptCopy?: string;
+      /** Copy the reply to the operator's private address. The address comes
+       * from the project's mail settings or the deployment, never from the
+       * request; the answer says what happened (`selfCopy`). */
+      ccSelf?: boolean;
     } = {},
-  ): Promise<Result<SupportThreadDetail>> {
+  ): Promise<Result<SupportThreadDetail & { selfCopy?: SelfCopyOutcome }>> {
     const parsed = sendSupportReplyInputSchema.safeParse(raw);
     if (!parsed.success) return validationFailure(parsed.error);
     const input = parsed.data;
@@ -818,18 +839,30 @@ export class ReplyService {
       // Worked out here from stored mail, never from the request, so a
       // tampered request still cannot add an address. Receipts may explicitly
       // copy the deployment-owned private operator address.
+      // An operator's copy of their own reply is the same kind of address,
+      // and is checked the same way.
+      const recipients = [
+        thread.requester_email,
+        addresses.supportEmail,
+        this.addresses.supportEmail,
+      ].map((address) => address.trim().toLowerCase());
       const copy = options.receiptCopy?.trim();
       const receiptCc =
-        copy &&
-        /^[^\s@<>,]+@[^\s@<>,]+\.[^\s@<>,]+$/.test(copy) &&
-        ![thread.requester_email, addresses.supportEmail, this.addresses.supportEmail].some(
-          (address) => address.toLowerCase() === copy.toLowerCase(),
-        )
-          ? [copy]
-          : [];
+        copy && COPY_ADDRESS.test(copy) && !recipients.includes(copy.toLowerCase()) ? [copy] : [];
       const cc = options.automatic
         ? receiptCc
         : await this.replyAllCc(input.threadId, thread.requester_email, addresses.supportEmail);
+      let selfCopy: SelfCopyOutcome | undefined;
+      if (options.ccSelf && !options.automatic) {
+        const self = (await this.operatorAddress(thread.app_id ?? undefined))?.trim();
+        if (!self || !COPY_ADDRESS.test(self)) selfCopy = "not_configured";
+        else if (recipients.includes(self.toLowerCase())) selfCopy = "is_recipient";
+        else {
+          selfCopy = "copied";
+          // Reply-all may already carry it, when the person copied us.
+          if (!cc.some((address) => address.toLowerCase() === self.toLowerCase())) cc.push(self);
+        }
+      }
       // Ours, so it is known whether or not the provider reports its own.
       const domain = addresses.supportEmail.split("@")[1]?.trim() || "localhost";
       const ownMessageId = `<${newId()}@${domain}>`;
@@ -929,7 +962,14 @@ export class ReplyService {
           action: "support.reply_sent",
           targetType: "support_thread",
           targetId: input.threadId,
-          metadata: { length: input.bodyText.length, threaded: Boolean(inReplyTo) },
+          metadata: {
+            length: input.bodyText.length,
+            threaded: Boolean(inReplyTo),
+            // Counts, not addresses: the audit log is read more widely than
+            // the conversation it describes.
+            ...(cc.length ? { cc: cc.length } : {}),
+            ...(selfCopy ? { selfCopy } : {}),
+          },
         }),
       ];
 
@@ -950,7 +990,8 @@ export class ReplyService {
       }
 
       await this.db.batch(statements);
-      return await this.supportService.detail(input.threadId);
+      const detail = await this.supportService.detail(input.threadId);
+      return detail.ok && selfCopy ? { ok: true, value: { ...detail.value, selfCopy } } : detail;
     } catch (error) {
       return internalFailure("reply.send", error);
     }

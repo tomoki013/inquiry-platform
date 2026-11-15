@@ -9,6 +9,7 @@ import type {
   OperatorProject,
   OperatorRef,
   OperatorReply,
+  OperatorReplyResult,
   OperatorReplyTemplate,
   OperatorTemplateChange,
   OperatorTemplateInput,
@@ -117,7 +118,7 @@ export interface ProjectOperatorClient {
     ticketId: string,
     reply: OperatorReply,
     operator: OperatorRef,
-  ): Promise<IntakeResult<OperatorTicketDetail>>;
+  ): Promise<IntakeResult<OperatorReplyResult>>;
   setSignature(signature: string, operator: OperatorRef): Promise<IntakeResult<OperatorProject>>;
   listTemplates(options?: {
     includeInactive?: boolean;

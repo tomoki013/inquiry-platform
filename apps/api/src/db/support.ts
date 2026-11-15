@@ -374,7 +374,9 @@ export class SupportRepository {
   }
 
   /** The `Message-ID`s a reply should thread onto: what the customer sent, and
-   * what we have already sent them, oldest first. */
+   * what we have already sent them, oldest first. A reply answers the latest of
+   * them, whichever side sent it, so a second reply in a row follows our first
+   * one rather than the customer's older mail. */
   async threadReferences(threadId: string): Promise<{ references: string[]; inReplyTo?: string }> {
     const { results } = await this.db
       .prepare(
@@ -397,11 +399,7 @@ export class SupportRepository {
         (row.direction === "inbound" || !row.transport_id || row.message_id_checked_at !== null),
     );
     const references = valid.map((row) => row.provider_message_id).slice(-50);
-    const lastInbound = [...valid].reverse().find((row) => row.direction === "inbound");
-    return {
-      references,
-      inReplyTo: lastInbound?.provider_message_id ?? references[references.length - 1],
-    };
+    return { references, inReplyTo: references[references.length - 1] };
   }
 
   async countOpen(scope: Scope = Scope.all): Promise<number> {

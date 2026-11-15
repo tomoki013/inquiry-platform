@@ -5,7 +5,9 @@ import type {
   OperatorProject,
   OperatorRef,
   OperatorReply,
+  OperatorReplyResult,
   OperatorReplyTemplate,
+  OperatorSelfCopy,
   OperatorTemplateChange,
   OperatorTemplateInput,
   OperatorTicketChange,
@@ -83,6 +85,7 @@ const replySchema = z
     idempotencyKey: z.string(),
     reopenIfResolved: z.boolean().optional(),
     templateId: z.string().min(1).max(200).optional(),
+    ccSelf: z.boolean().optional(),
   })
   .strict();
 const templateInputSchema = z
@@ -480,7 +483,7 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
     ticketId: string,
     raw: OperatorReply,
     operator: OperatorRef,
-  ): Promise<Result<OperatorTicketDetail>> {
+  ): Promise<Result<OperatorReplyResult>> {
     const parsed = replySchema.safeParse(raw);
     if (!parsed.success) return validationFailure(parsed.error);
     try {
@@ -492,6 +495,15 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
       if (!ticket) return notFound;
       const templateId = parsed.data.templateId;
       if (templateId && !(await this.ownTemplate(scoped.app, templateId))) return notFound;
+      // Only a yes/no crosses the binding; the address is the project's or
+      // the deployment's private operator address, resolved in Core.
+      const options = parsed.data.ccSelf ? { ccSelf: true } : {};
+      const answer = async (selfCopy: OperatorSelfCopy | undefined) => {
+        const detail = await this.detail(ticket.id);
+        return detail.ok && selfCopy
+          ? { ok: true as const, value: { ...detail.value, selfCopy } }
+          : detail;
+      };
       if (ticket.report_id) {
         const sent = await this.services.reports.replyToReporter(
           ticket.report_id,
@@ -501,8 +513,9 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
             ...(templateId ? { templateId } : {}),
           },
           actor,
+          options,
         );
-        return sent.ok ? this.detail(ticket.id) : sent;
+        return sent.ok ? answer(sent.value.selfCopy) : sent;
       }
       if (!ticket.thread_id || !ticket.requester_email) {
         return {
@@ -519,9 +532,10 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
           ...(templateId ? { templateId } : {}),
         },
         actor,
+        options,
       );
       if (!sent.ok) return sent;
-      return await this.detail(ticket.id);
+      return await answer(sent.value.selfCopy);
     } catch (error) {
       return internalFailure("operator.reply", error);
     }
@@ -776,6 +790,7 @@ function toDetail(
                   ? ("inbound" as const)
                   : ("outbound" as const),
             sender: item.value.sender,
+            recipient: item.value.visibility === "INTERNAL" ? null : item.value.recipient,
             body: item.value.body,
             createdAt: item.value.created_at,
           }
