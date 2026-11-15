@@ -92,26 +92,23 @@ export function renderTemplate(
 }
 
 /**
- * `Re:` once, however many round trips the thread has had.
+ * `Re:` in front of a subject, unless it already starts with a reply prefix —
+ * then it is answered as it stands, the way mail clients do. A prefix is never
+ * rewritten or folded: `RE: Re: 件名` stays `RE: Re: 件名`, and `返信: 件名`
+ * stays `返信: 件名`.
  *
- * Matches the prefixes mail clients actually produce — English and the
- * localised ones (`AW:`, `SV:`, `返信:`, `回复:` …), any case, half- or
- * full-width letters and colon, with or without a `[n]` / `(n)` counter — so a
- * subject that has been round-tripped through Gmail and a Japanese client does
- * not accumulate a column of them. `Fwd:` is not one: a forward is a different
- * message, and its subject is kept as it is.
+ * Recognised: English and the localised prefixes (`AW:`, `SV:`, `返信:`,
+ * `回复:` …), any case, half- or full-width letters and colon, with or without a
+ * `[n]` / `(n)` counter. `Fwd:` is not one: a forward is a different message,
+ * so its reply is `Re: Fwd: …`.
  */
 const REPLY_PREFIX =
-  /^[\s\u3000]*(?:(?:[rRｒＲ][eEｅＥ]|aw|sv|antw|返信|回复|回覆|回信|답장)[\s\u3000]*(?:\[\d+\]|\(\d+\)|［\d+］|（\d+）)?[\s\u3000]*[:：][\s\u3000]*)+/i;
-
-/** A subject with every leading reply prefix removed. */
-export function withoutReplyPrefix(subject: string): string {
-  return subject.replace(REPLY_PREFIX, "").trim();
-}
+  /^[\s\u3000]*(?:[rRｒＲ][eEｅＥ]|aw|sv|antw|返信|回复|回覆|回信|답장)[\s\u3000]*(?:\[\d+\]|\(\d+\)|［\d+］|（\d+）)?[\s\u3000]*[:：]/i;
 
 export function replySubject(subject: string): string {
-  const stripped = withoutReplyPrefix(subject);
-  return stripped.length === 0 ? "Re:" : `Re: ${stripped}`;
+  const trimmed = subject.trim();
+  if (trimmed.length === 0) return "Re:";
+  return REPLY_PREFIX.test(trimmed) ? trimmed : `Re: ${trimmed}`;
 }
 
 /** Used when a thread has no subject of its own and no template chose one. */
