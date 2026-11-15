@@ -65,3 +65,18 @@ export function coreFor(
   const binding = (env as unknown as Record<string, unknown>)[name];
   return binding && typeof binding === "object" ? (binding as AdminWebEnv["ADMIN_CORE"]) : null;
 }
+
+export function inquiryShareCore(env: AdminWebEnv, slug: string) {
+  const routes = env.INQUIRY_SHARE_PROJECTS;
+  const name = routes && Object.hasOwn(routes, slug) ? routes[slug] : undefined;
+  if (
+    typeof name !== "string" ||
+    !/^INQUIRY_SHARE_[A-Z0-9_]+$/.test(name) ||
+    name === "INQUIRY_SHARE_REDEEM" ||
+    name === "INQUIRY_SHARE_PROJECTS"
+  )
+    return null;
+  return Reflect.get(env, name) as
+    | Pick<AdminWebEnv["ADMIN_CORE"], "inquiryShareContext" | "createInquiryShare">
+    | undefined;
+}

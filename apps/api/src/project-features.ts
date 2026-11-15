@@ -34,7 +34,13 @@ const domain = z
     turnstile: turnstile.optional(),
   })
   .strict();
-const project = z.object({ inquiry: domain.optional(), report: domain.optional() }).strict();
+const project = z
+  .object({
+    inquiry: domain.optional(),
+    report: domain.optional(),
+    inquiryShare: z.boolean().default(false),
+  })
+  .strict();
 const legacy = domain.parse({
   reply: true,
   receipt: true,
@@ -65,6 +71,12 @@ export function projectFeatures(raw: unknown) {
     (id: string | undefined, kind: Domain): DomainFeatures => configured(id, kind) ?? legacy,
     {
       configured,
+      sharing: () =>
+        Object.keys(projects).filter((id) => {
+          return (
+            projects[id]?.inquiryShare === true && configured(id, "inquiry")?.enabled !== false
+          );
+        }),
       disabled: (kind: Domain, feature: "receipt" | "sla") =>
         Object.keys(projects).filter((id) => {
           const config = configured(id, kind);

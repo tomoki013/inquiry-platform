@@ -5,9 +5,11 @@ import { admin, harness, seedApp, testEnv } from "./harness";
 
 const keys = "test1:fo7nSQUnihDRS_AnJtn82f9hSXWpfl7S84QkzKdFqic";
 let threadId: string;
+let ticketId: string;
+let serviceId: string;
 beforeEach(async () => {
   const h = await harness();
-  await seedApp(h, "orbit");
+  serviceId = await seedApp(h, "orbit");
   await seedApp(h, "prism");
   const ticket = await h.support.createThread(
     {
@@ -22,18 +24,35 @@ beforeEach(async () => {
   );
   if (!ticket.ok) throw new Error(ticket.error.message);
   threadId = ticket.value.id;
+  ticketId = ticket.value.id;
 });
 
-function core(slug: string) {
+function core(slug: string, enabled = true) {
   const ctx = createExecutionContext();
   Object.defineProperty(ctx, "props", { value: { scope: { services: [slug] } } });
-  return new AdminCore(ctx, { ...testEnv, PII_ENCRYPTION_KEYS: keys });
+  return new AdminCore(ctx, {
+    ...testEnv,
+    PII_ENCRYPTION_KEYS: keys,
+    PROJECT_FEATURES: { [serviceId]: { inquiryShare: enabled } },
+  });
 }
 const packet = (text: string) => ({ reviewed: true, messages: [{ speaker: "customer", text }] });
 
 it("hands off only reviewed excerpts once to their owner and current project scope", async () => {
   const operator = core("orbit");
   const actor = "operator-1";
+  expect(await operator.inquiryShareContext(ticketId)).toEqual({
+    ok: true,
+    value: {
+      threadId,
+      messages: [{ id: expect.any(String), speaker: "customer", text: "Original private content" }],
+    },
+  });
+  expect(await core("prism").inquiryShareContext(ticketId)).toMatchObject({ ok: false });
+  expect(await core("orbit", false).inquiryShareContext(ticketId)).toMatchObject({ ok: false });
+  expect(
+    await core("orbit", false).createInquiryShare(threadId, packet("Hello"), actor),
+  ).toMatchObject({ ok: false });
   expect(
     await operator.createInquiryShare(threadId, { ...packet("Hello"), reviewed: false }, actor),
   ).toMatchObject({ ok: false, error: { code: "VALIDATION_ERROR" } });
@@ -55,6 +74,7 @@ it("hands off only reviewed excerpts once to their owner and current project sco
     await operator.takeInquiryShare(first.value.token, actor),
     await operator.takeInquiryShare(token, "other-operator"),
     await core("prism").takeInquiryShare(token, actor),
+    await core("orbit", false).takeInquiryShare(token, actor),
   ])
     expect(rejected).toMatchObject({ ok: false, error: { code: "NOT_FOUND" } });
   const stored = await testEnv.DB.prepare(

@@ -69,6 +69,8 @@ Secret は Core に登録する。Project の画面は公開 sitekey と同じ a
 
 問い合わせの専用 MCP は、migration `0023_inquiry_mcp_shares.sql` の適用後、Gateway に `ENABLE_INQUIRY_MCP: "true"` を設定すると `/inquiry-mcp` で利用できる。Core の個人情報保護用暗号化キーが必要。管理画面を別 Worker で運用している場合はこのパスも Gateway に転送する。Access で管理画面と同じ操作者として認証できる Streamable HTTP クライアントを使う。 [MCP のトランスポート仕様](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
 
+Core の `PROJECT_FEATURES` で Project ID ごとに `inquiryShare: true`（`inquiry` と同じ階層）を指定する。既定はオフで、オフにすると新規発行と既存コードの引き換えを拒否する。アプリ独自の管理画面から共通のレビュー画面に案内する場合、その Project だけに限定した Core binding を Gateway の `INQUIRY_SHARE_PROJECTS` に登録する。別サイト用のレビュー API は Access の admin に限定される。複数 Project のコード引き換え用 binding `INQUIRY_SHARE_REDEEM` は、専用 MCP 内の引き換えにだけ使われる。
+
 管理画面で問い合わせを1件開き、共有用に書き直したやり取りだけを確認して共有コードを発行する。氏名・連絡先・住所・識別番号や第三者を特定できる情報は操作者が取り除く。基盤は記録済みの氏名とメールアドレス、典型的なメールアドレスや電話番号を追加で検出する。入力文に残るあらゆる個人情報を自動で判定することはできない。
 
 `read_approved_inquiry` はその操作者の10分間・1回限りのコードで確認済みの発言だけを返す。新しいコードを作ると前のコードは無効になる。受け取った文章で返信案を作り、`{{userName}}` のような箇所は管理画面に戻って差し替える。専用 MCP が持つツールはこの読み取り操作のみ。

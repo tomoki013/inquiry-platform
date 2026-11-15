@@ -73,6 +73,7 @@ export async function takeInquiryShare(
   actor: string,
   token: string,
   scope: Scope,
+  allowedServices: readonly string[],
 ) {
   if (!tokenPattern.test(token)) return fail("NOT_FOUND", "共有が見つかりません。");
   const cipher = privateCipher(env);
@@ -80,9 +81,16 @@ export async function takeInquiryShare(
   const grant = scope.where("service_id");
   const row = await env.DB.prepare(
     `DELETE FROM inquiry_mcp_shares WHERE actor_id=? AND token_hash=? AND expires_at>?
+      AND service_id IN (SELECT value FROM json_each(?))
       ${grant ? `AND ${grant.sql}` : ""} RETURNING context_ciphertext`,
   )
-    .bind(actor, await digest(token), Date.now(), ...(grant?.values ?? []))
+    .bind(
+      actor,
+      await digest(token),
+      Date.now(),
+      JSON.stringify(allowedServices),
+      ...(grant?.values ?? []),
+    )
     .first<string>("context_ciphertext");
   if (!row) return fail("NOT_FOUND", "共有が見つかりません。");
   const messages = shareSchema.parse({
