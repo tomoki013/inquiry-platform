@@ -32,30 +32,28 @@ describe("report status machine", () => {
 });
 
 describe("replySubject", () => {
-  it("prefixes once, however many round trips there have been", () => {
+  it("adds Re: once, and answers a subject that already has one as it stands", () => {
     expect(replySubject("アプリで共有できません")).toBe("Re: アプリで共有できません");
-    expect(replySubject("Re: Re: アプリで共有できません")).toBe("Re: アプリで共有できません");
-    expect(replySubject("RE: アプリで共有できません")).toBe("Re: アプリで共有できません");
-    expect(replySubject("Re[2]: hello")).toBe("Re: hello");
+    expect(replySubject("Re: アプリで共有できません")).toBe("Re: アプリで共有できません");
+    expect(replySubject(" Re: アプリで共有できません ")).toBe("Re: アプリで共有できません");
   });
 
-  it("folds the prefixes other clients and languages produce into one Re:", () => {
+  it("never rewrites or folds the prefixes a client wrote", () => {
     for (const subject of [
+      "Re: Re: アプリで共有できません",
+      "RE: アプリで共有できません",
+      "Re[2]: hello",
+      "Re(3): hello",
       "Re：アプリで共有できません",
       "Ｒｅ: アプリで共有できません",
       "返信: アプリで共有できません",
-      "返信：Re: アプリで共有できません",
       "AW: Re: アプリで共有できません",
-      "Re(3): アプリで共有できません",
-      "re : RE:アプリで共有できません",
-      "Re: Re[2]: 返信: アプリで共有できません",
     ])
-      expect(replySubject(subject)).toBe("Re: アプリで共有できません");
+      expect(replySubject(subject)).toBe(subject);
   });
 
-  it("leaves everything after the leading prefixes alone", () => {
+  it("adds Re: in front of anything that is not a reply prefix", () => {
     expect(replySubject("Fwd: 共有について")).toBe("Re: Fwd: 共有について");
-    expect(replySubject("Re: 返信が来ない件 [TK-000123]")).toBe("Re: 返信が来ない件 [TK-000123]");
     expect(replySubject("Release notes")).toBe("Re: Release notes");
     expect(replySubject("[TK-000123] Re: 共有")).toBe("Re: [TK-000123] Re: 共有");
   });
@@ -86,7 +84,9 @@ describe("replySubjectFor", () => {
     expect(replySubjectFor({ ...mail, mailSubject: "新しい件名 [TK-000123]" })).toBe(
       "Re: 新しい件名 [TK-000123]",
     );
-    expect(replySubjectFor({ ...mail, mailSubject: "Re: Re: 新しい件名" })).toBe("Re: 新しい件名");
+    expect(replySubjectFor({ ...mail, mailSubject: "RE: Re: 新しい件名" })).toBe(
+      "RE: Re: 新しい件名",
+    );
   });
 });
 

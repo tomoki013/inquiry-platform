@@ -458,7 +458,8 @@ describe("an operator's own To, Cc and subject (overrides)", () => {
       )) as never,
     );
     expectOk((await reply(h, threadId, "二通目です")) as never);
-    expect(h.mail.sent[2]?.subject).toBe(`Re: 書き出しの続き [${number}]`);
+    // Their prefixes are kept as they wrote them; none is added.
+    expect(h.mail.sent[2]?.subject).toBe(`RE: Re: 書き出しの続き [${number}]`);
     const subjects = await h.db
       .prepare(
         "SELECT direction, subject FROM ticket_messages WHERE ticket_id=(SELECT ticket_id FROM ticket_sources WHERE source_type='support' AND source_id=?) ORDER BY created_at, rowid",
@@ -470,7 +471,7 @@ describe("an operator's own To, Cc and subject (overrides)", () => {
       receipt,
       `Re: ${receipt}`,
       "RE: Re: 書き出しの続き",
-      `Re: 書き出しの続き [${number}]`,
+      `RE: Re: 書き出しの続き [${number}]`,
     ]);
   });
 

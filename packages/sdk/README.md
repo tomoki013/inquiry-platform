@@ -106,15 +106,17 @@ await tickets.setSignature("My App\nhttps://my-app.example", { id: operatorId })
 ### Subjects
 
 A reply's subject follows what a mail client does: `Re:` and the subject of
-the conversation's latest mail, whichever side sent it. `Re:` appears once —
-`Re: Re:`, `RE:`, `Re[2]:`, `Re：`, `返信:`, `AW:` and the like are folded into
-one. The ticket's `mailSubject` is that latest subject; `subject` is the
+the conversation's latest mail, whichever side sent it. A subject that already
+starts with a reply prefix (`Re:`, `RE:`, `Re[2]:`, `Re：`, `返信:`, `AW:` and the
+like) is answered as it stands: no second `Re:` is added, and the prefixes are
+never rewritten or folded. The ticket's `mailSubject` is that latest subject; `subject` is the
 ticket's heading (a form's topic) and not what the mails say.
 
 | Conversation | Subject |
 | --- | --- |
 | Mail inquiry `共有できません`, first reply | `Re: 共有できません` |
 | They answer with `Re: 共有できません`, next reply | `Re: 共有できません` |
+| They answer with `RE: Re: 共有できません`, next reply | `RE: Re: 共有できません` (kept as written) |
 | Form inquiry with a receipt `お問い合わせを受け付けました: 共有 [TK-000123]`, first reply | `Re: お問い合わせを受け付けました: 共有 [TK-000123]` |
 | Form inquiry without a receipt, first reply | the template's subject, else `お問い合わせいただいた件について` |
 | Operator sends `新しい件名` on a ticket numbered in its subject | `新しい件名 [TK-000123]` |
