@@ -35,6 +35,7 @@ export const intakePropsSchema = z.object({
 export const projectOperatorPropsSchema = z.object({
   caller: z.string().trim().min(1).max(64),
   projects: z.array(slug).min(1).max(50),
+  allowReplyOverrides: z.boolean().optional(),
 }) satisfies z.ZodType<ProjectOperatorProps>;
 
 /**

@@ -5,6 +5,7 @@ import type {
   OperatorProject,
   OperatorRef,
   OperatorReply,
+  OperatorReplyPreview,
   OperatorReplyResult,
   OperatorReplyTemplate,
   OperatorSelfCopy,
@@ -86,8 +87,14 @@ const replySchema = z
     reopenIfResolved: z.boolean().optional(),
     templateId: z.string().min(1).max(200).optional(),
     ccSelf: z.boolean().optional(),
+    // Only with the binding's `allowReplyOverrides`. Form and limits here;
+    // which addresses are allowed is decided in `ReplyService`.
+    to: z.array(z.string().trim().min(3).max(254)).min(1).max(5).optional(),
+    cc: z.array(z.string().trim().min(3).max(254)).max(10).optional(),
+    subject: z.string().trim().min(1).max(200).optional(),
   })
   .strict();
+const previewSchema = z.object({ templateId: z.string().min(1).max(200).optional() }).strict();
 const templateInputSchema = z
   .object({
     key: z.string(),
@@ -478,6 +485,42 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
     }
   }
 
+  async previewReply(
+    projectSlug: string,
+    ticketId: string,
+    raw: { templateId?: string } = {},
+  ): Promise<Result<OperatorReplyPreview>> {
+    const parsed = previewSchema.safeParse(raw ?? {});
+    if (!parsed.success) return validationFailure(parsed.error);
+    try {
+      const scoped = await this.scope(projectSlug);
+      if (!scoped.ok) return scoped;
+      const ticket = await this.ticket(scoped.app, ticketId);
+      if (!ticket) return notFound;
+      const templateId = parsed.data.templateId;
+      if (templateId && !(await this.ownTemplate(scoped.app, templateId))) return notFound;
+      let envelope: Awaited<ReturnType<typeof this.services.reply.preview>>;
+      if (ticket.report_id) {
+        envelope = await this.services.reports.previewToReporter(ticket.report_id, templateId);
+      } else {
+        if (!ticket.thread_id || !ticket.requester_email) {
+          return {
+            ok: false,
+            error: { code: "CONFLICT", message: "返信先のメール会話がありません。" },
+          };
+        }
+        envelope = await this.services.reply.previewThread(ticket.thread_id, templateId);
+      }
+      if (!envelope.ok) return envelope;
+      return {
+        ok: true,
+        value: { ...envelope.value, overridesAllowed: scoped.grant.allowReplyOverrides === true },
+      };
+    } catch (error) {
+      return internalFailure("operator.previewReply", error);
+    }
+  }
+
   async reply(
     projectSlug: string,
     ticketId: string,
@@ -491,13 +534,28 @@ export class ProjectOperator extends WorkerEntrypoint<AdminCoreEnv> implements P
       if (!scoped.ok) return scoped;
       const actor = this.actor(scoped.grant, operator);
       if (!actor) return forbidden;
+      const { to, cc, subject } = parsed.data;
+      const overriding = to !== undefined || cc !== undefined || subject !== undefined;
+      // A binding that was not given it cannot choose where a reply goes.
+      if (overriding && scoped.grant.allowReplyOverrides !== true) return forbidden;
       const ticket = await this.ticket(scoped.app, ticketId);
       if (!ticket) return notFound;
       const templateId = parsed.data.templateId;
       if (templateId && !(await this.ownTemplate(scoped.app, templateId))) return notFound;
-      // Only a yes/no crosses the binding; the address is the project's or
-      // the deployment's private operator address, resolved in Core.
-      const options = parsed.data.ccSelf ? { ccSelf: true } : {};
+      // `ccSelf` is a yes/no; its address is the project's or the
+      // deployment's private operator address, resolved in Core.
+      const options = {
+        ...(parsed.data.ccSelf ? { ccSelf: true } : {}),
+        ...(overriding
+          ? {
+              overrides: {
+                ...(to !== undefined ? { to } : {}),
+                ...(cc !== undefined ? { cc } : {}),
+                ...(subject !== undefined ? { subject } : {}),
+              },
+            }
+          : {}),
+      };
       const answer = async (selfCopy: OperatorSelfCopy | undefined) => {
         const detail = await this.detail(ticket.id);
         return detail.ok && selfCopy

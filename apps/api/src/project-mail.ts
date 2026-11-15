@@ -26,6 +26,11 @@ const configSchema = z.object({
    * the project's mail settings (`app_mail_settings.inquiry_receipt`), which
    * win when set; kept for deployments configured with v0.10.0. */
   inquiryReceipt: z.boolean().default(true),
+  /** Where the ticket number goes in the subject of a form's receipt:
+   * `[TK-000123] お問い合わせを受け付けました: …` (`start`, the default) or
+   * `お問い合わせを受け付けました: … [TK-000123]` (`end`). Either way a reply
+   * naming it in its subject is filed under the ticket. */
+  inquiryReceiptNumberAt: z.enum(["start", "end"]).default("start"),
   /** Opt-in customer receipt containing only the original message body. */
   inquiryReceiptQuoteBody: z.boolean().default(false),
   /** Do not send a separate conversation when a sent parent is awaiting its real ID. */
@@ -52,6 +57,7 @@ export interface ProjectMailDelivery {
   inquiryReceiptTemplate?: string;
   inquiryReceipt?: boolean;
   inquiryReceiptQuoteBody?: boolean;
+  inquiryReceiptNumberAt?: "start" | "end";
   requireVerifiedReplyParent?: boolean;
   inquiryReceiptCopyToNotification?: boolean;
   replyClosing?: string;
@@ -98,6 +104,7 @@ export function projectMailResolver(
       // An unreadable route sends no receipt rather than one in the wrong voice.
       inquiryReceipt: parsed.success ? parsed.data.inquiryReceipt : false,
       inquiryReceiptQuoteBody: parsed.success && parsed.data.inquiryReceiptQuoteBody,
+      inquiryReceiptNumberAt: parsed.success ? parsed.data.inquiryReceiptNumberAt : "start",
       requireVerifiedReplyParent: parsed.success && parsed.data.requireVerifiedReplyParent,
       inquiryReceiptCopyToNotification:
         parsed.success && parsed.data.inquiryReceiptCopyToNotification,

@@ -343,6 +343,7 @@ export function buildServices(
       detail: record("report"),
       sendReceipt: record("report"),
       replyToReporter: record("report"),
+      previewToReporter: record("report"),
       createReplyDraft: record("report"),
       prepareDecision: record("report", "reportId"),
       completeDecision: record("report", "reportId"),
@@ -356,6 +357,7 @@ export function buildServices(
     base.reply,
     {
       send: record("thread", "threadId"),
+      previewThread: record("thread"),
       getDraft: record("thread"),
       deleteDraft: record("thread"),
       saveDraft: record("thread", "threadId"),

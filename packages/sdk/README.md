@@ -131,6 +131,51 @@ A reply is threaded (`In-Reply-To`) onto the latest mail in the
 conversation, whichever side sent it, so a second reply in a row follows your
 first one.
 
+### Seeing and choosing To, Cc and subject
+
+`previewReply(ticketId, { templateId? })` answers what a plain reply would go
+out with now, without sending or recording anything:
+
+```ts
+const preview = await tickets.previewReply(ticket.id);
+// preview.value: {
+//   from: "Example Support <support@example.com>",
+//   to: ["person@example.org"],
+//   cc: ["colleague@example.org"],          // reply-all
+//   self: { address: "ops@example.net", outcome: "copied" }, // what ccSelf adds
+//   subject: "Re: …",
+//   overridesAllowed: false,
+// }
+```
+
+`self.address` is `null` when no operator address is configured; `outcome` is
+what `ccSelf: true` would do (`copied` / `not_configured` / `is_recipient`).
+
+A binding whose `props` carry `allowReplyOverrides: true` may send its own
+`to` (1–5), `cc` (0–10, replaces the reply-all list; `ccSelf` is still added on
+top) and `subject` (one line, up to 200 characters). Without it any of them is
+`FORBIDDEN`. Plain addresses only (`a@example.com`, no display names); the
+support address is refused, duplicates are dropped and a Cc already on the To
+is not repeated. The From is never overridable.
+
+```ts
+await tickets.reply(
+  ticket.id,
+  { body, idempotencyKey, to: ["person@example.org"], cc: [], subject: "…", ccSelf: true },
+  { id: operatorId },
+);
+```
+
+Threading does not depend on the subject: `In-Reply-To` / `References` are
+the same as for a plain reply. When the platform's subject carries the ticket
+number (`[TK-000123]`) and yours does not, the number is appended
+(`… [TK-000123]`), so an answer that loses its headers still finds the
+ticket. An overridden subject is used for that one mail; the next plain reply
+gets the platform's subject again (as `previewReply` shows). The timeline's
+`recipient` is what was actually sent (To, then Cc). The audit entry records
+which parts were overridden and the number of To and Cc addresses, never the
+addresses.
+
 Who may use the console is your admin's authentication; the platform records
 `operator.id` (an opaque id of your choosing, never an address) in its audit
 log. Point notification links at your console with the deployment seed's

@@ -408,3 +408,182 @@ it("pins a project's sender instead of falling back to the shared address", asyn
   expect(mail.sent[0]?.from).toContain("<contact@orbit.example>");
   expect(mail.sent[0]?.replyTo).toBe("contact@orbit.example");
 });
+
+describe("an operator's own To, Cc and subject (overrides)", () => {
+  async function mailThread(h: Awaited<ReturnType<typeof harness>>) {
+    return expectOk<{ threadId: string }>(
+      (await h.support.ingestInboundEmail(
+        {
+          from: "taro@corp.example",
+          to: "support@example.com",
+          recipients: ["support@example.com", "boss@corp.example"],
+          subject: "ログインできません",
+          bodyText: "入れません",
+          messageId: "<q1@corp.example>",
+          appSlug: "orbit",
+        },
+        mailActor,
+      )) as never,
+    ).threadId;
+  }
+  const send = (
+    h: Awaited<ReturnType<typeof harness>>,
+    threadId: string,
+    overrides: { to?: string[]; cc?: string[]; subject?: string },
+    extra: { ccSelf?: boolean } = {},
+  ) =>
+    h.reply.send({ threadId, bodyText: "確認します", idempotencyKey: crypto.randomUUID() }, admin, {
+      overrides,
+      ...extra,
+    });
+
+  it("previews what a plain reply gets, and a plain reply gets exactly that", async () => {
+    const h = await harness();
+    await seedApp(h, "orbit");
+    const threadId = await mailThread(h);
+    const preview = expectOk<{
+      from: string;
+      to: string[];
+      cc: string[];
+      self: { address: string | null; outcome: string };
+      subject: string;
+    }>((await h.reply.previewThread(threadId)) as never);
+    expect(preview).toMatchObject({
+      to: ["taro@corp.example"],
+      cc: ["boss@corp.example"],
+      subject: "Re: ログインできません",
+    });
+    expectOk((await reply(h, threadId, "確認します")) as never);
+    const sent = h.mail.sent[0];
+    expect(sent?.from).toBe(preview.from);
+    expect([sent?.to]).toEqual(preview.to);
+    expect(sent?.cc).toEqual(preview.cc);
+    expect(sent?.subject).toBe(preview.subject);
+  });
+
+  it("sends to the operator's To and Cc, records them, and audits only counts", async () => {
+    const h = await harness();
+    await seedApp(h, "orbit");
+    const threadId = await mailThread(h);
+    expectOk(
+      (await send(h, threadId, {
+        to: ["Taro@corp.example", "hanako@corp.example", "taro@corp.example"],
+        cc: ["hanako@corp.example", "kaito@corp.example"],
+        subject: "ログインの件（追加のご案内）",
+      })) as never,
+    );
+    const sent = h.mail.sent[0];
+    expect(sent?.to).toBe("Taro@corp.example");
+    expect(sent?.alsoTo).toEqual(["hanako@corp.example"]);
+    // Already on the To: not copied again. Reply-all's boss is replaced.
+    expect(sent?.cc).toEqual(["kaito@corp.example"]);
+    expect(sent?.subject).toBe("ログインの件（追加のご案内）");
+    // The thread stays threaded however the subject reads.
+    expect(sent?.inReplyTo).toBe("<q1@corp.example>");
+    const message = await h.db
+      .prepare("SELECT recipient FROM support_messages WHERE thread_id=? AND direction='outbound'")
+      .bind(threadId)
+      .first<{ recipient: string }>();
+    expect(message?.recipient).toBe("Taro@corp.example, hanako@corp.example, kaito@corp.example");
+    const audit = await h.db
+      .prepare("SELECT metadata_json AS metadata FROM audit_logs WHERE action='support.reply_sent'")
+      .first<{ metadata: string }>();
+    expect(JSON.parse(audit?.metadata ?? "{}")).toMatchObject({
+      overridden: "to,cc,subject",
+      to: 2,
+      cc: 1,
+    });
+    expect(audit?.metadata).not.toContain("@");
+    // The thread keeps its own subject for the next plain reply.
+    expectOk((await reply(h, threadId, "続きです")) as never);
+    expect(h.mail.sent[1]?.subject).toBe("Re: ログインできません");
+    expect(h.mail.sent[1]?.cc).toEqual(["boss@corp.example"]);
+  });
+
+  it("sends no reply-all Cc for an empty list, and still adds the operator's own copy", async () => {
+    const h = await harness();
+    const appId = await seedApp(h, "orbit");
+    await h.db
+      .prepare(
+        "INSERT INTO app_mail_settings (app_id, signature_text, notification_email, updated_at) VALUES (?, '', 'ops@private.example', ?)",
+      )
+      .bind(appId, new Date().toISOString())
+      .run();
+    const threadId = await mailThread(h);
+    const preview = expectOk<{ self: { address: string | null; outcome: string } }>(
+      (await h.reply.previewThread(threadId)) as never,
+    );
+    expect(preview.self).toEqual({ address: "ops@private.example", outcome: "copied" });
+    const result = expectOk<{ selfCopy?: string }>(
+      (await send(h, threadId, { cc: [] }, { ccSelf: true })) as never,
+    );
+    expect(result.selfCopy).toBe("copied");
+    expect(h.mail.sent[0]?.cc).toEqual(["ops@private.example"]);
+  });
+
+  it("refuses a malformed address, our own address, a blank or two-line subject", async () => {
+    const h = await harness();
+    await seedApp(h, "orbit");
+    const threadId = await mailThread(h);
+    for (const overrides of [
+      { to: ["not-an-address"] },
+      { to: ["Taro <taro@corp.example>"] },
+      { to: ["support@example.com"] },
+      { cc: ["SUPPORT@example.com"] },
+      { to: [] },
+      { subject: "  " },
+      { subject: "件名\nBcc: x@attacker.example" },
+    ]) {
+      expect(await send(h, threadId, overrides)).toMatchObject({
+        ok: false,
+        error: { code: "VALIDATION_ERROR" },
+      });
+    }
+    expect(h.mail.sent).toHaveLength(0);
+  });
+
+  it("keeps the ticket number a form's subject carries, and files the answer by it", async () => {
+    const h = await harness({ receipts: true });
+    h.mail.reportsMessageId = false;
+    await seedApp(h, "orbit");
+    const threadId = await formThread(h);
+    await h.settled();
+    const number = h.mail.sent[0]?.subject.match(/TK-\d+/)?.[0];
+    expect(number).toBeTruthy();
+    expectOk((await send(h, threadId, { subject: "書き出しの件" })) as never);
+    expect(h.mail.sent[1]?.subject).toBe(`書き出しの件 [${number}]`);
+    // Named already, it is not added twice.
+    expectOk((await send(h, threadId, { subject: `${number} 書き出しの件` })) as never);
+    expect(h.mail.sent[2]?.subject).toBe(`${number} 書き出しの件`);
+    // A colleague the operator wrote to answers without headers.
+    expectOk((await send(h, threadId, { to: ["colleague@example.org"] })) as never);
+    const answered = expectOk<{ threadId: string; newThread: boolean }>(
+      (await h.support.ingestInboundEmail(
+        {
+          from: "colleague@example.org",
+          subject: `Re: ${h.mail.sent[1]?.subject}`,
+          bodyText: "確認しました",
+          messageId: "<colleague@example.org>",
+          appSlug: "orbit",
+        },
+        mailActor,
+      )) as never,
+    );
+    expect(answered).toMatchObject({ threadId, newThread: false });
+  });
+
+  it("is ignored for automatic mail", async () => {
+    const h = await harness();
+    await seedApp(h, "orbit");
+    const threadId = await mailThread(h);
+    expectOk(
+      (await h.reply.send(
+        { threadId, bodyText: "受付しました", idempotencyKey: crypto.randomUUID() },
+        { type: "system", id: "inquiry-receipt" },
+        { automatic: true, overrides: { to: ["x@example.org"], subject: "別件" } },
+      )) as never,
+    );
+    expect(h.mail.sent[0]?.to).toBe("taro@corp.example");
+    expect(h.mail.sent[0]?.subject).toBe("Re: ログインできません");
+  });
+});
