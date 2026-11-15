@@ -213,7 +213,17 @@ export interface OperatorTicketSummary {
   source: OperatorTicketSource;
   resolution: string | null;
   priority: string;
+  /** The ticket's heading: for a form submission its topic, for a mail the
+   * subject it arrived with. Not necessarily what the mails say — see
+   * `mailSubject`. */
   subject: string;
+  /** The conversation's mail subject as it stands: that of its latest mail,
+   * either way, an operator's own subject included. The next reply goes out as
+   * `Re:` this (`previewReply` shows exactly what). For a mail inquiry nothing
+   * has been sent on yet, the subject the person wrote; `null` for a form
+   * submission before its receipt or first reply, and for a ticket with no
+   * conversation. */
+  mailSubject: string | null;
   /** Absent when the person asked for no reply. */
   requesterEmail: string | null;
   slaState: "OK" | "AT_RISK" | "BREACHED";
@@ -238,6 +248,9 @@ export type OperatorTimelineItem =
        * (including the operator's own copy, `OperatorReply.ccSelf`). `null`
        * for a note. */
       recipient: string | null;
+      /** The subject the mail actually went out or came in with. `null` for a
+       * note, a form submission, and mail recorded before subjects were kept. */
+      subject: string | null;
       body: string;
       createdAt: string;
     }
@@ -371,7 +384,9 @@ export interface OperatorReply {
   /** The subject, in place of `OperatorReplyPreview.subject`. At most 200
    * characters, one line. When the platform's subject carries the ticket
    * number (`[TK-000123]`) and this one does not, the number is added at the
-   * end, so a reply that loses its headers still finds the ticket. Needs
+   * end, so a reply that loses its headers still finds the ticket. Sent as
+   * written — no `Re:` is added — and it becomes the conversation's subject:
+   * the next reply is `Re:` this (`OperatorTicketSummary.mailSubject`). Needs
    * `allowReplyOverrides`. */
   subject?: string;
 }

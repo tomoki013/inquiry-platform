@@ -94,14 +94,23 @@ export function renderTemplate(
 /**
  * `Re:` once, however many round trips the thread has had.
  *
- * Matches the English and Japanese prefixes mail clients actually produce, with
- * or without a `[n]` counter, so a subject that has been round-tripped through
- * Gmail and a Japanese client does not accumulate a column of them.
+ * Matches the prefixes mail clients actually produce — English and the
+ * localised ones (`AW:`, `SV:`, `返信:`, `回复:` …), any case, half- or
+ * full-width letters and colon, with or without a `[n]` / `(n)` counter — so a
+ * subject that has been round-tripped through Gmail and a Japanese client does
+ * not accumulate a column of them. `Fwd:` is not one: a forward is a different
+ * message, and its subject is kept as it is.
  */
-const REPLY_PREFIX = /^\s*(?:(?:re|aw|sv|antw|回信|답장)(?:\s*\[\d+\])?\s*[:：]\s*|Re[:：]\s*)+/i;
+const REPLY_PREFIX =
+  /^[\s\u3000]*(?:(?:[rRｒＲ][eEｅＥ]|aw|sv|antw|返信|回复|回覆|回信|답장)[\s\u3000]*(?:\[\d+\]|\(\d+\)|［\d+］|（\d+）)?[\s\u3000]*[:：][\s\u3000]*)+/i;
+
+/** A subject with every leading reply prefix removed. */
+export function withoutReplyPrefix(subject: string): string {
+  return subject.replace(REPLY_PREFIX, "").trim();
+}
 
 export function replySubject(subject: string): string {
-  const stripped = subject.replace(REPLY_PREFIX, "").trim();
+  const stripped = withoutReplyPrefix(subject);
   return stripped.length === 0 ? "Re:" : `Re: ${stripped}`;
 }
 
@@ -109,26 +118,29 @@ export function replySubject(subject: string): string {
 export const DEFAULT_REPLY_SUBJECT = "お問い合わせいただいた件について";
 
 /**
- * The subject a reply actually goes out with.
+ * The subject a reply actually goes out with, before an operator changes it.
  *
- * For mail, `Re: <what they wrote>`. Echoing their subject is what keeps the
- * answer in the conversation they started, so it is not something a template
- * gets to override — a follow-up that starts a second thread is the problem
- * this avoids, not a formatting preference.
+ * The rule is a mail client's: `Re:` and the subject of the conversation's
+ * latest mail. `mailSubject` is that subject — whatever the person last sent,
+ * or whatever we last sent (an operator's own subject included, since that is
+ * what the person now sees). Echoing it is what keeps the answer in the
+ * conversation they know, so a template does not get to override it.
  *
- * A form submission is the opposite case: there is no message of theirs to
- * reply to, because they never sent one. `admin-bridge.ts` still needs a
- * subject for the row and builds `[category] requestId`, which is fine as a
- * heading in an operator client and reads as `Re: [bug] 8f21c…` in a customer's
- * inbox — meaningless, and obviously machine-made. With no thread to preserve,
- * the subject is chosen rather than echoed: the template's, when one was used,
- * and a plain default otherwise.
+ * Before any mail has gone either way there is nothing to echo:
+ *
+ * - a mail inquiry echoes the subject the person wrote (`subject`);
+ * - a form submission has no message of theirs to reply to, and its `subject`
+ *   is a heading for the operator (`[category] requestId`, a form topic) that
+ *   would read as `Re: [bug] 8f21c…` in their inbox. So it is chosen rather
+ *   than echoed: the template's, when one was used, and a plain default
+ *   otherwise. Once the receipt or the first reply has gone, that subject is
+ *   `mailSubject` and the usual rule applies.
  */
 export function replySubjectFor(
   thread: { subject: string; source: SupportSource; mailSubject?: string },
   templateSubject?: string,
 ): string {
-  if (thread.mailSubject) return replySubject(thread.mailSubject);
+  if (thread.mailSubject?.trim()) return replySubject(thread.mailSubject);
   if (thread.source === "email") return replySubject(thread.subject);
   const chosen = templateSubject?.trim();
   return chosen && chosen.length > 0 ? chosen : DEFAULT_REPLY_SUBJECT;

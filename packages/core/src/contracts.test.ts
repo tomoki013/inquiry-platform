@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { appUrlSchema, createAppInputSchema } from "./apps";
 import { assertSafeAuditMetadata } from "./audit";
 import {
+  DEFAULT_REPLY_SUBJECT,
   renderTemplate,
   replySubject,
+  replySubjectFor,
   sendSupportReplyInputSchema,
   unresolvedVariables,
 } from "./reply";
@@ -37,8 +39,54 @@ describe("replySubject", () => {
     expect(replySubject("Re[2]: hello")).toBe("Re: hello");
   });
 
+  it("folds the prefixes other clients and languages produce into one Re:", () => {
+    for (const subject of [
+      "Re：アプリで共有できません",
+      "Ｒｅ: アプリで共有できません",
+      "返信: アプリで共有できません",
+      "返信：Re: アプリで共有できません",
+      "AW: Re: アプリで共有できません",
+      "Re(3): アプリで共有できません",
+      "re : RE:アプリで共有できません",
+      "Re: Re[2]: 返信: アプリで共有できません",
+    ])
+      expect(replySubject(subject)).toBe("Re: アプリで共有できません");
+  });
+
+  it("leaves everything after the leading prefixes alone", () => {
+    expect(replySubject("Fwd: 共有について")).toBe("Re: Fwd: 共有について");
+    expect(replySubject("Re: 返信が来ない件 [TK-000123]")).toBe("Re: 返信が来ない件 [TK-000123]");
+    expect(replySubject("Release notes")).toBe("Re: Release notes");
+    expect(replySubject("[TK-000123] Re: 共有")).toBe("Re: [TK-000123] Re: 共有");
+  });
+
   it("survives an empty subject", () => {
     expect(replySubject("   ")).toBe("Re:");
+  });
+});
+
+describe("replySubjectFor", () => {
+  const form = { subject: "[bug] 8f21c", source: "web_form" as const };
+  const mail = { subject: "Re: 共有できません", source: "email" as const };
+
+  it("answers a mail inquiry with Re: what they wrote, whatever the template says", () => {
+    expect(replySubjectFor(mail, "テンプレートの件名")).toBe("Re: 共有できません");
+  });
+
+  it("chooses a form's first subject: the template's, else the default", () => {
+    expect(replySubjectFor(form, " テンプレートの件名 ")).toBe("テンプレートの件名");
+    expect(replySubjectFor(form)).toBe(DEFAULT_REPLY_SUBJECT);
+  });
+
+  it("echoes the conversation's latest subject once there is one", () => {
+    const receipt = "お問い合わせを受け付けました: 共有 [TK-000123]";
+    expect(replySubjectFor({ ...form, mailSubject: receipt }, "テンプレートの件名")).toBe(
+      `Re: ${receipt}`,
+    );
+    expect(replySubjectFor({ ...mail, mailSubject: "新しい件名 [TK-000123]" })).toBe(
+      "Re: 新しい件名 [TK-000123]",
+    );
+    expect(replySubjectFor({ ...mail, mailSubject: "Re: Re: 新しい件名" })).toBe("Re: 新しい件名");
   });
 });
 

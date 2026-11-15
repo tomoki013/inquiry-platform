@@ -63,7 +63,8 @@ const SELECT = `SELECT t.*,s.name AS service_name,CASE WHEN t.type='REPORT' OR t
  (SELECT source_id FROM ticket_sources WHERE ticket_id=t.id AND source_type='report' LIMIT 1) AS report_id,
  COALESCE((SELECT source_id FROM ticket_sources WHERE ticket_id=t.id AND source_type='support' AND source_id=t.id),(SELECT source_id FROM ticket_sources WHERE ticket_id=t.id AND source_type='support' LIMIT 1)) AS thread_id,
  CASE WHEN EXISTS(SELECT 1 FROM ticket_sources WHERE ticket_id=t.id AND source_type='report') THEN 'report'
-      ELSE COALESCE((SELECT st.source FROM ticket_sources ts JOIN support_threads st ON st.id=ts.source_id WHERE ts.ticket_id=t.id AND ts.source_type='support' LIMIT 1), 'internal') END AS operator_source
+      ELSE COALESCE((SELECT st.source FROM ticket_sources ts JOIN support_threads st ON st.id=ts.source_id WHERE ts.ticket_id=t.id AND ts.source_type='support' LIMIT 1), 'internal') END AS operator_source,
+ (SELECT COALESCE(st.mail_subject, CASE WHEN st.source='email' THEN st.subject END) FROM support_threads st WHERE st.id=COALESCE((SELECT source_id FROM ticket_sources WHERE ticket_id=t.id AND source_type='support' AND source_id=t.id),(SELECT source_id FROM ticket_sources WHERE ticket_id=t.id AND source_type='support' LIMIT 1))) AS mail_subject
  FROM tickets t JOIN services s ON s.id=t.service_id`;
 
 /** Operations only. No mail provider: notes cannot send mail. */

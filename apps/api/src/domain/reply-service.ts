@@ -29,14 +29,13 @@ import type { AppRepository } from "../db/apps";
 import type { AuditRepository } from "../db/audit";
 import type { SupportRepository } from "../db/support";
 import type { ProjectMailSettings, TemplateRepository } from "../db/templates";
-import { privateText } from "../privacy/crypto";
 import type { ProjectFeatures } from "../project-features";
 import type { ProjectMailDelivery } from "../project-mail";
 import { internalFailure, notFound, validationFailure } from "./failures";
 import { sha256Hex } from "./identity";
 import type { SupportService } from "./support-service";
 import { TicketService } from "./ticket-service";
-import { ticketNumbersFromReply } from "./ticket-threading";
+import { keepingReferences } from "./ticket-threading";
 
 /**
  * Web-form threads from the last day still owed a receipt: nobody has written
@@ -930,15 +929,11 @@ export class ReplyService {
         : options.initialMessage
           ? thread.subject
           : this.replySubjectOf(thread, template?.subject);
-      // An operator's subject keeps the ticket number the platform's carried:
-      // it is what files a reply that lost its headers (`ticket-threading.ts`).
-      const keptNumbers = overriddenSubject
-        ? ticketNumbersFromReply(platformSubject, "").filter(
-            (number) => !ticketNumbersFromReply(overriddenSubject, "").includes(number),
-          )
-        : [];
+      // An operator's subject is sent as written, keeping the references the
+      // platform's carried (ticket number, receipt or report ID): they are what
+      // file a reply that lost its headers (`ticket-threading.ts`).
       const subject = overriddenSubject
-        ? [overriddenSubject, ...keptNumbers.map((number) => `[${number}]`)].join(" ")
+        ? keepingReferences(overriddenSubject, platformSubject)
         : platformSubject;
 
       const includeSignature =
@@ -1076,13 +1071,6 @@ export class ReplyService {
       const at = nowIso();
       const messageId = newId();
       const statements: D1PreparedStatement[] = [
-        this.db
-          .prepare(
-            "UPDATE support_threads SET mail_subject = COALESCE(mail_subject, ?) WHERE id = ?",
-          )
-          // The platform's subject, not an operator's one-off: the next plain
-          // reply keeps answering the conversation the person knows.
-          .bind(privateText(this.db, platformSubject), input.threadId),
         this.support.insertMessageStatement({
           id: messageId,
           threadId: input.threadId,
@@ -1108,6 +1096,12 @@ export class ReplyService {
                 .bind(at, messageId),
             ]
           : []),
+        // What the person now sees in their inbox, an operator's own subject
+        // included: the timeline shows it, and the next reply is `Re:` this
+        // (`replySubjectFor`).
+        ...this.support.mailSubjectStatements(messageId, input.threadId, subject, {
+          conversation: subject,
+        }),
         this.support.touchThreadStatement(input.threadId, "outbound", at),
         this.support.recordSendStatement(input.idempotencyKey, input.threadId, messageId),
         ...(options.preserveDraft ? [] : [this.support.deleteDraftStatement(input.threadId)]),

@@ -718,6 +718,36 @@ describe("ProjectOperator: seeing and choosing a reply's To, Cc and subject", ()
     });
   });
 
+  it("makes an operator's subject the conversation's, and shows each mail's subject", async () => {
+    const own = await contact("orbit", "o-1", "a@example.com");
+    const sent = mailed();
+    const client = createProjectOperatorClient(operator(editing, env).api, "orbit");
+    const replied = await client.reply(
+      own.id,
+      { body: "確認します", idempotencyKey: "reply-sj-0001", subject: "ご質問の件" },
+      person,
+    );
+    if (!replied.ok) throw new Error(replied.error.message);
+    expect(replied.value.mailSubject).toBe("ご質問の件");
+    const messages = replied.value.timeline.filter((item) => item.kind === "message");
+    expect(messages.find((item) => item.direction === "outbound")).toMatchObject({
+      subject: "ご質問の件",
+    });
+    // A form submission is not a mail: it has no subject of its own.
+    expect(messages.find((item) => item.direction === "inbound")).toMatchObject({ subject: null });
+    const page = await client.listTickets();
+    if (!page.ok) throw new Error(page.error.message);
+    expect(page.value.items.find((item) => item.id === own.id)?.mailSubject).toBe("ご質問の件");
+    // The next reply, and its preview, answer it.
+    const preview = await client.previewReply(own.id);
+    expect(preview.ok && preview.value.subject).toBe("Re: ご質問の件");
+    expect(
+      (await client.reply(own.id, { body: "続きです", idempotencyKey: "reply-sj-0002" }, person))
+        .ok,
+    ).toBe(true);
+    expect(sent[1]?.subject).toBe("Re: ご質問の件");
+  });
+
   it("refuses too many addresses, a malformed one and the support address", async () => {
     const own = await contact("orbit", "o-1", "a@example.com");
     const sent = mailed();

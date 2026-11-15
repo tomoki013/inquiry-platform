@@ -107,3 +107,29 @@ export async function findReceiptReplyThread(
     return null;
   return row.id;
 }
+
+/**
+ * The references in a subject that file a reply which lost its headers:
+ * ticket numbers (`[TK-000123]`, `TK-000123`), receipt IDs (`[受付ID:…]`) and
+ * report IDs (`[通報ID:…]`), each as the tag it would be written back as.
+ */
+export function referenceTags(subject: string): string[] {
+  return [
+    ...ticketNumbersFromReply(subject, "").map((number) => `[${number}]`),
+    ...receiptIdsFromReply(subject, "").map((id) => `[受付ID:${id}]`),
+    ...[...subject.matchAll(new RegExp(`\\[通報ID[:：]\\s*(${UUID})\\]`, "gi"))].map(
+      (m) => `[通報ID:${(m[1] ?? "").toLowerCase()}]`,
+    ),
+  ];
+}
+
+/**
+ * `subject`, with every reference `carrier` had and `subject` lacks added at
+ * the end. A subject somebody chose — an operator's, or the person's client
+ * editing it — is otherwise left exactly as written.
+ */
+export function keepingReferences(subject: string, carrier: string | null | undefined): string {
+  const own = referenceTags(subject).map((tag) => tag.toLowerCase());
+  const missing = referenceTags(carrier ?? "").filter((tag) => !own.includes(tag.toLowerCase()));
+  return [subject, ...missing].join(" ");
+}

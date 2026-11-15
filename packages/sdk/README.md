@@ -131,6 +131,26 @@ A reply is threaded (`In-Reply-To`) onto the latest mail in the
 conversation, whichever side sent it, so a second reply in a row follows your
 first one.
 
+### Subjects
+
+A reply's subject follows what a mail client does: `Re:` and the subject of
+the conversation's latest mail, whichever side sent it. `Re:` appears once —
+`Re: Re:`, `RE:`, `Re[2]:`, `Re：`, `返信:`, `AW:` and the like are folded into
+one. The ticket's `mailSubject` is that latest subject; `subject` is the
+ticket's heading (a form's topic) and not what the mails say.
+
+| Conversation | Subject |
+| --- | --- |
+| Mail inquiry `共有できません`, first reply | `Re: 共有できません` |
+| They answer with `Re: 共有できません`, next reply | `Re: 共有できません` |
+| Form inquiry with a receipt `お問い合わせを受け付けました: 共有 [TK-000123]`, first reply | `Re: お問い合わせを受け付けました: 共有 [TK-000123]` |
+| Form inquiry without a receipt, first reply | the template's subject, else `お問い合わせいただいた件について` |
+| Operator sends `新しい件名` on a ticket numbered in its subject | `新しい件名 [TK-000123]` |
+| Any reply after that | `Re: 新しい件名 [TK-000123]` |
+| They answer with `別の件名`, next reply | `Re: 別の件名 [TK-000123]` (a number the conversation carried is kept) |
+
+Threading never depends on the subject (`In-Reply-To` / `References`).
+
 ### Seeing and choosing To, Cc and subject
 
 `previewReply(ticketId, { templateId? })` answers what a plain reply would go
@@ -170,9 +190,10 @@ Threading does not depend on the subject: `In-Reply-To` / `References` are
 the same as for a plain reply. When the platform's subject carries the ticket
 number (`[TK-000123]`) and yours does not, the number is appended
 (`… [TK-000123]`), so an answer that loses its headers still finds the
-ticket. An overridden subject is used for that one mail; the next plain reply
-gets the platform's subject again (as `previewReply` shows). The timeline's
-`recipient` is what was actually sent (To, then Cc). The audit entry records
+ticket. An overridden subject is sent as written (no `Re:` is added) and
+becomes the conversation's: the next reply is `Re: <your subject>`, as
+`previewReply` shows. The timeline's `recipient` is what was actually sent (To,
+then Cc), and its `subject` the subject the mail went out or came in with. The audit entry records
 which parts were overridden and the number of To and Cc addresses, never the
 addresses.
 

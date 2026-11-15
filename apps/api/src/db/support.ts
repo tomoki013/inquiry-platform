@@ -206,6 +206,37 @@ export class SupportRepository {
   }
 
   /**
+   * The subject a mail went out or came in with, for the timeline, and — when
+   * given — the conversation's subject the next reply answers
+   * (`support_threads.mail_subject`). Runs after `insertMessageStatement`: the
+   * projection trigger copies no subject into `ticket_messages`. Empty values
+   * write nothing, so a mail without a subject keeps the conversation's.
+   */
+  mailSubjectStatements(
+    messageId: string,
+    threadId: string,
+    subject: string | undefined,
+    options: { conversation?: string } = {},
+  ): D1PreparedStatement[] {
+    return [
+      ...(subject
+        ? [
+            this.db
+              .prepare("UPDATE ticket_messages SET subject = ? WHERE legacy_message_id = ?")
+              .bind(privateText(this.db, subject), messageId),
+          ]
+        : []),
+      ...(options.conversation
+        ? [
+            this.db
+              .prepare("UPDATE support_threads SET mail_subject = ? WHERE id = ?")
+              .bind(privateText(this.db, options.conversation), threadId),
+          ]
+        : []),
+    ];
+  }
+
+  /**
    * Moves the thread's clock forward after a message lands.
    *
    * Only an inbound message raises `unread_count` — our own reply and an

@@ -802,6 +802,7 @@ function toSummary(ticket: Ticket, assignee: string | null): OperatorTicketSumma
     resolution: ticket.resolution,
     priority: ticket.priority,
     subject: ticket.subject,
+    mailSubject: ticket.mail_subject ?? null,
     requesterEmail: ticket.requester_email,
     slaState: ticket.sla_state,
     nextAction: ticket.next_action,
@@ -849,6 +850,7 @@ function toDetail(
                   : ("outbound" as const),
             sender: item.value.sender,
             recipient: item.value.visibility === "INTERNAL" ? null : item.value.recipient,
+            subject: item.value.visibility === "INTERNAL" ? null : (item.value.subject ?? null),
             body: item.value.body,
             createdAt: item.value.created_at,
           }

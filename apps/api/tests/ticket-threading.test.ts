@@ -1,6 +1,10 @@
 import type { IngestInboundEmailResult } from "@inquiry-platform/core";
 import { beforeEach, describe, expect, it } from "vitest";
-import { receiptIdsFromReply, ticketNumbersFromReply } from "../src/domain/ticket-threading";
+import {
+  keepingReferences,
+  receiptIdsFromReply,
+  ticketNumbersFromReply,
+} from "../src/domain/ticket-threading";
 import { expectOk, type Harness, harness, seedApp } from "./harness";
 
 /*
@@ -116,5 +120,21 @@ describe("a reply that quotes its receipt ID", () => {
       )) as never,
     );
     expect(stranger.threadId).not.toBe(first.threadId);
+  });
+});
+
+describe("keepingReferences", () => {
+  const id = "11111111-2222-4333-8444-555555555555";
+  it("adds back only the references the new subject lacks", () => {
+    expect(keepingReferences("新しい件名", "Re: 旧件名 [TK-000123]")).toBe(
+      "新しい件名 [TK-000123]",
+    );
+    expect(keepingReferences("TK-000123 新しい件名", "旧件名 [TK-000123]")).toBe(
+      "TK-000123 新しい件名",
+    );
+    expect(keepingReferences("通報", `[app] 通報 [通報ID:${id}] [受付ID:${id}]`)).toBe(
+      `通報 [受付ID:${id}] [通報ID:${id}]`,
+    );
+    expect(keepingReferences("そのまま", null)).toBe("そのまま");
   });
 });

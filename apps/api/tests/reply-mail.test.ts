@@ -494,9 +494,9 @@ describe("an operator's own To, Cc and subject (overrides)", () => {
       cc: 1,
     });
     expect(audit?.metadata).not.toContain("@");
-    // The thread keeps its own subject for the next plain reply.
+    // The operator's subject is now the conversation's, as in a mail client.
     expectOk((await reply(h, threadId, "続きです")) as never);
-    expect(h.mail.sent[1]?.subject).toBe("Re: ログインできません");
+    expect(h.mail.sent[1]?.subject).toBe("Re: ログインの件（追加のご案内）");
     expect(h.mail.sent[1]?.cc).toEqual(["boss@corp.example"]);
   });
 
@@ -570,6 +570,49 @@ describe("an operator's own To, Cc and subject (overrides)", () => {
       )) as never,
     );
     expect(answered).toMatchObject({ threadId, newThread: false });
+  });
+
+  it("answers the person's latest subject, keeping a ticket number they dropped", async () => {
+    const h = await harness({ receipts: true });
+    h.mail.reportsMessageId = false;
+    await seedApp(h, "orbit");
+    const threadId = await formThread(h);
+    await h.settled();
+    const receipt = h.mail.sent[0]?.subject ?? "";
+    const number = receipt.match(/TK-\d+/)?.[0];
+    expect(number).toBeTruthy();
+    // The first reply to a form answers its receipt.
+    expectOk((await reply(h, threadId, "一通目です")) as never);
+    expect(h.mail.sent[1]?.subject).toBe(`Re: ${receipt}`);
+    // Their client changed the subject and lost the number.
+    expectOk(
+      (await h.support.ingestInboundEmail(
+        {
+          from: "someone@example.com",
+          subject: "RE: Re: 書き出しの続き",
+          bodyText: "もう一つ",
+          messageId: "<again@example.com>",
+          inReplyTo: h.mail.sent[1]?.messageId,
+          appSlug: "orbit",
+        },
+        mailActor,
+      )) as never,
+    );
+    expectOk((await reply(h, threadId, "二通目です")) as never);
+    expect(h.mail.sent[2]?.subject).toBe(`Re: 書き出しの続き [${number}]`);
+    const subjects = await h.db
+      .prepare(
+        "SELECT direction, subject FROM ticket_messages WHERE ticket_id=(SELECT ticket_id FROM ticket_sources WHERE source_type='support' AND source_id=?) ORDER BY created_at, rowid",
+      )
+      .bind(threadId)
+      .all<{ direction: string; subject: string | null }>();
+    expect(subjects.results.map((row) => row.subject)).toEqual([
+      null,
+      receipt,
+      `Re: ${receipt}`,
+      "RE: Re: 書き出しの続き",
+      `Re: 書き出しの続き [${number}]`,
+    ]);
   });
 
   it("is ignored for automatic mail", async () => {
