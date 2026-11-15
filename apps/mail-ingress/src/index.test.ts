@@ -22,7 +22,6 @@ class FakeMessage {
     readonly to: string,
     private readonly rawText: string,
     readonly rawSize = rawText.length,
-    private readonly headerValues: Record<string, string> = {},
   ) {}
 
   get raw(): ReadableStream {
@@ -37,7 +36,7 @@ class FakeMessage {
   }
 
   get headers(): Headers {
-    return new Headers(this.headerValues);
+    return new Headers();
   }
 
   forward(recipient: string): Promise<void> {
@@ -236,88 +235,5 @@ describe("logging", () => {
     expect(written).not.toContain("共有ボタン");
     expect(written).not.toContain("アプリで共有できません");
     expect(written).toContain("mail.queued");
-  });
-});
-
-describe("the operator's copy of our own reply (ccSelf)", () => {
-  const copyHeaders = {
-    from: "Example Support <support@example.com>",
-    "message-id": "<11111111-2222-4333-8444-555555555555@example.com>",
-    "x-inquiry-copy": "11111111-2222-4333-8444-555555555555",
-  };
-  const copy = () =>
-    new FakeMessage("bounce@send.example.com", "support@example.com", RAW, RAW.length, copyHeaders);
-  const answering = (answer: unknown, status = 200) =>
-    vi
-      .fn()
-      .mockImplementation(async (url: string) =>
-        url.includes("/self-copy")
-          ? new Response(JSON.stringify(answer), { status })
-          : new Response(null, { status: 201 }),
-      );
-
-  it("forwards a recognised copy to the operator, and neither stores nor routes it", async () => {
-    const fetchStub = answering({ selfCopy: true, forwardTo: "ops@private.example" });
-    const { env } = makeEnv({
-      ADMIN_CORE: { fetch: fetchStub } as unknown as AdminCoreStub,
-    });
-    const mail = copy();
-    await worker.email(mail as never, env, ctx);
-    expect(mail.forwardedTo).toEqual(["ops@private.example"]);
-    expect(fetchStub).toHaveBeenCalledTimes(1);
-    const [url, options] = fetchStub.mock.calls[0]!;
-    expect(url).toContain("/internal/mail-ingress/self-copy");
-    expect(JSON.parse(options.body)).toMatchObject({
-      from: "support@example.com",
-      messageId: copyHeaders["message-id"],
-      copyId: copyHeaders["x-inquiry-copy"],
-    });
-    expect(mail.events).not.toContain("raw");
-  });
-
-  it("drops a copy it has nowhere to send, and one whose forward fails", async () => {
-    const nowhere = makeEnv({
-      ADMIN_CORE: { fetch: answering({ selfCopy: true, forwardTo: null }) } as never,
-    });
-    const first = copy();
-    await worker.email(first as never, nowhere.env, ctx);
-    expect(first.forwardedTo).toEqual([]);
-    expect(first.events).toEqual([]);
-
-    const failing = makeEnv({
-      ADMIN_CORE: {
-        fetch: answering({ selfCopy: true, forwardTo: "ops@private.example" }),
-      } as never,
-    });
-    const second = copy();
-    second.forwardShouldFail = true;
-    await worker.email(second as never, failing.env, ctx);
-    expect(second.events).toEqual(["forward"]);
-  });
-
-  it("takes the usual path when Core says it is not a copy, or cannot say", async () => {
-    for (const fetchStub of [answering({ selfCopy: false }), answering({}, 503)]) {
-      const { env } = makeEnv({ ADMIN_CORE: { fetch: fetchStub } as never });
-      const mail = copy();
-      await worker.email(mail as never, env, ctx);
-      expect(mail.forwardedTo).toEqual(["operator@example.com"]);
-      expect(fetchStub.mock.calls.map(([url]) => String(url))).toEqual([
-        expect.stringContaining("/self-copy"),
-        expect.stringContaining("/raw"),
-      ]);
-    }
-  });
-
-  it("never asks about the person's own mail", async () => {
-    const { env, fetchStub } = makeEnv();
-    const mail = new FakeMessage("someone@example.com", "support@example.com", RAW, RAW.length, {
-      from: "Someone <someone@example.com>",
-      "message-id": "<first@example.com>",
-    });
-    await worker.email(mail as never, env, ctx);
-    expect(fetchStub.mock.calls.map(([url]) => String(url))).toEqual([
-      expect.stringContaining("/raw"),
-    ]);
-    expect(mail.forwardedTo).toEqual(["operator@example.com"]);
   });
 });

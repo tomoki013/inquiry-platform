@@ -558,7 +558,7 @@ describe("ProjectOperator: copying the operator on their own reply", () => {
     return sent;
   }
 
-  it("puts the support address on Cc, never the private one, and answers selfCopy", async () => {
+  it("puts the private operator address on Cc and answers selfCopy", async () => {
     const own = await contact("orbit", "o-1", "a@example.com");
     const sent = mailed();
     const env = { ...testEnv, MAIL_API_KEY: "test-key", NOTIFICATION_EMAIL: "ops@private.example" };
@@ -570,13 +570,12 @@ describe("ProjectOperator: copying the operator on their own reply", () => {
     );
     if (!replied.ok) throw new Error(replied.error.message);
     expect(replied.value.selfCopy).toBe("copied");
-    expect(sent.at(-1)).toMatchObject({ to: ["a@example.com"], cc: ["support@example.com"] });
-    expect(JSON.stringify(sent.at(-1))).not.toContain("ops@private.example");
+    expect(sent.at(-1)).toMatchObject({ to: ["a@example.com"], cc: ["ops@private.example"] });
     expect(
       replied.value.timeline.find(
         (item) => item.kind === "message" && item.direction === "outbound",
       ),
-    ).toMatchObject({ recipient: "a@example.com, support@example.com" });
+    ).toMatchObject({ recipient: "a@example.com, ops@private.example" });
 
     // A retried key answers the ticket as it stands, without sending again.
     const again = await client.reply(
@@ -653,12 +652,7 @@ describe("ProjectOperator: seeing and choosing a reply's To, Cc and subject", ()
     expect(preview.value).toMatchObject({
       to: ["a@example.com"],
       cc: [],
-      self: {
-        cc: "support@example.com",
-        forwardTo: "ops@private.example",
-        address: "ops@private.example",
-        outcome: "copied",
-      },
+      self: { address: "ops@private.example", outcome: "copied" },
       overridesAllowed: false,
     });
     expect(preview.value.from).toMatch(/<support@example\.com>$/);
@@ -671,7 +665,7 @@ describe("ProjectOperator: seeing and choosing a reply's To, Cc and subject", ()
     expect(sent[0]).toMatchObject({
       from: preview.value.from,
       to: preview.value.to,
-      cc: [preview.value.self.cc],
+      cc: [preview.value.self.address],
       subject: preview.value.subject,
     });
     // Another project's ticket is not there to preview.
@@ -703,7 +697,7 @@ describe("ProjectOperator: seeing and choosing a reply's To, Cc and subject", ()
     if (!replied.ok) throw new Error(replied.error.message);
     expect(sent[0]).toMatchObject({
       to: ["a@example.com", "b@example.com"],
-      cc: ["c@example.com", "support@example.com"],
+      cc: ["c@example.com", "ops@private.example"],
       subject: "ご質問の件",
     });
     expect(
@@ -711,7 +705,7 @@ describe("ProjectOperator: seeing and choosing a reply's To, Cc and subject", ()
         (item) => item.kind === "message" && item.direction === "outbound",
       ),
     ).toMatchObject({
-      recipient: "a@example.com, b@example.com, c@example.com, support@example.com",
+      recipient: "a@example.com, b@example.com, c@example.com, ops@private.example",
     });
     const audit = await testEnv.DB.prepare(
       "SELECT metadata_json AS metadata FROM audit_logs WHERE action='support.reply_sent'",

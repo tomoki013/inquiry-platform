@@ -51,11 +51,6 @@ export interface SupportReplyMail extends BaseMail {
    * before the provider answers: the next reply's `In-Reply-To` and the
    * customer's answer are matched against it. */
   messageId?: string;
-  /** Written as the `X-Inquiry-Copy` header when the mail is also copied to
-   * the support address for the operator (`ccSelf`): the id of the stored
-   * outgoing message, so the copy that comes back through mail-ingress is
-   * recognised even if the provider replaced our `Message-ID`. */
-  copyId?: string;
   /** Sent without an operator (a receipt). Marked `Auto-Submitted` so a
    * well-behaved auto-responder on the other end does not answer it. */
   automatic?: boolean;

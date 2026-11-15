@@ -19,14 +19,6 @@ import { privateBucket } from "../../api/src/privacy/files";
  * true even when the parse is not merely wrong but killed — see `email` below.
  *
  * A forwarding failure is logged and does not stop the message being stored.
- *
- * One exception comes first: the operator's copy of our own reply. `ccSelf`
- * puts the support address on a reply's Cc, so the copy arrives here. Core
- * recognises it (`/internal/mail-ingress/self-copy`), and it is forwarded to
- * the operator's address instead of the route's, and not stored — it is not
- * the person writing. Only a mail from the address it was sent to is asked
- * about, so nobody else's mail waits on that question; if Core cannot answer,
- * the mail takes the usual path and Core's ingestion drops it there.
  */
 export interface MailIngressEnv {
   ADMIN_CORE: AdminCoreStub;
@@ -64,30 +56,6 @@ interface InboundMessage {
 export default {
   async email(message: InboundMessage, env: MailIngressEnv, ctx: ExecutionContext): Promise<void> {
     const route = routeFor(message.to, env);
-    const copy = await selfCopy(message, env, route.projectSlug);
-    if (copy) {
-      // Never also to the route's address, and never stored. A forward that
-      // fails — most likely a destination Email Routing has not verified — is
-      // logged, and the copy is dropped: the reply itself was delivered, and
-      // filing our own mail as the person's would be worse than a missing copy.
-      // Never back to the address it came in on: that would be a loop.
-      if (
-        !copy.forwardTo ||
-        copy.forwardTo.trim().toLowerCase() === message.to.trim().toLowerCase()
-      ) {
-        log("mail.self_copy_unforwarded", {});
-        return;
-      }
-      try {
-        await message.forward(copy.forwardTo);
-        log("mail.self_copy_forwarded", {});
-      } catch (error) {
-        log("mail.self_copy_forward_failed", {
-          error: error instanceof Error ? error.name : "Unknown",
-        });
-      }
-      return;
-    }
     // Deliver first, parse second.
     //
     // The order used to be the other way round, with the parse wrapped in a
@@ -151,51 +119,6 @@ async function store(
   }
   log("mail.queued", {});
   return "stored";
-}
-
-/**
- * Whether `message` is the operator's copy of our own reply, and where it goes.
- * Asked only of mail whose From header is the address it was delivered to — a
- * reply copied to the support address is exactly that, and the person's mail
- * never is. `null` means "not a copy", including when Core cannot say.
- */
-async function selfCopy(
-  message: InboundMessage,
-  env: MailIngressEnv,
-  projectSlug?: string,
-): Promise<{ forwardTo: string | null } | null> {
-  const from = headerAddress(message.headers.get("from"));
-  if (!from || from !== message.to.trim().toLowerCase()) return null;
-  const messageId = message.headers.get("message-id")?.trim() || undefined;
-  const copyId = message.headers.get("x-inquiry-copy")?.trim() || undefined;
-  if (!messageId && !copyId) return null;
-  try {
-    const response = await env.ADMIN_CORE.fetch(
-      `${INTERNAL_ORIGIN}/internal/mail-ingress/self-copy`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from, messageId, copyId, projectSlug }),
-      },
-    );
-    if (!response.ok) {
-      log("mail.self_copy_check_failed", { status: response.status });
-      return null;
-    }
-    const answer = (await response.json()) as { selfCopy?: unknown; forwardTo?: unknown };
-    if (answer.selfCopy !== true) return null;
-    return { forwardTo: typeof answer.forwardTo === "string" ? answer.forwardTo : null };
-  } catch (error) {
-    log("mail.self_copy_check_failed", { error: error instanceof Error ? error.name : "Unknown" });
-    return null;
-  }
-}
-
-/** The bare, lower-case address of a `From` header: `Name <a@example.com>`. */
-function headerAddress(value: string | null): string | undefined {
-  if (!value) return undefined;
-  const address = (/<([^<>\s]+@[^<>\s]+)>/.exec(value)?.[1] ?? value).trim().toLowerCase();
-  return /^[^\s@<>,]+@[^\s@<>,]+$/.test(address) ? address : undefined;
 }
 
 /**

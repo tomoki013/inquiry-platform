@@ -69,27 +69,8 @@ export interface ReplyEnvelope {
   from: string;
   to: string[];
   cc: string[];
-  self: SelfCopyPlan;
+  self: { address: string | null; outcome: SelfCopyOutcome };
   subject: string;
-}
-
-/**
- * What `ccSelf` does to one reply. The person sees `cc` — the project's
- * support address — and never the operator's private address: that copy comes
- * back through mail-ingress, is recognised (`findSelfCopy`), and is forwarded
- * to `forwardTo` without becoming a ticket.
- */
-export interface SelfCopyPlan {
-  /** Added to the reply's Cc, visible to everyone on it. `null` unless
-   * `outcome` is `copied`. */
-  cc: string | null;
-  /** Where mail-ingress forwards the copy: the project's notification
-   * address, else the deployment's. Never shown to the person. */
-  forwardTo: string | null;
-  /** Kept for consoles written against the earlier shape: the operator's own
-   * address, which is now `forwardTo`. */
-  address: string | null;
-  outcome: SelfCopyOutcome;
 }
 
 /** The thread fields an envelope is worked out from. `id` is null for a
@@ -718,34 +699,16 @@ export class ReplyService {
     );
   }
 
-  /** Where the operator's copy of a reply is forwarded (`SelfCopyPlan`), or
-   * `undefined` when there is nowhere. */
-  async selfCopyForwardTo(appId: string | undefined): Promise<string | undefined> {
-    const self = (await this.operatorAddress(appId))?.trim();
-    return self && COPY_ADDRESS.test(self) ? self : undefined;
-  }
-
-  /**
-   * What `ccSelf` would do to a mail already going to `recipients` (To and
-   * Cc). The copy goes to the support address the person already sees; when
-   * the operator's own address is on the mail anyway, there is nothing to add.
-   */
+  /** What `ccSelf` would add to a mail already going to `recipients`. */
   private async selfCopyFor(
     appId: string | undefined,
-    supportEmail: string,
     recipients: readonly string[],
-  ): Promise<SelfCopyPlan> {
-    const forwardTo = (await this.selfCopyForwardTo(appId)) ?? null;
-    if (!forwardTo) return { cc: null, forwardTo: null, address: null, outcome: "not_configured" };
-    // An operator address that is one of ours gets the reply anyway, and
-    // forwarding a copy to it would bring the copy straight back.
-    const own = [supportEmail, this.addresses.supportEmail, ...(this.addresses.ownAddresses ?? [])];
-    const onIt = [...recipients, ...own].map(lower).includes(lower(forwardTo));
+  ): Promise<{ address: string | null; outcome: SelfCopyOutcome }> {
+    const self = (await this.operatorAddress(appId))?.trim();
+    if (!self || !COPY_ADDRESS.test(self)) return { address: null, outcome: "not_configured" };
     return {
-      cc: onIt ? null : supportEmail,
-      forwardTo,
-      address: forwardTo,
-      outcome: onIt ? "is_recipient" : "copied",
+      address: self,
+      outcome: recipients.map(lower).includes(lower(self)) ? "is_recipient" : "copied",
     };
   }
 
@@ -769,9 +732,10 @@ export class ReplyService {
         from: `${addresses.fromName} <${addresses.supportEmail}>`,
         to,
         cc,
-        self: await this.selfCopyFor(thread.app_id ?? undefined, addresses.supportEmail, [
+        self: await this.selfCopyFor(thread.app_id ?? undefined, [
           ...to,
-          ...cc,
+          addresses.supportEmail,
+          this.addresses.supportEmail,
         ]),
         subject: this.replySubjectOf(thread, template?.subject),
       });
@@ -1047,14 +1011,15 @@ export class ReplyService {
       ).filter((address) => !recipients.includes(lower(address)));
       let selfCopy: SelfCopyOutcome | undefined;
       if (options.ccSelf && !options.automatic) {
-        const self = await this.selfCopyFor(thread.app_id ?? undefined, addresses.supportEmail, [
-          ...to,
-          ...cc,
-        ]);
+        const self = await this.selfCopyFor(thread.app_id ?? undefined, recipients);
         selfCopy = self.outcome;
-        // The support address, which the filter above keeps off every other
-        // Cc: only this copy may carry it (`SelfCopyPlan`).
-        if (self.cc) cc.push(self.cc);
+        // Reply-all may already carry it, when the person copied us.
+        if (
+          self.address &&
+          self.outcome === "copied" &&
+          !cc.map(lower).includes(lower(self.address))
+        )
+          cc.push(self.address);
       }
       const overridden = [
         ...(checked.value.to ? ["to"] : []),
@@ -1063,10 +1028,7 @@ export class ReplyService {
       ];
       // Ours, so it is known whether or not the provider reports its own.
       const domain = addresses.supportEmail.split("@")[1]?.trim() || "localhost";
-      // Named after the stored message, so the operator's copy coming back is
-      // recognised by it (`findSelfCopy`).
-      const messageId = newId();
-      const ownMessageId = `<${messageId}@${domain}>`;
+      const ownMessageId = `<${newId()}@${domain}>`;
       const sent = await mail.sendSupportReply({
         to: to[0] ?? thread.requester_email,
         ...(to.length > 1 ? { alsoTo: to.slice(1) } : {}),
@@ -1080,7 +1042,6 @@ export class ReplyService {
         idempotencyKey: attempt.provider_key,
         messageId: ownMessageId,
         ...(cc.length ? { cc } : {}),
-        ...(selfCopy === "copied" ? { copyId: messageId } : {}),
         ...(options.automatic ? { automatic: true } : {}),
       });
 
@@ -1108,6 +1069,7 @@ export class ReplyService {
       }
 
       const at = nowIso();
+      const messageId = newId();
       const statements: D1PreparedStatement[] = [
         this.support.insertMessageStatement({
           id: messageId,
