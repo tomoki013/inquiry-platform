@@ -34,7 +34,7 @@ import { internalFailure, notFound, validationFailure } from "./failures";
 import { pseudonymise } from "./identity";
 import { ModerationRegistry } from "./moderation";
 import type { NotificationHook } from "./notification-service";
-import type { ReplyService, SelfCopyOutcome } from "./reply-service";
+import type { ReplyEnvelope, ReplyOverrides, ReplyService, SelfCopyOutcome } from "./reply-service";
 import { reportMailSubject } from "./report-threading";
 import { Scope } from "./scope";
 import { TicketService } from "./ticket-service";
@@ -201,7 +201,7 @@ export class ReportService {
     reportId: string,
     raw: unknown,
     actor: ActorRef,
-    options: { ccSelf?: boolean } = {},
+    options: { ccSelf?: boolean; overrides?: ReplyOverrides } = {},
   ): Promise<Result<SupportThreadDetail & { selfCopy?: SelfCopyOutcome }>> {
     const input = raw && typeof raw === "object" ? raw : {};
     const parsed = sendSupportReplyInputSchema.safeParse({ ...input, threadId: reportId });
@@ -216,13 +216,42 @@ export class ReportService {
         return fail("FORBIDDEN", "定型文は無効です。");
       const thread = await this.reportConversation(report);
       if (!thread.ok) return thread;
-      return this.reply.send(
-        { ...parsed.data, threadId: thread.value },
-        actor,
-        options.ccSelf ? { ccSelf: true } : {},
-      );
+      return this.reply.send({ ...parsed.data, threadId: thread.value }, actor, {
+        ...(options.ccSelf ? { ccSelf: true } : {}),
+        ...(options.overrides ? { overrides: options.overrides } : {}),
+      });
     } catch (error) {
       return internalFailure("report.replyToReporter", error);
+    }
+  }
+
+  /** What a reply to the reporter would go out with (`ReplyService.preview`),
+   * without opening a conversation for a report that has none yet. */
+  async previewToReporter(reportId: string, templateId?: string): Promise<Result<ReplyEnvelope>> {
+    try {
+      const report = await this.reports.findRow(reportId);
+      if (!report) return notFound("通報");
+      if (report.support_thread_id) {
+        const thread = await this.support.findThread(report.support_thread_id);
+        if (thread) return this.reply.preview(thread, templateId);
+      }
+      const source = await new TicketService(this.db).source("report", report.id);
+      if (!source.ok) return source;
+      const ticket = await new TicketService(this.db).row(source.value.id);
+      if (!ticket?.requester_email) return fail("CONFLICT", "通報者の連絡先がありません。");
+      return this.reply.preview(
+        {
+          id: null,
+          app_id: report.app_id,
+          source: "email",
+          subject: ticket.subject,
+          mail_subject: null,
+          requester_email: ticket.requester_email,
+        },
+        templateId,
+      );
+    } catch (error) {
+      return internalFailure("report.previewToReporter", error);
     }
   }
 

@@ -133,6 +133,16 @@ describe("ResendMailProvider", () => {
     expect(body.cc).toEqual(["boss@corp.example"]);
   });
 
+  it("sends to every To an operator chose", async () => {
+    const fetcher = fakeFetch(jsonResponse({ id: "resend-7" }));
+    await new ResendMailProvider("key", fetcher as never, undefined, false).sendSupportReply({
+      ...mail,
+      alsoTo: ["colleague@corp.example"],
+    });
+    const body = JSON.parse(String((fetcher.mock.calls[0] as [string, RequestInit])[1].body));
+    expect(body.to).toEqual([mail.to, "colleague@corp.example"]);
+  });
+
   it("omits the headers block entirely for a first message", async () => {
     const fetcher = fakeFetch(jsonResponse({ id: "resend-3" }));
     await new ResendMailProvider("key", fetcher as never).sendTransactional(mail);

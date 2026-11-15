@@ -34,6 +34,7 @@ function operator(
     getTicket: entry.getTicket.bind(entry),
     changeTicket: entry.changeTicket.bind(entry),
     addNote: entry.addNote.bind(entry),
+    previewReply: entry.previewReply.bind(entry),
     reply: entry.reply.bind(entry),
     setSignature: entry.setSignature.bind(entry),
     listTemplates: entry.listTemplates.bind(entry),
@@ -606,16 +607,134 @@ describe("ProjectOperator: copying the operator on their own reply", () => {
     const sent = mailed();
     const env = { ...testEnv, MAIL_API_KEY: "test-key" };
     const api = operator(orbitConsole, env).api;
-    for (const tampered of [
-      { cc: ["x@attacker.example"] },
-      { ccSelf: "x@attacker.example" },
-      { to: "x@attacker.example" },
-    ]) {
+    for (const [tampered, code] of [
+      // Well-formed, but this binding was not given overrides.
+      [{ cc: ["x@attacker.example"] }, "FORBIDDEN"],
+      [{ to: ["x@attacker.example"] }, "FORBIDDEN"],
+      [{ subject: "別件" }, "FORBIDDEN"],
+      [{ ccSelf: "x@attacker.example" }, "VALIDATION_ERROR"],
+      [{ to: "x@attacker.example" }, "VALIDATION_ERROR"],
+      [{ bcc: ["x@attacker.example"] }, "VALIDATION_ERROR"],
+    ] as const) {
       expect(
         await api.reply(
           "orbit",
           own.id,
           { body: "本文", idempotencyKey: "reply-cc-0003", ...tampered } as never,
+          person,
+        ),
+      ).toMatchObject({ ok: false, error: { code } });
+    }
+    expect(sent).toHaveLength(0);
+  });
+});
+
+describe("ProjectOperator: seeing and choosing a reply's To, Cc and subject", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function mailed() {
+    const sent: Array<{ to: string[]; cc?: string[]; subject: string; from: string }> = [];
+    vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push(JSON.parse(String(init?.body)));
+      return Response.json({ id: `resend-${sent.length}` });
+    });
+    return sent;
+  }
+  const editing: ProjectOperatorProps = { ...orbitConsole, allowReplyOverrides: true };
+  const env = { ...testEnv, MAIL_API_KEY: "test-key", NOTIFICATION_EMAIL: "ops@private.example" };
+
+  it("previews what a reply would get, and the reply gets exactly that", async () => {
+    const own = await contact("orbit", "o-1", "a@example.com");
+    const sent = mailed();
+    const client = createProjectOperatorClient(operator(orbitConsole, env).api, "orbit");
+    const preview = await client.previewReply(own.id);
+    if (!preview.ok) throw new Error(preview.error.message);
+    expect(preview.value).toMatchObject({
+      to: ["a@example.com"],
+      cc: [],
+      self: { address: "ops@private.example", outcome: "copied" },
+      overridesAllowed: false,
+    });
+    expect(preview.value.from).toMatch(/<support@example\.com>$/);
+    const replied = await client.reply(
+      own.id,
+      { body: "確認します", idempotencyKey: "reply-pv-0001", ccSelf: true },
+      person,
+    );
+    expect(replied.ok).toBe(true);
+    expect(sent[0]).toMatchObject({
+      from: preview.value.from,
+      to: preview.value.to,
+      cc: [preview.value.self.address],
+      subject: preview.value.subject,
+    });
+    // Another project's ticket is not there to preview.
+    const other = await contact("prism", "p-1", "b@example.com");
+    expect(await client.previewReply(other.id)).toMatchObject({
+      ok: false,
+      error: { code: "NOT_FOUND" },
+    });
+  });
+
+  it("sends with the operator's To, Cc and subject when the binding allows it", async () => {
+    const own = await contact("orbit", "o-1", "a@example.com");
+    const sent = mailed();
+    const client = createProjectOperatorClient(operator(editing, env).api, "orbit");
+    const preview = await client.previewReply(own.id);
+    expect(preview.ok && preview.value.overridesAllowed).toBe(true);
+    const replied = await client.reply(
+      own.id,
+      {
+        body: "確認します",
+        idempotencyKey: "reply-ov-0001",
+        to: ["a@example.com", "b@example.com"],
+        cc: ["c@example.com"],
+        subject: "ご質問の件",
+        ccSelf: true,
+      },
+      person,
+    );
+    if (!replied.ok) throw new Error(replied.error.message);
+    expect(sent[0]).toMatchObject({
+      to: ["a@example.com", "b@example.com"],
+      cc: ["c@example.com", "ops@private.example"],
+      subject: "ご質問の件",
+    });
+    expect(
+      replied.value.timeline.find(
+        (item) => item.kind === "message" && item.direction === "outbound",
+      ),
+    ).toMatchObject({
+      recipient: "a@example.com, b@example.com, c@example.com, ops@private.example",
+    });
+    const audit = await testEnv.DB.prepare(
+      "SELECT metadata_json AS metadata FROM audit_logs WHERE action='support.reply_sent'",
+    ).first<{ metadata: string }>();
+    expect(audit?.metadata).not.toContain("@");
+    expect(JSON.parse(audit?.metadata ?? "{}")).toMatchObject({
+      overridden: "to,cc,subject",
+      to: 2,
+      cc: 2,
+    });
+  });
+
+  it("refuses too many addresses, a malformed one and the support address", async () => {
+    const own = await contact("orbit", "o-1", "a@example.com");
+    const sent = mailed();
+    const api = operator(editing, env).api;
+    const many = (n: number) => Array.from({ length: n }, (_, i) => `p${i}@example.com`);
+    for (const overrides of [
+      { to: many(6) },
+      { cc: many(11) },
+      { to: ["a@example.com\r\nBcc: x@attacker.example"] },
+      { cc: ["support@example.com"] },
+      { subject: "x".repeat(201) },
+    ]) {
+      expect(
+        await api.reply(
+          "orbit",
+          own.id,
+          { body: "本文", idempotencyKey: "reply-ov-0002", ...overrides },
           person,
         ),
       ).toMatchObject({ ok: false, error: { code: "VALIDATION_ERROR" } });

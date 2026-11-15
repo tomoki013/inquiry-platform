@@ -13,6 +13,7 @@ export type {
   OperatorProject,
   OperatorRef,
   OperatorReply,
+  OperatorReplyPreview,
   OperatorReplyResult,
   OperatorReplyTemplate,
   OperatorSelfCopy,

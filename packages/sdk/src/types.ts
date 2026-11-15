@@ -169,6 +169,10 @@ export interface ProjectOperatorProps {
   caller: string;
   /** Project slugs this binding may operate. */
   projects: string[];
+  /** Lets this binding's replies name their own To, Cc and subject
+   * (`OperatorReply.to` / `cc` / `subject`). Off unless set: a binding
+   * without it gets `FORBIDDEN` for any of them. */
+  allowReplyOverrides?: boolean;
 }
 
 /** Who, inside the project's own console, did something. An opaque, stable id
@@ -356,6 +360,37 @@ export interface OperatorReply {
    * never one the request names. Whether it was added is in the answer's
    * `selfCopy`; an unset address does not stop the reply. */
   ccSelf?: boolean;
+  /** The To, in place of the person who wrote in. 1–5 addresses. Needs the
+   * binding's `allowReplyOverrides`. The support address is refused. */
+  to?: string[];
+  /** The reply-all Cc, in place of the one the platform works out
+   * (`OperatorReplyPreview.cc`); `[]` sends none. Up to 10 addresses. The
+   * operator's own copy is still `ccSelf`, added on top. Needs
+   * `allowReplyOverrides`. The support address is refused. */
+  cc?: string[];
+  /** The subject, in place of `OperatorReplyPreview.subject`. At most 200
+   * characters, one line. When the platform's subject carries the ticket
+   * number (`[TK-000123]`) and this one does not, the number is added at the
+   * end, so a reply that loses its headers still finds the ticket. Needs
+   * `allowReplyOverrides`. */
+  subject?: string;
+}
+
+/** What a reply would go out with, if sent now without overrides. */
+export interface OperatorReplyPreview {
+  /** `Name <address>`. Not overridable. */
+  from: string;
+  /** The person who wrote in. */
+  to: string[];
+  /** Reply-all: everybody else on the person's latest mail. */
+  cc: string[];
+  /** The operator's own copy (`OperatorReply.ccSelf`): the address it would
+   * add, and what asking for it would do. `address` is `null` when none is
+   * configured. */
+  self: { address: string | null; outcome: OperatorSelfCopy };
+  subject: string;
+  /** Whether this binding may send `to` / `cc` / `subject`. */
+  overridesAllowed: boolean;
 }
 
 /** What became of `OperatorReply.ccSelf`.
@@ -408,8 +443,17 @@ export interface ProjectOperatorApi {
     note: { body: string; idempotencyKey: string },
     operator: OperatorRef,
   ): Promise<IntakeResult<OperatorTicketDetail>>;
-  /** Mails the person who wrote in. Only a body goes up: recipient, sender and
-   * subject are decided by the platform from the ticket's thread. */
+  /** The From, To, Cc and subject a reply to this ticket would get.
+   * `templateId` is the template the reply is written from, which may choose
+   * the subject of a ticket with no mail subject of its own. */
+  previewReply(
+    projectSlug: string,
+    ticketId: string,
+    options?: { templateId?: string },
+  ): Promise<IntakeResult<OperatorReplyPreview>>;
+  /** Mails the person who wrote in. Recipient, sender and subject are decided
+   * by the platform from the ticket's thread, unless the binding allows
+   * overrides and the reply names its own `to` / `cc` / `subject`. */
   reply(
     projectSlug: string,
     ticketId: string,

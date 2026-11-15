@@ -289,6 +289,51 @@ describe("a project's receipt settings", () => {
   });
 });
 
+describe("where a form receipt's subject puts the ticket number", () => {
+  it("puts it last for a project that asks, and files a headerless answer by it", async () => {
+    const mail = new FakeMailProvider();
+    mail.reportsMessageId = false;
+    const h = await harness({
+      receipts: true,
+      mail,
+      delivery: () => ({ mail, inquiryReceiptNumberAt: "end" }),
+    });
+    await seedApp(h, "orbit");
+    const threadId = await form(h);
+    const ticket = await ticketFor(h, threadId);
+    expect(mail.sent[0]?.subject).toBe(
+      `お問い合わせを受け付けました: 書き出しについて [${ticket?.ticket_number}]`,
+    );
+    const answered = expectOk<{ threadId: string; newThread: boolean }>(
+      (await h.support.ingestInboundEmail(
+        {
+          from: "someone@example.com",
+          to: "support@example.com",
+          subject: `Re: ${mail.sent[0]?.subject}`,
+          bodyText: "追加で質問です",
+          messageId: "<no-headers@example.com>",
+          references: [],
+          appSlug: "orbit",
+          automated: false,
+        },
+        mailActor,
+      )) as never,
+    );
+    expect(answered).toMatchObject({ threadId, newThread: false });
+  });
+
+  it("keeps it first by default", async () => {
+    const mail = new FakeMailProvider();
+    const h = await harness({ receipts: true, mail, delivery: () => ({ mail }) });
+    await seedApp(h, "orbit");
+    const threadId = await form(h);
+    const ticket = await ticketFor(h, threadId);
+    expect(mail.sent[0]?.subject).toBe(
+      `[${ticket?.ticket_number}] お問い合わせを受け付けました: 書き出しについて`,
+    );
+  });
+});
+
 describe("opt-in receipt email workflow", () => {
   it("quotes only the original body, copies the operator and threads both reply-all senders", async () => {
     const mail = new FakeMailProvider();

@@ -9,6 +9,7 @@ import type {
   OperatorProject,
   OperatorRef,
   OperatorReply,
+  OperatorReplyPreview,
   OperatorReplyResult,
   OperatorReplyTemplate,
   OperatorTemplateChange,
@@ -114,6 +115,10 @@ export interface ProjectOperatorClient {
     note: { body: string; idempotencyKey: string },
     operator: OperatorRef,
   ): Promise<IntakeResult<OperatorTicketDetail>>;
+  previewReply(
+    ticketId: string,
+    options?: { templateId?: string },
+  ): Promise<IntakeResult<OperatorReplyPreview>>;
   reply(
     ticketId: string,
     reply: OperatorReply,
@@ -165,6 +170,8 @@ export function createProjectOperatorClient(
       call((api) => api.changeTicket(projectSlug, ticketId, change, operator)),
     addNote: (ticketId, note, operator) =>
       call((api) => api.addNote(projectSlug, ticketId, note, operator)),
+    previewReply: (ticketId, options) =>
+      call((api) => api.previewReply(projectSlug, ticketId, options)),
     reply: (ticketId, reply, operator) =>
       call((api) => api.reply(projectSlug, ticketId, reply, operator)),
     setSignature: (signature, operator) =>

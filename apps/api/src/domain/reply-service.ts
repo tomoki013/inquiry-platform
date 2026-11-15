@@ -36,6 +36,7 @@ import { internalFailure, notFound, validationFailure } from "./failures";
 import { sha256Hex } from "./identity";
 import type { SupportService } from "./support-service";
 import { TicketService } from "./ticket-service";
+import { ticketNumbersFromReply } from "./ticket-threading";
 
 /**
  * Web-form threads from the last day still owed a receipt: nobody has written
@@ -54,6 +55,48 @@ export const INQUIRY_RECEIPT_RETRY_SQL = `SELECT t.id FROM support_threads t
 export type SelfCopyOutcome = OperatorSelfCopy;
 
 const COPY_ADDRESS = /^[^\s@<>,]+@[^\s@<>,]+\.[^\s@<>,]+$/;
+
+/** An operator's own To, Cc and subject for one reply. Shape and permission
+ * are checked by the caller (`ProjectOperator`); what an address may be is
+ * checked here, where the support addresses are known. */
+export interface ReplyOverrides {
+  to?: string[];
+  cc?: string[];
+  subject?: string;
+}
+
+/** What a reply goes out with, before any override. */
+export interface ReplyEnvelope {
+  from: string;
+  to: string[];
+  cc: string[];
+  self: { address: string | null; outcome: SelfCopyOutcome };
+  subject: string;
+}
+
+/** The thread fields an envelope is worked out from. `id` is null for a
+ * report whose conversation has not been opened yet. */
+export interface EnvelopeThread {
+  id: string | null;
+  app_id: string | null;
+  source: string;
+  subject: string;
+  mail_subject: string | null;
+  requester_email: string;
+}
+
+const lower = (address: string) => address.trim().toLowerCase();
+
+/** The generic receipt's subject, the number where the project's route puts it. */
+function receiptSubject(
+  subject: string,
+  number: string | undefined,
+  at: "start" | "end" | undefined,
+): string {
+  const text = `お問い合わせを受け付けました: ${subject}`;
+  if (!number) return text;
+  return at === "end" ? `${text} [${number}]` : `[${number}] ${text}`;
+}
 
 export interface ReplyAddresses {
   supportEmail: string;
@@ -425,7 +468,7 @@ export class ReplyService {
             ? {
                 subject:
                   projectReceipt?.subject ??
-                  `${number ? `[${number}] ` : ""}お問い合わせを受け付けました: ${thread.subject}`,
+                  receiptSubject(thread.subject, number, route?.inquiryReceiptNumberAt),
               }
             : {}),
         },
@@ -645,6 +688,108 @@ export class ReplyService {
     return settings.notificationEmail || this.addresses.operatorEmail;
   }
 
+  /** The subject a reply to this thread gets, before any override. */
+  private replySubjectOf(thread: EnvelopeThread, templateSubject?: string): string {
+    return replySubjectFor(
+      {
+        subject: thread.subject,
+        source: thread.source as never,
+        mailSubject: thread.mail_subject ?? undefined,
+      },
+      templateSubject,
+    );
+  }
+
+  /** What `ccSelf` would add to a mail already going to `recipients`. */
+  private async selfCopyFor(
+    appId: string | undefined,
+    recipients: readonly string[],
+  ): Promise<{ address: string | null; outcome: SelfCopyOutcome }> {
+    const self = (await this.operatorAddress(appId))?.trim();
+    if (!self || !COPY_ADDRESS.test(self)) return { address: null, outcome: "not_configured" };
+    return {
+      address: self,
+      outcome: recipients.map(lower).includes(lower(self)) ? "is_recipient" : "copied",
+    };
+  }
+
+  /**
+   * The From, To, Cc and subject a reply to `thread` would go out with now,
+   * without overrides — what an operator's console shows above the composer.
+   * Read-only: nothing is recorded, and the Message-ID lookup `send` does is
+   * not repeated.
+   */
+  async preview(thread: EnvelopeThread, templateId?: string): Promise<Result<ReplyEnvelope>> {
+    try {
+      const template = templateId ? await this.templates.find(templateId) : undefined;
+      if (templateId && (!template || (template.appId && template.appId !== thread.app_id)))
+        return notFound("定型文");
+      const addresses = await this.addressesFor(thread.app_id ?? undefined);
+      const to = [thread.requester_email];
+      const cc = thread.id
+        ? await this.replyAllCc(thread.id, thread.requester_email, addresses.supportEmail)
+        : [];
+      return ok({
+        from: `${addresses.fromName} <${addresses.supportEmail}>`,
+        to,
+        cc,
+        self: await this.selfCopyFor(thread.app_id ?? undefined, [
+          ...to,
+          addresses.supportEmail,
+          this.addresses.supportEmail,
+        ]),
+        subject: this.replySubjectOf(thread, template?.subject),
+      });
+    } catch (error) {
+      return internalFailure("reply.preview", error);
+    }
+  }
+
+  async previewThread(threadId: string, templateId?: string): Promise<Result<ReplyEnvelope>> {
+    const thread = await this.support.findThread(threadId);
+    if (!thread?.requester_email) return notFound("問い合わせ");
+    return this.preview(thread, templateId);
+  }
+
+  /**
+   * An operator's To and Cc, checked: well-formed, deduplicated, and never
+   * one of this deployment's own addresses (a reply to ourselves would loop
+   * through mail-ingress). Cc drops anybody already on the To.
+   */
+  private checkedOverrides(
+    overrides: ReplyOverrides,
+    supportEmail: string,
+  ): Result<{ to?: string[]; cc?: string[] }> {
+    const own = new Set(
+      [supportEmail, this.addresses.supportEmail, ...(this.addresses.ownAddresses ?? [])].map(
+        lower,
+      ),
+    );
+    const clean = (list: string[] | undefined): Result<string[] | undefined> => {
+      if (!list) return ok(undefined);
+      const seen = new Map<string, string>();
+      for (const raw of list) {
+        const address = raw.trim();
+        if (!COPY_ADDRESS.test(address) || address.length > 254)
+          return fail("VALIDATION_ERROR", "メールアドレスの形式が正しくありません。");
+        if (own.has(lower(address)))
+          return fail("VALIDATION_ERROR", "サポート用のアドレスは宛先にできません。");
+        if (!seen.has(lower(address))) seen.set(lower(address), address);
+      }
+      return ok([...seen.values()]);
+    };
+    const to = clean(overrides.to);
+    if (!to.ok) return to;
+    if (to.value && to.value.length === 0)
+      return fail("VALIDATION_ERROR", "宛先を1件以上指定してください。");
+    const cc = clean(overrides.cc);
+    if (!cc.ok) return cc;
+    return ok({
+      ...(to.value ? { to: to.value } : {}),
+      ...(cc.value ? { cc: cc.value } : {}),
+    });
+  }
+
   // ---- sending -----------------------------------------------------------
 
   async send(
@@ -667,6 +812,9 @@ export class ReplyService {
        * from the project's mail settings or the deployment, never from the
        * request; the answer says what happened (`selfCopy`). */
       ccSelf?: boolean;
+      /** An operator's own To, Cc and subject (`ReplyOverrides`). Only a
+       * caller that checked the operator may set them passes these. */
+      overrides?: ReplyOverrides;
     } = {},
   ): Promise<Result<SupportThreadDetail & { selfCopy?: SelfCopyOutcome }>> {
     const parsed = sendSupportReplyInputSchema.safeParse(raw);
@@ -737,6 +885,15 @@ export class ReplyService {
       }
 
       const addresses = await this.addressesFor(thread.app_id ?? undefined);
+      const overrides = options.overrides && !options.automatic ? options.overrides : {};
+      const checked = this.checkedOverrides(overrides, addresses.supportEmail);
+      if (!checked.ok) return checked;
+      const overriddenSubject = overrides.subject?.trim();
+      if (
+        overrides.subject !== undefined &&
+        (!overriddenSubject || /[\r\n]/.test(overriddenSubject))
+      )
+        return fail("VALIDATION_ERROR", "件名を1行で入力してください。");
       const mail = addresses.mail;
       if (!mail.configured) {
         return fail("MAIL_ERROR", "メール送信機能が設定されていません。");
@@ -768,18 +925,21 @@ export class ReplyService {
       // one still cannot choose what a reply says it is about.
       const template = input.templateId ? await this.templates.find(input.templateId) : undefined;
       if (template?.appId && template.appId !== thread.app_id) return notFound("定型文");
-      const subject = options.subject
+      const platformSubject = options.subject
         ? options.subject
         : options.initialMessage
           ? thread.subject
-          : replySubjectFor(
-              {
-                subject: thread.subject,
-                source: thread.source as never,
-                mailSubject: thread.mail_subject ?? undefined,
-              },
-              template?.subject,
-            );
+          : this.replySubjectOf(thread, template?.subject);
+      // An operator's subject keeps the ticket number the platform's carried:
+      // it is what files a reply that lost its headers (`ticket-threading.ts`).
+      const keptNumbers = overriddenSubject
+        ? ticketNumbersFromReply(platformSubject, "").filter(
+            (number) => !ticketNumbersFromReply(overriddenSubject, "").includes(number),
+          )
+        : [];
+      const subject = overriddenSubject
+        ? [overriddenSubject, ...keptNumbers.map((number) => `[${number}]`)].join(" ")
+        : platformSubject;
 
       const includeSignature =
         features?.signature !== false &&
@@ -841,33 +1001,42 @@ export class ReplyService {
       // copy the deployment-owned private operator address.
       // An operator's copy of their own reply is the same kind of address,
       // and is checked the same way.
-      const recipients = [
-        thread.requester_email,
-        addresses.supportEmail,
-        this.addresses.supportEmail,
-      ].map((address) => address.trim().toLowerCase());
+      // An operator with `allowReplyOverrides` may name the To and Cc
+      // themselves (`checkedOverrides`); everybody else gets the ones above.
+      const to = checked.value.to ?? [thread.requester_email];
+      const recipients = [...to, addresses.supportEmail, this.addresses.supportEmail].map(lower);
       const copy = options.receiptCopy?.trim();
       const receiptCc =
         copy && COPY_ADDRESS.test(copy) && !recipients.includes(copy.toLowerCase()) ? [copy] : [];
-      const cc = options.automatic
-        ? receiptCc
-        : await this.replyAllCc(input.threadId, thread.requester_email, addresses.supportEmail);
+      const cc = (
+        options.automatic
+          ? receiptCc
+          : (checked.value.cc ??
+            (await this.replyAllCc(input.threadId, thread.requester_email, addresses.supportEmail)))
+      ).filter((address) => !recipients.includes(lower(address)));
       let selfCopy: SelfCopyOutcome | undefined;
       if (options.ccSelf && !options.automatic) {
-        const self = (await this.operatorAddress(thread.app_id ?? undefined))?.trim();
-        if (!self || !COPY_ADDRESS.test(self)) selfCopy = "not_configured";
-        else if (recipients.includes(self.toLowerCase())) selfCopy = "is_recipient";
-        else {
-          selfCopy = "copied";
-          // Reply-all may already carry it, when the person copied us.
-          if (!cc.some((address) => address.toLowerCase() === self.toLowerCase())) cc.push(self);
-        }
+        const self = await this.selfCopyFor(thread.app_id ?? undefined, recipients);
+        selfCopy = self.outcome;
+        // Reply-all may already carry it, when the person copied us.
+        if (
+          self.address &&
+          self.outcome === "copied" &&
+          !cc.map(lower).includes(lower(self.address))
+        )
+          cc.push(self.address);
       }
+      const overridden = [
+        ...(checked.value.to ? ["to"] : []),
+        ...(checked.value.cc ? ["cc"] : []),
+        ...(overriddenSubject ? ["subject"] : []),
+      ];
       // Ours, so it is known whether or not the provider reports its own.
       const domain = addresses.supportEmail.split("@")[1]?.trim() || "localhost";
       const ownMessageId = `<${newId()}@${domain}>`;
       const sent = await mail.sendSupportReply({
-        to: thread.requester_email,
+        to: to[0] ?? thread.requester_email,
+        ...(to.length > 1 ? { alsoTo: to.slice(1) } : {}),
         from,
         replyTo: addresses.supportEmail,
         subject,
@@ -911,7 +1080,9 @@ export class ReplyService {
           .prepare(
             "UPDATE support_threads SET mail_subject = COALESCE(mail_subject, ?) WHERE id = ?",
           )
-          .bind(privateText(this.db, subject), input.threadId),
+          // The platform's subject, not an operator's one-off: the next plain
+          // reply keeps answering the conversation the person knows.
+          .bind(privateText(this.db, platformSubject), input.threadId),
         this.support.insertMessageStatement({
           id: messageId,
           threadId: input.threadId,
@@ -921,7 +1092,9 @@ export class ReplyService {
           transportId: sent.transportId,
           inReplyTo,
           sender: addresses.supportEmail,
-          recipient: [thread.requester_email, ...cc].join(", "),
+          // As sent, overrides included: a reply from any of them that lost
+          // its headers is still filed here (`findTicketReplyThread`).
+          recipient: [...to, ...cc].join(", "),
           // The finished text, stored as sent. Never re-rendered from a
           // template later: editing a template must not change what somebody
           // was actually told.
@@ -969,6 +1142,8 @@ export class ReplyService {
             // the conversation it describes.
             ...(cc.length ? { cc: cc.length } : {}),
             ...(selfCopy ? { selfCopy } : {}),
+            // Which parts the operator chose, and how many To; never what.
+            ...(overridden.length ? { overridden: overridden.join(","), to: to.length } : {}),
           },
         }),
       ];
