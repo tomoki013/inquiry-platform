@@ -34,7 +34,7 @@ import { internalFailure, notFound, validationFailure } from "./failures";
 import { pseudonymise } from "./identity";
 import { ModerationRegistry } from "./moderation";
 import type { NotificationHook } from "./notification-service";
-import type { ReplyEnvelope, ReplyOverrides, ReplyService, SelfCopyOutcome } from "./reply-service";
+import type { ReplyEnvelope, ReplyOverrides, ReplyService } from "./reply-service";
 import { reportMailSubject } from "./report-threading";
 import { Scope } from "./scope";
 import { TicketService } from "./ticket-service";
@@ -201,8 +201,8 @@ export class ReportService {
     reportId: string,
     raw: unknown,
     actor: ActorRef,
-    options: { ccSelf?: boolean; overrides?: ReplyOverrides } = {},
-  ): Promise<Result<SupportThreadDetail & { selfCopy?: SelfCopyOutcome }>> {
+    options: { overrides?: ReplyOverrides } = {},
+  ): Promise<Result<SupportThreadDetail>> {
     const input = raw && typeof raw === "object" ? raw : {};
     const parsed = sendSupportReplyInputSchema.safeParse({ ...input, threadId: reportId });
     if (!parsed.success) return validationFailure(parsed.error);
@@ -217,7 +217,6 @@ export class ReportService {
       const thread = await this.reportConversation(report);
       if (!thread.ok) return thread;
       return this.reply.send({ ...parsed.data, threadId: thread.value }, actor, {
-        ...(options.ccSelf ? { ccSelf: true } : {}),
         ...(options.overrides ? { overrides: options.overrides } : {}),
       });
     } catch (error) {

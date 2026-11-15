@@ -16,7 +16,6 @@ export type {
   OperatorReplyPreview,
   OperatorReplyResult,
   OperatorReplyTemplate,
-  OperatorSelfCopy,
   OperatorTemplateChange,
   OperatorTemplateInput,
   OperatorTicketChange,

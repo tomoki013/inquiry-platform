@@ -103,34 +103,6 @@ await tickets.reply(ticket.id, { body, idempotencyKey }, { id: operatorId });
 await tickets.setSignature("My App\nhttps://my-app.example", { id: operatorId });
 ```
 
-### Copying yourself on a reply
-
-`reply` takes `ccSelf: true` to put the operator's own private address on the
-mail's Cc. The address is the project's notification recipient
-(`mailSettings[].notificationEmail`) or, without one, the deployment's
-`NOTIFICATION_EMAIL`. The request never names an address: recipient, Cc,
-sender and subject all stay the platform's decision.
-
-```ts
-const sent = await tickets.reply(ticket.id, { body, idempotencyKey, ccSelf: true }, { id: operatorId });
-if (sent.ok && sent.value.selfCopy === "not_configured") {
-  // Sent to the person, without your copy: no operator address is set.
-}
-```
-
-`selfCopy` is `copied`, `not_configured` (no address; the reply is still sent)
-or `is_recipient` (the address is the person's or the support address, which
-get the mail anyway). It is present only when `ccSelf` was asked for and this
-call sent the reply; a retried `idempotencyKey` answers without it. Nobody is
-copied twice: if the person's mail already had the address on it, reply-all
-keeps one. Each timeline message carries `recipient` (the person, then every
-Cc), so the copy shows there too. The audit log records the number of Cc
-addresses and the `selfCopy` outcome, never the addresses.
-
-A reply is threaded (`In-Reply-To`) onto the latest mail in the
-conversation, whichever side sent it, so a second reply in a row follows your
-first one.
-
 ### Subjects
 
 A reply's subject follows what a mail client does: `Re:` and the subject of
@@ -162,18 +134,13 @@ const preview = await tickets.previewReply(ticket.id);
 //   from: "Example Support <support@example.com>",
 //   to: ["person@example.org"],
 //   cc: ["colleague@example.org"],          // reply-all
-//   self: { address: "ops@example.net", outcome: "copied" }, // what ccSelf adds
 //   subject: "Re: …",
 //   overridesAllowed: false,
 // }
 ```
 
-`self.address` is `null` when no operator address is configured; `outcome` is
-what `ccSelf: true` would do (`copied` / `not_configured` / `is_recipient`).
-
 A binding whose `props` carry `allowReplyOverrides: true` may send its own
-`to` (1–5), `cc` (0–10, replaces the reply-all list; `ccSelf` is still added on
-top) and `subject` (one line, up to 200 characters). Without it any of them is
+`to` (1–5), `cc` (0–10, replaces the reply-all list) and `subject` (one line, up to 200 characters). Without it any of them is
 `FORBIDDEN`. Plain addresses only (`a@example.com`, no display names); the
 support address is refused, duplicates are dropped and a Cc already on the To
 is not repeated. The From is never overridable.
@@ -181,7 +148,7 @@ is not repeated. The From is never overridable.
 ```ts
 await tickets.reply(
   ticket.id,
-  { body, idempotencyKey, to: ["person@example.org"], cc: [], subject: "…", ccSelf: true },
+  { body, idempotencyKey, to: ["person@example.org"], cc: [], subject: "…" },
   { id: operatorId },
 );
 ```

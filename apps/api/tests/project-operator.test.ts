@@ -546,89 +546,6 @@ describe("ProjectOperator: a report is decided on the report", () => {
   });
 });
 
-describe("ProjectOperator: copying the operator on their own reply", () => {
-  afterEach(() => vi.unstubAllGlobals());
-
-  function mailed() {
-    const sent: Array<{ to: string[]; cc?: string[] }> = [];
-    vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
-      sent.push(JSON.parse(String(init?.body)));
-      return Response.json({ id: `resend-${sent.length}` });
-    });
-    return sent;
-  }
-
-  it("puts the private operator address on Cc and answers selfCopy", async () => {
-    const own = await contact("orbit", "o-1", "a@example.com");
-    const sent = mailed();
-    const env = { ...testEnv, MAIL_API_KEY: "test-key", NOTIFICATION_EMAIL: "ops@private.example" };
-    const client = createProjectOperatorClient(operator(orbitConsole, env).api, "orbit");
-    const replied = await client.reply(
-      own.id,
-      { body: "確認します", idempotencyKey: "reply-cc-0001", ccSelf: true },
-      person,
-    );
-    if (!replied.ok) throw new Error(replied.error.message);
-    expect(replied.value.selfCopy).toBe("copied");
-    expect(sent.at(-1)).toMatchObject({ to: ["a@example.com"], cc: ["ops@private.example"] });
-    expect(
-      replied.value.timeline.find(
-        (item) => item.kind === "message" && item.direction === "outbound",
-      ),
-    ).toMatchObject({ recipient: "a@example.com, ops@private.example" });
-
-    // A retried key answers the ticket as it stands, without sending again.
-    const again = await client.reply(
-      own.id,
-      { body: "確認します", idempotencyKey: "reply-cc-0001", ccSelf: true },
-      person,
-    );
-    expect(again.ok && again.value.selfCopy).toBeUndefined();
-    expect(sent).toHaveLength(1);
-  });
-
-  it("still sends, and says so, when there is no operator address", async () => {
-    const own = await contact("orbit", "o-1", "a@example.com");
-    const sent = mailed();
-    const env = { ...testEnv, MAIL_API_KEY: "test-key", NOTIFICATION_EMAIL: undefined };
-    const client = createProjectOperatorClient(operator(orbitConsole, env).api, "orbit");
-    const replied = await client.reply(
-      own.id,
-      { body: "確認します", idempotencyKey: "reply-cc-0002", ccSelf: true },
-      person,
-    );
-    expect(replied).toMatchObject({ ok: true, value: { selfCopy: "not_configured" } });
-    expect(sent).toHaveLength(1);
-    expect(sent[0]?.cc).toBeUndefined();
-  });
-
-  it("takes no address from the request", async () => {
-    const own = await contact("orbit", "o-1", "a@example.com");
-    const sent = mailed();
-    const env = { ...testEnv, MAIL_API_KEY: "test-key" };
-    const api = operator(orbitConsole, env).api;
-    for (const [tampered, code] of [
-      // Well-formed, but this binding was not given overrides.
-      [{ cc: ["x@attacker.example"] }, "FORBIDDEN"],
-      [{ to: ["x@attacker.example"] }, "FORBIDDEN"],
-      [{ subject: "別件" }, "FORBIDDEN"],
-      [{ ccSelf: "x@attacker.example" }, "VALIDATION_ERROR"],
-      [{ to: "x@attacker.example" }, "VALIDATION_ERROR"],
-      [{ bcc: ["x@attacker.example"] }, "VALIDATION_ERROR"],
-    ] as const) {
-      expect(
-        await api.reply(
-          "orbit",
-          own.id,
-          { body: "本文", idempotencyKey: "reply-cc-0003", ...tampered } as never,
-          person,
-        ),
-      ).toMatchObject({ ok: false, error: { code } });
-    }
-    expect(sent).toHaveLength(0);
-  });
-});
-
 describe("ProjectOperator: seeing and choosing a reply's To, Cc and subject", () => {
   afterEach(() => vi.unstubAllGlobals());
 
@@ -641,7 +558,7 @@ describe("ProjectOperator: seeing and choosing a reply's To, Cc and subject", ()
     return sent;
   }
   const editing: ProjectOperatorProps = { ...orbitConsole, allowReplyOverrides: true };
-  const env = { ...testEnv, MAIL_API_KEY: "test-key", NOTIFICATION_EMAIL: "ops@private.example" };
+  const env = { ...testEnv, MAIL_API_KEY: "test-key" };
 
   it("previews what a reply would get, and the reply gets exactly that", async () => {
     const own = await contact("orbit", "o-1", "a@example.com");
@@ -652,20 +569,18 @@ describe("ProjectOperator: seeing and choosing a reply's To, Cc and subject", ()
     expect(preview.value).toMatchObject({
       to: ["a@example.com"],
       cc: [],
-      self: { address: "ops@private.example", outcome: "copied" },
       overridesAllowed: false,
     });
     expect(preview.value.from).toMatch(/<support@example\.com>$/);
     const replied = await client.reply(
       own.id,
-      { body: "確認します", idempotencyKey: "reply-pv-0001", ccSelf: true },
+      { body: "確認します", idempotencyKey: "reply-pv-0001" },
       person,
     );
     expect(replied.ok).toBe(true);
     expect(sent[0]).toMatchObject({
       from: preview.value.from,
       to: preview.value.to,
-      cc: [preview.value.self.address],
       subject: preview.value.subject,
     });
     // Another project's ticket is not there to preview.
@@ -690,14 +605,13 @@ describe("ProjectOperator: seeing and choosing a reply's To, Cc and subject", ()
         to: ["a@example.com", "b@example.com"],
         cc: ["c@example.com"],
         subject: "ご質問の件",
-        ccSelf: true,
       },
       person,
     );
     if (!replied.ok) throw new Error(replied.error.message);
     expect(sent[0]).toMatchObject({
       to: ["a@example.com", "b@example.com"],
-      cc: ["c@example.com", "ops@private.example"],
+      cc: ["c@example.com"],
       subject: "ご質問の件",
     });
     expect(
@@ -705,7 +619,7 @@ describe("ProjectOperator: seeing and choosing a reply's To, Cc and subject", ()
         (item) => item.kind === "message" && item.direction === "outbound",
       ),
     ).toMatchObject({
-      recipient: "a@example.com, b@example.com, c@example.com, ops@private.example",
+      recipient: "a@example.com, b@example.com, c@example.com",
     });
     const audit = await testEnv.DB.prepare(
       "SELECT metadata_json AS metadata FROM audit_logs WHERE action='support.reply_sent'",
@@ -714,7 +628,7 @@ describe("ProjectOperator: seeing and choosing a reply's To, Cc and subject", ()
     expect(JSON.parse(audit?.metadata ?? "{}")).toMatchObject({
       overridden: "to,cc,subject",
       to: 2,
-      cc: 2,
+      cc: 1,
     });
   });
 

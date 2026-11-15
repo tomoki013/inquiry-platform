@@ -2,7 +2,6 @@ import type {
   ActorRef,
   AppliedTemplate,
   AppMailSettings,
-  OperatorSelfCopy,
   ReplyTemplate,
   Result,
   SupportDraft,
@@ -50,9 +49,6 @@ export const INQUIRY_RECEIPT_RETRY_SQL = `SELECT t.id FROM support_threads t
   AND NOT EXISTS (SELECT 1 FROM reports x WHERE x.support_thread_id=t.id __PROJECT__)
   ORDER BY t.created_at LIMIT 25`;
 
-/** See `OperatorSelfCopy`. */
-export type SelfCopyOutcome = OperatorSelfCopy;
-
 const COPY_ADDRESS = /^[^\s@<>,]+@[^\s@<>,]+\.[^\s@<>,]+$/;
 
 /** An operator's own To, Cc and subject for one reply. Shape and permission
@@ -69,7 +65,6 @@ export interface ReplyEnvelope {
   from: string;
   to: string[];
   cc: string[];
-  self: { address: string | null; outcome: SelfCopyOutcome };
   subject: string;
 }
 
@@ -110,10 +105,6 @@ export interface ReplyAddresses {
   replyClosing?: string;
   /** This deployment's other addresses (no-reply, report), never copied on a reply. */
   ownAddresses?: readonly string[];
-  /** The deployment's private operator address (`NOTIFICATION_EMAIL`), used
-   * for an operator's copy of their own reply when the project's mail
-   * settings name none. */
-  operatorEmail?: string;
   /** Project-scoped overrides from the platform's mail settings repository. */
   resolve?: (appId: string | undefined) => Promise<ProjectMailSettings>;
   delivery?: (appId: string | undefined) => ProjectMailDelivery;
@@ -680,13 +671,6 @@ export class ReplyService {
     }
   }
 
-  /** The operator's private address: the project's notification recipient,
-   * else the deployment's. Internal only, like `ProjectMailSettings`. */
-  private async operatorAddress(appId: string | undefined): Promise<string | undefined> {
-    const settings = (await this.addresses.resolve?.(appId)) ?? {};
-    return settings.notificationEmail || this.addresses.operatorEmail;
-  }
-
   /** The subject a reply to this thread gets, before any override. */
   private replySubjectOf(thread: EnvelopeThread, templateSubject?: string): string {
     return replySubjectFor(
@@ -697,19 +681,6 @@ export class ReplyService {
       },
       templateSubject,
     );
-  }
-
-  /** What `ccSelf` would add to a mail already going to `recipients`. */
-  private async selfCopyFor(
-    appId: string | undefined,
-    recipients: readonly string[],
-  ): Promise<{ address: string | null; outcome: SelfCopyOutcome }> {
-    const self = (await this.operatorAddress(appId))?.trim();
-    if (!self || !COPY_ADDRESS.test(self)) return { address: null, outcome: "not_configured" };
-    return {
-      address: self,
-      outcome: recipients.map(lower).includes(lower(self)) ? "is_recipient" : "copied",
-    };
   }
 
   /**
@@ -732,11 +703,6 @@ export class ReplyService {
         from: `${addresses.fromName} <${addresses.supportEmail}>`,
         to,
         cc,
-        self: await this.selfCopyFor(thread.app_id ?? undefined, [
-          ...to,
-          addresses.supportEmail,
-          this.addresses.supportEmail,
-        ]),
         subject: this.replySubjectOf(thread, template?.subject),
       });
     } catch (error) {
@@ -807,15 +773,11 @@ export class ReplyService {
       /** Internal receipt-only fields, never accepted from a reply request. */
       quotedBody?: string;
       receiptCopy?: string;
-      /** Copy the reply to the operator's private address. The address comes
-       * from the project's mail settings or the deployment, never from the
-       * request; the answer says what happened (`selfCopy`). */
-      ccSelf?: boolean;
       /** An operator's own To, Cc and subject (`ReplyOverrides`). Only a
        * caller that checked the operator may set them passes these. */
       overrides?: ReplyOverrides;
     } = {},
-  ): Promise<Result<SupportThreadDetail & { selfCopy?: SelfCopyOutcome }>> {
+  ): Promise<Result<SupportThreadDetail>> {
     const parsed = sendSupportReplyInputSchema.safeParse(raw);
     if (!parsed.success) return validationFailure(parsed.error);
     const input = parsed.data;
@@ -994,8 +956,6 @@ export class ReplyService {
       // Worked out here from stored mail, never from the request, so a
       // tampered request still cannot add an address. Receipts may explicitly
       // copy the deployment-owned private operator address.
-      // An operator's copy of their own reply is the same kind of address,
-      // and is checked the same way.
       // An operator with `allowReplyOverrides` may name the To and Cc
       // themselves (`checkedOverrides`); everybody else gets the ones above.
       const to = checked.value.to ?? [thread.requester_email];
@@ -1009,18 +969,6 @@ export class ReplyService {
           : (checked.value.cc ??
             (await this.replyAllCc(input.threadId, thread.requester_email, addresses.supportEmail)))
       ).filter((address) => !recipients.includes(lower(address)));
-      let selfCopy: SelfCopyOutcome | undefined;
-      if (options.ccSelf && !options.automatic) {
-        const self = await this.selfCopyFor(thread.app_id ?? undefined, recipients);
-        selfCopy = self.outcome;
-        // Reply-all may already carry it, when the person copied us.
-        if (
-          self.address &&
-          self.outcome === "copied" &&
-          !cc.map(lower).includes(lower(self.address))
-        )
-          cc.push(self.address);
-      }
       const overridden = [
         ...(checked.value.to ? ["to"] : []),
         ...(checked.value.cc ? ["cc"] : []),
@@ -1135,7 +1083,6 @@ export class ReplyService {
             // Counts, not addresses: the audit log is read more widely than
             // the conversation it describes.
             ...(cc.length ? { cc: cc.length } : {}),
-            ...(selfCopy ? { selfCopy } : {}),
             // Which parts the operator chose, and how many To; never what.
             ...(overridden.length ? { overridden: overridden.join(","), to: to.length } : {}),
           },
@@ -1159,8 +1106,7 @@ export class ReplyService {
       }
 
       await this.db.batch(statements);
-      const detail = await this.supportService.detail(input.threadId);
-      return detail.ok && selfCopy ? { ok: true, value: { ...detail.value, selfCopy } } : detail;
+      return await this.supportService.detail(input.threadId);
     } catch (error) {
       return internalFailure("reply.send", error);
     }
