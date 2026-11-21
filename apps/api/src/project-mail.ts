@@ -37,6 +37,11 @@ const configSchema = z.object({
   requireVerifiedReplyParent: z.boolean().default(false),
   /** Copy the receipt to the private notification recipient for email reply-all. */
   inquiryReceiptCopyToNotification: z.boolean().default(false),
+  /** True: every operator reply also goes to this project's own support
+   * address (`supportEmail`) on Cc, so the conversation is kept in that
+   * mailbox too. Mail-ingress receives that copy and never files it — mail
+   * from this deployment's own addresses opens no inquiry and joins none. */
+  replyCcSupport: z.boolean().default(false),
   /** This project's closing line instead of the deployment's
    * (`Branding.replyClosing`); an empty string means none. */
   replyClosing: z.string().trim().max(200).optional(),
@@ -60,6 +65,7 @@ export interface ProjectMailDelivery {
   inquiryReceiptNumberAt?: "start" | "end";
   requireVerifiedReplyParent?: boolean;
   inquiryReceiptCopyToNotification?: boolean;
+  replyCcSupport?: boolean;
   replyClosing?: string;
 }
 
@@ -108,9 +114,23 @@ export function projectMailResolver(
       requireVerifiedReplyParent: parsed.success && parsed.data.requireVerifiedReplyParent,
       inquiryReceiptCopyToNotification:
         parsed.success && parsed.data.inquiryReceiptCopyToNotification,
+      replyCcSupport: parsed.success && parsed.data.replyCcSupport,
       replyClosing: parsed.success ? parsed.data.replyClosing : undefined,
     };
     cache.set(appId, delivery);
     return delivery;
   };
+}
+
+/** Every support address a project route names: this deployment's own, never a customer's. */
+export function projectSupportAddresses(raw: unknown): string[] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+  // Read leniently: a route too broken to send with still names our address.
+  return Object.values(raw as Record<string, unknown>).flatMap((route) => {
+    const address =
+      route && typeof route === "object"
+        ? (route as { supportEmail?: unknown }).supportEmail
+        : undefined;
+    return typeof address === "string" && address.includes("@") ? [address.trim()] : [];
+  });
 }

@@ -490,3 +490,104 @@ describe("an operator's own To, Cc and subject (overrides)", () => {
     expect(h.mail.sent[0]?.subject).toBe("Re: ログインできません");
   });
 });
+
+describe("copying every reply to the project's support address (replyCcSupport)", () => {
+  const SUPPORT = "contact@orbit.example";
+  async function copying(on = true) {
+    const mail = new FakeMailProvider();
+    const h = await harness({
+      mail,
+      delivery: (appId) => (appId ? { mail, supportEmail: SUPPORT, replyCcSupport: on } : { mail }),
+    });
+    await seedApp(h, "orbit");
+    return h;
+  }
+  async function mailThread(h: Awaited<ReturnType<typeof harness>>) {
+    return expectOk<{ threadId: string }>(
+      (await h.support.ingestInboundEmail(
+        {
+          from: "taro@corp.example",
+          to: SUPPORT,
+          recipients: [SUPPORT, "boss@corp.example"],
+          subject: "ログインできません",
+          bodyText: "入れません",
+          messageId: "<q1@corp.example>",
+          appSlug: "orbit",
+        },
+        mailActor,
+      )) as never,
+    ).threadId;
+  }
+
+  it("puts the support address on the Cc of every reply, and shows it first", async () => {
+    const h = await copying();
+    const threadId = await mailThread(h);
+    const preview = expectOk<{ cc: string[] }>((await h.reply.previewThread(threadId)) as never);
+    expect(preview.cc).toEqual(["boss@corp.example", SUPPORT]);
+    expectOk((await reply(h, threadId, "一通目")) as never);
+    expectOk((await reply(h, threadId, "二通目")) as never);
+    for (const sent of h.mail.sent) {
+      expect(sent.cc).toEqual(["boss@corp.example", SUPPORT]);
+      expect(sent.to).toBe("taro@corp.example");
+    }
+  });
+
+  it("keeps it when the operator chooses the Cc, and accepts it handed back", async () => {
+    const h = await copying();
+    const threadId = await mailThread(h);
+    for (const cc of [[], ["boss@corp.example", SUPPORT]]) {
+      expectOk(
+        (await h.reply.send(
+          { threadId, bodyText: "確認します", idempotencyKey: crypto.randomUUID() },
+          admin,
+          { overrides: { cc } },
+        )) as never,
+      );
+    }
+    expect(h.mail.sent.map((sent) => sent.cc)).toEqual([[SUPPORT], ["boss@corp.example", SUPPORT]]);
+  });
+
+  it("copies nothing when the project has not asked for it", async () => {
+    const h = await copying(false);
+    const threadId = await mailThread(h);
+    expectOk((await reply(h, threadId, "確認します")) as never);
+    expect(h.mail.sent[0]?.cc).toEqual(["boss@corp.example"]);
+  });
+
+  it("never files the copy that comes back: no new inquiry, nothing added", async () => {
+    const h = await copying();
+    const threadId = await mailThread(h);
+    expectOk((await reply(h, threadId, "確認します")) as never);
+    const sent = h.mail.sent[0];
+    const before = await h.db
+      .prepare(
+        "SELECT (SELECT COUNT(*) FROM support_threads) AS threads, (SELECT COUNT(*) FROM support_messages) AS messages",
+      )
+      .first<{ threads: number; messages: number }>();
+    // The copy, as mail-ingress hands it over — and the same with headers lost
+    // and a fresh subject, which would otherwise look like a new mail inquiry.
+    for (const copy of [
+      { messageId: "<copy-1@mail.example>", inReplyTo: sent?.inReplyTo, subject: sent?.subject },
+      { messageId: "<copy-2@mail.example>", subject: "まったく新しい件名" },
+    ]) {
+      const result = await h.support.ingestInboundEmail(
+        {
+          from: SUPPORT.toUpperCase(),
+          to: SUPPORT,
+          recipients: ["taro@corp.example", SUPPORT],
+          bodyText: "確認します",
+          appSlug: "orbit",
+          ...copy,
+        },
+        mailActor,
+      );
+      expect(result).toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
+    }
+    const after = await h.db
+      .prepare(
+        "SELECT (SELECT COUNT(*) FROM support_threads) AS threads, (SELECT COUNT(*) FROM support_messages) AS messages",
+      )
+      .first<{ threads: number; messages: number }>();
+    expect(after).toEqual(before);
+  });
+});

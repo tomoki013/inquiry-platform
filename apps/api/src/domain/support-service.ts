@@ -61,6 +61,13 @@ export class SupportService {
      */
     private readonly opened?: (threadId: string) => void,
     private readonly features?: ProjectFeatures,
+    /**
+     * Whether `address` is one of this deployment's own (a support, no-reply
+     * or report address, the project's included). Mail from one is a copy of
+     * what we sent — a reply Cc'd to the support mailbox — never somebody
+     * writing in.
+     */
+    private readonly ownSender?: (address: string, appId: string | undefined) => Promise<boolean>,
   ) {}
 
   private async featureProject(appId: string | undefined) {
@@ -107,6 +114,11 @@ export class SupportService {
       const at = input.receivedAt ?? nowIso();
       const appId = input.appSlug ? (await this.apps.findBySlug(input.appSlug))?.id : undefined;
       if (input.appSlug && !appId) return notFound("Project");
+      // Our own mail coming back (a reply copied to the support address) is
+      // already in its conversation as the message we sent. Filing it would
+      // open a new inquiry from ourselves, or add our words as the person's.
+      if (await this.ownSender?.(input.from, appId))
+        return fail("FORBIDDEN", "このサービス自身のアドレスから届いたメールは取り込みません。");
       const existingThreadId =
         (await this.support.findThreadByHeaders(input.inReplyTo, input.references)) ??
         (await findReportReplyThread(this.db, input)) ??
