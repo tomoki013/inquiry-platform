@@ -25,7 +25,7 @@ import type { AdminCoreEnv } from "./env";
 import { privateCipher, privateDatabase } from "./privacy/crypto";
 import { privateBucket } from "./privacy/files";
 import { projectFeatures } from "./project-features";
-import { projectMailResolver } from "./project-mail";
+import { projectMailResolver, projectSupportAddresses } from "./project-mail";
 import { aggregateDatabase, ProjectRegistry } from "./storage/database";
 import { namespacedSupportKey } from "./storage/files";
 
@@ -142,6 +142,17 @@ function buildLocalServices(
     notify,
     (threadId) => schedule(replyService.sendInquiryReceipt(threadId)),
     features,
+    async (address, appId) => {
+      const own = [
+        env.SUPPORT_EMAIL,
+        env.NOREPLY_EMAIL,
+        env.REPORT_EMAIL,
+        ...projectSupportAddresses(env.PROJECT_MAIL_PROVIDERS),
+        (await templates.mailSettings(appId).catch(() => undefined))?.supportEmail,
+      ];
+      const sender = address.trim().toLowerCase();
+      return own.some((candidate) => candidate?.trim().toLowerCase() === sender);
+    },
   );
 
   inbound = new InboundJobs(

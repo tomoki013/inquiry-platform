@@ -160,6 +160,8 @@ export class ReplyService {
       defaultSupportUrl: delivery?.supportUrl ?? this.addresses.defaultSupportUrl,
       replyClosing: (delivery?.replyClosing ?? this.addresses.replyClosing ?? "").trim(),
       mail: delivery?.mail ?? this.mail,
+      /** Copy every operator reply to `supportEmail` (`replyCcSupport`). */
+      ccSupport: delivery?.replyCcSupport === true,
     };
   }
 
@@ -699,6 +701,7 @@ export class ReplyService {
       const cc = thread.id
         ? await this.replyAllCc(thread.id, thread.requester_email, addresses.supportEmail)
         : [];
+      if (addresses.ccSupport) cc.push(addresses.supportEmail);
       return ok({
         from: `${addresses.fromName} <${addresses.supportEmail}>`,
         to,
@@ -724,19 +727,23 @@ export class ReplyService {
   private checkedOverrides(
     overrides: ReplyOverrides,
     supportEmail: string,
+    ccSupport = false,
   ): Result<{ to?: string[]; cc?: string[] }> {
     const own = new Set(
       [supportEmail, this.addresses.supportEmail, ...(this.addresses.ownAddresses ?? [])].map(
         lower,
       ),
     );
-    const clean = (list: string[] | undefined): Result<string[] | undefined> => {
+    const clean = (list: string[] | undefined, copied?: string): Result<string[] | undefined> => {
       if (!list) return ok(undefined);
       const seen = new Map<string, string>();
       for (const raw of list) {
         const address = raw.trim();
         if (!COPY_ADDRESS.test(address) || address.length > 254)
           return fail("VALIDATION_ERROR", "メールアドレスの形式が正しくありません。");
+        // The support copy the preview showed, handed back as it stood: it is
+        // added again at send, so it is dropped here instead of refused.
+        if (copied && lower(address) === lower(copied)) continue;
         if (own.has(lower(address)))
           return fail("VALIDATION_ERROR", "サポート用のアドレスは宛先にできません。");
         if (!seen.has(lower(address))) seen.set(lower(address), address);
@@ -747,7 +754,7 @@ export class ReplyService {
     if (!to.ok) return to;
     if (to.value && to.value.length === 0)
       return fail("VALIDATION_ERROR", "宛先を1件以上指定してください。");
-    const cc = clean(overrides.cc);
+    const cc = clean(overrides.cc, ccSupport ? supportEmail : undefined);
     if (!cc.ok) return cc;
     return ok({
       ...(to.value ? { to: to.value } : {}),
@@ -847,7 +854,7 @@ export class ReplyService {
 
       const addresses = await this.addressesFor(thread.app_id ?? undefined);
       const overrides = options.overrides && !options.automatic ? options.overrides : {};
-      const checked = this.checkedOverrides(overrides, addresses.supportEmail);
+      const checked = this.checkedOverrides(overrides, addresses.supportEmail, addresses.ccSupport);
       if (!checked.ok) return checked;
       const overriddenSubject = overrides.subject?.trim();
       if (
@@ -969,6 +976,11 @@ export class ReplyService {
           : (checked.value.cc ??
             (await this.replyAllCc(input.threadId, thread.requester_email, addresses.supportEmail)))
       ).filter((address) => !recipients.includes(lower(address)));
+      // The project's own mailbox keeps the conversation (`replyCcSupport`).
+      // Mail-ingress receives this copy and files none of it: see
+      // `SupportService.ingestInboundEmail`.
+      // Automatic receipts too: the mailbox holds every mail of the conversation.
+      if (addresses.ccSupport) cc.push(addresses.supportEmail);
       const overridden = [
         ...(checked.value.to ? ["to"] : []),
         ...(checked.value.cc ? ["cc"] : []),

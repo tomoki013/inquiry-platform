@@ -305,6 +305,12 @@ export async function harness(
     auditRepo,
     notify,
     options.receipts ? (id) => pending.push(replyService.sendInquiryReceipt(id)) : undefined,
+    undefined,
+    // As production: the deployment's support address and the project's own.
+    async (address, appId) =>
+      ["support@example.com", options.delivery?.(appId).supportEmail]
+        .filter(Boolean)
+        .includes(address.trim().toLowerCase()),
   );
 
   replyService = new ReplyService(
