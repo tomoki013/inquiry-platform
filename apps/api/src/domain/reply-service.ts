@@ -979,7 +979,8 @@ export class ReplyService {
       // The project's own mailbox keeps the conversation (`replyCcSupport`).
       // Mail-ingress receives this copy and files none of it: see
       // `SupportService.ingestInboundEmail`.
-      if (!options.automatic && addresses.ccSupport) cc.push(addresses.supportEmail);
+      // Automatic receipts too: the mailbox holds every mail of the conversation.
+      if (addresses.ccSupport) cc.push(addresses.supportEmail);
       const overridden = [
         ...(checked.value.to ? ["to"] : []),
         ...(checked.value.cc ? ["cc"] : []),

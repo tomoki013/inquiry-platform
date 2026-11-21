@@ -547,6 +547,37 @@ describe("copying every reply to the project's support address (replyCcSupport)"
     expect(h.mail.sent.map((sent) => sent.cc)).toEqual([[SUPPORT], ["boss@corp.example", SUPPORT]]);
   });
 
+  it("copies the automatic receipt too, and the copy opens nothing", async () => {
+    const mail = new FakeMailProvider();
+    const h = await harness({
+      mail,
+      receipts: true,
+      delivery: (appId) =>
+        appId ? { mail, supportEmail: SUPPORT, replyCcSupport: true } : { mail },
+    });
+    await seedApp(h, "orbit");
+    await formThread(h);
+    await h.settled();
+    expect(mail.sent).toHaveLength(1);
+    expect(mail.sent[0]?.to).toBe("someone@example.com");
+    expect(mail.sent[0]?.cc).toEqual([SUPPORT]);
+    const copy = await h.support.ingestInboundEmail(
+      {
+        from: SUPPORT,
+        to: SUPPORT,
+        recipients: ["someone@example.com", SUPPORT],
+        subject: mail.sent[0]?.subject ?? "",
+        bodyText: "受け付けました",
+        messageId: "<receipt-copy@mail.example>",
+        appSlug: "orbit",
+      },
+      mailActor,
+    );
+    expect(copy).toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
+    await h.settled();
+    expect(mail.sent).toHaveLength(1);
+  });
+
   it("copies nothing when the project has not asked for it", async () => {
     const h = await copying(false);
     const threadId = await mailThread(h);

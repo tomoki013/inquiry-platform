@@ -37,7 +37,7 @@ const configSchema = z.object({
   requireVerifiedReplyParent: z.boolean().default(false),
   /** Copy the receipt to the private notification recipient for email reply-all. */
   inquiryReceiptCopyToNotification: z.boolean().default(false),
-  /** True: every operator reply also goes to this project's own support
+  /** True: every reply and automatic receipt also goes to this project's own support
    * address (`supportEmail`) on Cc, so the conversation is kept in that
    * mailbox too. Mail-ingress receives that copy and never files it — mail
    * from this deployment's own addresses opens no inquiry and joins none. */
